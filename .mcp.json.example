@@ -1,0 +1,26 @@
+# Copy to .mcp.json and fill in real values.
+# .mcp.json is git-ignored and must never be committed — it contains real API tokens.
+# These MCP servers give Claude Code direct access to Railway and Sentry for this project.
+#
+# Railway: do NOT put a token here. Run `railway login` in the terminal instead.
+#          The CLI stores OAuth credentials at ~/.railway/config.json automatically.
+#          Putting any token in the env causes "Unauthorized" errors that are hard to debug.
+#
+# Sentry token: sentry.io → User Settings → Auth Tokens → Create New Token
+#               Required scopes: project:read, org:read, event:read, issue:read
+{
+  "mcpServers": {
+    "railway": {
+      "command": "npx",
+      "args": ["@railway/mcp-server"]
+    },
+    "sentry": {
+      "command": "npx",
+      "args": ["@sentry/mcp-server"],
+      "env": {
+        "SENTRY_ACCESS_TOKEN": "your-sentry-auth-token-here",
+        "SENTRY_HOST": "https://sentry.io"
+      }
+    }
+  }
+}

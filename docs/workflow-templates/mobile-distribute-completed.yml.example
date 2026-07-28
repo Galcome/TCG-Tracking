@@ -1,0 +1,118 @@
+name: Mobile - Distribute Completed EAS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      eas_build_id:
+        description: Completed EAS build id
+        required: true
+      apk_url:
+        description: APK artifact URL from signed EAS webhook
+        required: false
+        default: ""
+      tester_groups:
+        description: Firebase App Distribution tester groups
+        required: false
+        default: alpha
+      build_details_url:
+        description: EAS build details URL from webhook
+        required: false
+        default: ""
+      git_commit_hash:
+        description: Source commit hash reported by EAS
+        required: false
+        default: ""
+
+concurrency:
+  group: mobile-distribute-${{ inputs.eas_build_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  android-firebase-distribute:
+    name: Download completed EAS APK and distribute via Firebase
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+      INPUT_APK_URL: ${{ inputs.apk_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install global CLIs
+        run: npm install -g eas-cli firebase-tools
+
+      - name: Fetch completed EAS build metadata
+        id: eas_build
+        run: |
+          if [ -n "$INPUT_APK_URL" ]; then
+            echo "Using APK URL provided by signed EAS webhook."
+            echo "apk_url=$INPUT_APK_URL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUILD_JSON_FILE=eas-build-completed.json
+          eas build:view "${{ inputs.eas_build_id }}" --json > "$BUILD_JSON_FILE"
+          cat "$BUILD_JSON_FILE"
+          STATUS=$(jq -r '.status // ""' "$BUILD_JSON_FILE" | tr '[:upper:]' '[:lower:]')
+          PLATFORM=$(jq -r '.platform // ""' "$BUILD_JSON_FILE" | tr '[:upper:]' '[:lower:]')
+          BUILD_PROFILE=$(jq -r '.metadata.buildProfile // .buildProfile // ""' "$BUILD_JSON_FILE")
+          APK_URL=$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // ""' "$BUILD_JSON_FILE")
+          if [ "$STATUS" != "finished" ]; then
+            echo "EAS build is not finished. status=$STATUS" >&2
+            exit 1
+          fi
+          if [ "$PLATFORM" != "android" ]; then
+            echo "EAS build is not Android. platform=$PLATFORM" >&2
+            exit 1
+          fi
+          if [ "$BUILD_PROFILE" != "preview" ]; then
+            echo "EAS build is not preview profile. buildProfile=$BUILD_PROFILE" >&2
+            exit 1
+          fi
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "EAS build did not expose an APK URL." >&2
+            exit 1
+          fi
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK from EAS
+        run: |
+          curl -L "${{ steps.eas_build.outputs.apk_url }}" -o app-release.apk
+          test -s app-release.apk
+          ls -lh app-release.apk
+
+      - name: Keep APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-preview-${{ inputs.eas_build_id }}
+          path: app-release.apk
+          retention-days: 14
+
+      - name: Distribute to Firebase App Distribution
+        run: |
+          firebase appdistribution:distribute app-release.apk \
+            --app "$FIREBASE_ANDROID_APP_ID" \
+            --groups "${{ inputs.tester_groups || 'alpha' }}" \
+            --token "$FIREBASE_TOKEN"
+
+      - name: Summarize distribution
+        run: |
+          {
+            echo "### Firebase Android distribution complete"
+            echo ""
+            echo "- EAS build id: \`${{ inputs.eas_build_id }}\`"
+            echo "- EAS URL: ${{ inputs.build_details_url }}"
+            echo "- EAS git commit: \`${{ inputs.git_commit_hash }}\`"
+            echo "- Tester groups: \`${{ inputs.tester_groups || 'alpha' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,148 @@
+name: Mobile - Start EAS Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tester_groups:
+        description: Firebase App Distribution tester groups used after EAS completes
+        required: false
+        default: alpha
+
+concurrency:
+  group: mobile-start-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  android-eas-start:
+    name: Start Android APK build on EAS cloud
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      EXPO_PUBLIC_SENTRY_DSN: ${{ secrets.EXPO_PUBLIC_SENTRY_DSN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG || 'bestbestsoftware' }}
+      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT || 'replace-with-mobile-sentry-project' }}
+      FIREBASE_TESTER_GROUPS: ${{ inputs.tester_groups || 'alpha' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ] && [ "$GITHUB_REF_NAME" != "master" ]; then
+            echo "Mobile releases must be dispatched from main/master. Current ref: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+          echo "Checking for a successful CI run on $GITHUB_SHA..."
+          for attempt in $(seq 1 60); do
+            RUNS_JSON=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "CI" \
+              --branch "$GITHUB_REF_NAME" \
+              --commit "$GITHUB_SHA" \
+              --json status,conclusion,url \
+              --limit 10)
+            SUCCESS_COUNT=$(echo "$RUNS_JSON" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')
+            FAILURE_COUNT=$(echo "$RUNS_JSON" | jq '[.[] | select(.status == "completed" and (.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out"))] | length')
+
+            if [ "$SUCCESS_COUNT" -gt 0 ]; then
+              echo "CI success found for release commit."
+              exit 0
+            fi
+            if [ "$FAILURE_COUNT" -gt 0 ]; then
+              echo "CI failed for this commit. Refusing to spend an EAS build." >&2
+              echo "$RUNS_JSON" | jq -r '.[].url'
+              exit 1
+            fi
+
+            echo "CI is not complete yet; waiting... attempt $attempt/60"
+            sleep 10
+          done
+
+          echo "Timed out waiting for CI success on $GITHUB_SHA." >&2
+          exit 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - name: Install global CLIs
+        run: npm install -g eas-cli firebase-tools
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate mobile release metadata
+        run: npm run release:check -- --require-env
+
+      - name: Prepare Firebase native config for EAS
+        run: |
+          firebase apps:sdkconfig android "$FIREBASE_ANDROID_APP_ID" \
+            --out google-services.json \
+            --token "$FIREBASE_TOKEN"
+          test -s google-services.json
+          eas env:create \
+            --environment preview \
+            --scope project \
+            --name GOOGLE_SERVICES_JSON \
+            --type file \
+            --visibility secret \
+            --value google-services.json \
+            --force \
+            --non-interactive
+
+      - name: Bundle Android JS preflight
+        run: |
+          npx expo export --platform android --output-dir dist-release-check --clear
+          rm -rf dist-release-check
+
+      - name: Start Android APK build on EAS cloud
+        id: eas_build
+        run: |
+          BUILD_JSON_FILE=eas-build-start.json
+          eas build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --no-wait \
+            --message "firebase-groups=$FIREBASE_TESTER_GROUPS commit=$GITHUB_SHA" \
+            --json > "$BUILD_JSON_FILE"
+          cat "$BUILD_JSON_FILE"
+          BUILD_ID=$(jq -r 'if type == "array" then .[0].id else .id end' "$BUILD_JSON_FILE")
+          BUILD_URL=$(jq -r 'if type == "array" then (.[0].buildDetailsPageUrl // .[0].detailsPageUrl // .[0].url // "") else (.buildDetailsPageUrl // .detailsPageUrl // .url // "") end' "$BUILD_JSON_FILE")
+          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
+            echo "EAS build did not return a build id." >&2
+            exit 1
+          fi
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "build_url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### EAS Android build started"
+            echo ""
+            echo "- Build id: \`$BUILD_ID\`"
+            echo "- EAS URL: $BUILD_URL"
+            echo "- Firebase tester groups after webhook/manual distribution: \`$FIREBASE_TESTER_GROUPS\`"
+            echo ""
+            echo "GitHub Actions stops here. Use the completed-build workflow or the Railway webhook when a backend exists."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep EAS build metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-eas-build-start-${{ github.sha }}
+          path: eas-build-start.json
+          retention-days: 14

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables - NEVER commit these files
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+!app/.env.example
+railway_vars.txt
+.sessions.json
+google-services.json
+GoogleService-Info.plist
+
+# MCP server config - contains real API tokens
+.mcp.json
+app/.mcp.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# uv cache (lock file itself should be committed for apps)
+.uv/
