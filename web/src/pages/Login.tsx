@@ -8,6 +8,14 @@ import { useState, type FormEvent } from 'react'
 
 import { auth } from '../firebase'
 
+const GOOGLE_ERRORS: Record<string, string> = {
+  'auth/unauthorized-domain':
+    'This site is not an authorised Firebase domain. Add it under Authentication → Settings → Authorized domains.',
+  'auth/account-exists-with-different-credential':
+    'That email already signs in with a different method. Use email and password instead.',
+  'auth/network-request-failed': 'Could not reach Firebase. Check your connection.',
+}
+
 /**
  * There is no sign-up flow. Signing in only gets you in if your email is on the
  * backend's ALLOWED_MEMBER_EMAILS list - anyone can obtain a Google token for this
@@ -49,7 +57,9 @@ export function Login() {
         return
       }
       if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
-        setError('Google sign-in failed.')
+        // Always surface the Firebase code. A bare "sign-in failed" is unactionable,
+        // and these failures are almost always configuration, not the user.
+        setError(GOOGLE_ERRORS[code] ?? `Google sign-in failed${code ? ` (${code})` : ''}.`)
       }
       setBusy(false)
     }
