@@ -5,8 +5,10 @@
   --color-surface: #131c2e;
   --color-edge: #23304a;
   --color-muted: #8ca0c0;
+  --color-text: #e8eefc;
   --color-accent: #38bdf8;
   --color-gain: #34d399;
+  --color-loss: #f87171;
 }
 
 html,

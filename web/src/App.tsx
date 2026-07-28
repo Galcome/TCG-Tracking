@@ -2,9 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { api } from './api'
+import { AppShell } from './components/AppShell'
+import { Dashboard } from './pages/Dashboard'
 import { Inventory } from './pages/Inventory'
 import { Login } from './pages/Login'
-import { NewProduct } from './pages/NewProduct'
+import { ProductDetail } from './pages/ProductDetail'
+import { Reports } from './pages/Reports'
 import { useAuth } from './useAuth'
 
 export function App() {
@@ -21,26 +24,27 @@ export function App() {
     return <Login />
   }
 
-  return (
-    <div className="mx-auto max-w-md">
-      <header className="flex items-center justify-between border-b border-(--color-edge) px-4 py-3">
-        <span className="text-sm text-(--color-muted)">
-          {me.data ? me.data.display_name : user.email}
-        </span>
-        <button type="button" onClick={signOut} className="text-sm text-(--color-accent)">
+  if (me.isError) {
+    // Most likely this account is not on the store's member allowlist.
+    return (
+      <div className="mx-auto max-w-md p-6">
+        <p className="text-sm text-red-400">{(me.error as Error).message}</p>
+        <button type="button" onClick={signOut} className="mt-4 text-sm text-(--color-accent)">
           Sign out
         </button>
-      </header>
+      </div>
+    )
+  }
 
-      {me.isError ? (
-        <p className="p-4 text-sm text-red-400">{(me.error as Error).message}</p>
-      ) : (
-        <Routes>
-          <Route path="/" element={<Inventory />} />
-          <Route path="/products/new" element={<NewProduct />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      )}
-    </div>
+  return (
+    <AppShell member={me.data} onSignOut={signOut}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/inventory" element={<Inventory />} />
+        <Route path="/products/:productId" element={<ProductDetail />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AppShell>
   )
 }

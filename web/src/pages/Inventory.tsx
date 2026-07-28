@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../api'
+import { AddProductDialog } from '../components/forms'
+import { Button, Card, Empty, FIELD_CLASS, FifoNote } from '../components/ui'
+import { money, toneFor } from '../format'
 
 /** Debounce so typing does not fire a request per keystroke. */
 function useDebounced<T>(value: T, delayMs: number): T {
@@ -17,34 +20,63 @@ function useDebounced<T>(value: T, delayMs: number): T {
 export function Inventory() {
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
+  const [stock, setStock] = useState('')
+  const [adding, setAdding] = useState(false)
   const debouncedSearch = useDebounced(search, 250)
 
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const products = useQuery({
-    queryKey: ['products', debouncedSearch, game],
-    queryFn: () => api.products({ q: debouncedSearch, game: game || undefined }),
+    queryKey: ['products', debouncedSearch, game, stock],
+    queryFn: () =>
+      api.products({
+        q: debouncedSearch || undefined,
+        game: game || undefined,
+        stock: stock || undefined,
+      }),
   })
 
-  return (
-    <div className="space-y-4 p-4 pb-28">
-      <input
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search products…"
-        className="w-full rounded-lg border border-(--color-edge) bg-(--color-surface) px-3 py-3 text-base outline-none focus:border-(--color-accent)"
-      />
+  const items = products.data?.items ?? []
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-        <FilterChip label="All" active={game === ''} onClick={() => setGame('')} />
-        {games.data?.map((option) => (
-          <FilterChip
-            key={option.id}
-            label={option.name}
-            active={game === option.slug}
-            onClick={() => setGame(option.slug)}
-          />
-        ))}
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold lg:text-2xl">Inventory</h1>
+        <Button type="button" onClick={() => setAdding(true)} className="hidden lg:block">
+          Add product
+        </Button>
+      </div>
+
+      {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
+          horizontal scrollbar on desktop. */}
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products…"
+          className={`${FIELD_CLASS} mt-0`}
+        />
+        <select
+          value={game}
+          onChange={(e) => setGame(e.target.value)}
+          className={`${FIELD_CLASS} mt-0 sm:w-48`}
+        >
+          <option value="">All games</option>
+          {games.data?.map((option) => (
+            <option key={option.id} value={option.slug}>
+              {option.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={stock}
+          onChange={(e) => setStock(e.target.value)}
+          className={`${FIELD_CLASS} mt-0 sm:w-40`}
+        >
+          <option value="">All stock</option>
+          <option value="in">In stock</option>
+          <option value="out">Sold out</option>
+        </select>
       </div>
 
       {products.isLoading && <p className="text-sm text-(--color-muted)">Loading…</p>}
@@ -52,63 +84,120 @@ export function Inventory() {
         <p className="text-sm text-red-400">{(products.error as Error).message}</p>
       )}
 
-      {products.data && products.data.items.length === 0 && (
-        <p className="py-8 text-center text-sm text-(--color-muted)">
+      {products.data && items.length === 0 && (
+        <Empty>
           {debouncedSearch ? 'Nothing matches that search.' : 'No products yet.'}
-        </p>
+        </Empty>
       )}
 
-      <ul className="space-y-2">
-        {products.data?.items.map((product) => (
-          <li
-            key={product.id}
-            className="rounded-lg border border-(--color-edge) bg-(--color-surface) p-3"
-          >
-            <p className="font-medium">{product.name}</p>
-            <p className="mt-0.5 text-sm text-(--color-muted)">
-              {product.game.name} · {product.product_type.name}
-              {product.set_name ? ` · ${product.set_name}` : ''}
-            </p>
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 && (
+        <>
+          {/* Desktop: a dense table that actually uses the width. */}
+          <Card className="hidden overflow-x-auto p-0 lg:block">
+            <table className="w-full text-sm">
+              <thead className="border-b border-(--color-edge) text-left text-xs uppercase tracking-wide text-(--color-muted)">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Product</th>
+                  <th className="px-4 py-3 font-medium">Game</th>
+                  <th className="px-4 py-3 font-medium">Type</th>
+                  <th className="px-4 py-3 text-right font-medium">In stock</th>
+                  <th className="px-4 py-3 text-right font-medium">Unit cost</th>
+                  <th className="px-4 py-3 text-right font-medium">Inventory value</th>
+                  <th className="px-4 py-3 text-right font-medium">Realized profit</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-(--color-edge)">
+                {items.map((product) => (
+                  <tr key={product.id} className="hover:bg-(--color-surface)">
+                    <td className="px-4 py-3">
+                      <Link to={`/products/${product.id}`} className="text-(--color-accent)">
+                        {product.name}
+                      </Link>
+                      {product.set_name && (
+                        <span className="ml-2 text-xs text-(--color-muted)">
+                          {product.set_name}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-(--color-muted)">{product.game.name}</td>
+                    <td className="px-4 py-3 text-(--color-muted)">
+                      {product.product_type.name}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right tabular-nums ${
+                        product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
+                      }`}
+                    >
+                      {product.stats.quantity_on_hand}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-(--color-muted)">
+                      {money(product.stats.average_unit_cost, '—')}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {money(product.stats.remaining_cost)}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right tabular-nums ${toneFor(product.stats.realized_profit)}`}
+                    >
+                      {money(product.stats.realized_profit)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
 
-      {products.data && products.data.total > products.data.items.length && (
-        <p className="text-center text-xs text-(--color-muted)">
-          Showing {products.data.items.length} of {products.data.total}
-        </p>
+          {/* Mobile: stacked cards. */}
+          <ul className="space-y-2 lg:hidden">
+            {items.map((product) => (
+              <li key={product.id}>
+                <Link to={`/products/${product.id}`}>
+                  <Card>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{product.name}</p>
+                        <p className="mt-0.5 text-xs text-(--color-muted)">
+                          {product.game.name} · {product.product_type.name}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p
+                          className={`text-sm tabular-nums ${
+                            product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
+                          }`}
+                        >
+                          {product.stats.quantity_on_hand} in stock
+                        </p>
+                        <p className="text-xs tabular-nums text-(--color-muted)">
+                          {money(product.stats.remaining_cost)}
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          <div className="flex items-center justify-between">
+            <FifoNote />
+            {products.data && (
+              <p className="text-xs text-(--color-muted)">{items.length} shown</p>
+            )}
+          </div>
+        </>
       )}
 
-      <Link
-        to="/products/new"
-        className="fixed inset-x-4 bottom-6 mx-auto block max-w-md rounded-xl bg-(--color-accent) px-4 py-4 text-center font-medium text-(--color-ink) shadow-lg"
+      {/* Mobile primary action, thumb-reachable above the tab bar. */}
+      <button
+        type="button"
+        onClick={() => setAdding(true)}
+        className="fixed inset-x-4 bottom-20 z-10 rounded-xl bg-(--color-accent) px-4 py-3.5 font-medium text-(--color-ink) shadow-lg lg:hidden"
       >
         Add product
-      </Link>
-    </div>
-  )
-}
+      </button>
 
-function FilterChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`shrink-0 rounded-full border px-3 py-1.5 text-sm ${
-        active
-          ? 'border-(--color-accent) bg-(--color-accent) text-(--color-ink)'
-          : 'border-(--color-edge) text-(--color-muted)'
-      }`}
-    >
-      {label}
-    </button>
+      {adding && <AddProductDialog onClose={() => setAdding(false)} />}
+    </div>
   )
 }

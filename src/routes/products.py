@@ -1,17 +1,27 @@
-"""Product routes: creation, retrieval, editing and forgiving search."""
+"""Product routes: creation, retrieval, editing, deletion and forgiving search."""
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.database import Base
 from src.dependencies import db_session, get_current_member
+from src.models.ledger import Purchase
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
-from src.schemas.product import ProductCreate, ProductList, ProductRead, ProductUpdate
+from src.schemas.product import (
+    EMPTY_STATS,
+    ProductCreate,
+    ProductDetail,
+    ProductList,
+    ProductRead,
+    ProductStatsRead,
+    ProductUpdate,
+)
+from src.services import history, inventory, ledger
 
 router = APIRouter()
 
@@ -22,6 +32,9 @@ MAX_LIMIT = 200
 # target, so a short query still scores well against a long concatenated search_text.
 # 0.35 catches ordinary typos ("vivd voltage") without returning the whole table.
 SIMILARITY_THRESHOLD = 0.35
+
+STOCK_IN = "in"
+STOCK_OUT = "out"
 
 
 def _escape_like(value: str) -> str:
@@ -35,6 +48,12 @@ def _require_taxonomy(db: Session, model: type[Base], record_id: uuid.UUID, labe
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown {label}",
         )
+
+
+def _stats_for(stats_by_product: dict, product_id: uuid.UUID) -> ProductStatsRead:
+    """Products with no transactions still need a stats block, all zeroes."""
+    found = stats_by_product.get(product_id)
+    return ProductStatsRead.model_validate(found) if found else ProductStatsRead(**EMPTY_STATS)
 
 
 def _apply_filters(
@@ -70,13 +89,14 @@ def list_products(
     q: str | None = Query(default=None, max_length=200, description="Free-text search"),
     game: str | None = Query(default=None, max_length=60, description="Game slug"),
     product_type: str | None = Query(default=None, max_length=60, description="Product type slug"),
+    stock: str | None = Query(default=None, description="in | out"),
     include_archived: bool = Query(default=False),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ) -> ProductList:
-    """Search and filter products.
+    """Search and filter products, each with its derived stock and cost figures.
 
     Matching is forgiving: exact substring OR trigram similarity, so partial words and
     small misspellings still find the item.
@@ -91,7 +111,6 @@ def list_products(
     )
 
     if search:
-        # Best match first; name and id keep the order total so paging is stable.
         filtered = filtered.order_by(
             func.word_similarity(search, Product.search_text).desc(),
             Product.name.asc(),
@@ -101,50 +120,107 @@ def list_products(
         filtered = filtered.order_by(Product.name.asc(), Product.id.asc())
 
     items = db.scalars(filtered.limit(limit).offset(offset)).unique().all()
+    stats_by_product = inventory.product_stats(db, [item.id for item in items])
+
+    rows = []
+    for item in items:
+        stats = _stats_for(stats_by_product, item.id)
+        # Stock filtering happens here rather than in SQL: quantity is an aggregate over
+        # three tables, and this list is tens of rows, not millions.
+        if stock == STOCK_IN and stats.quantity_on_hand <= 0:
+            continue
+        if stock == STOCK_OUT and stats.quantity_on_hand > 0:
+            continue
+        item.stats = stats
+        rows.append(ProductRead.model_validate(item, from_attributes=True))
+
     return ProductList(
-        items=[ProductRead.model_validate(item) for item in items],
-        total=total or 0,
+        items=rows,
+        total=total or 0 if stock is None else len(rows),
         limit=limit,
         offset=offset,
     )
 
 
-@router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProductDetail, status_code=status.HTTP_201_CREATED)
 def create_product(
     payload: ProductCreate,
     member: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
-) -> Product:
-    """Create a product manually. No external catalog lookup is required."""
+) -> ProductDetail:
+    """Create a product, optionally with the purchase that brought it into stock.
+
+    Both happen in one transaction: a product created without the cost that came with it
+    is exactly the gap this app exists to close.
+    """
     _require_taxonomy(db, Game, payload.game_id, "game")
     _require_taxonomy(db, ProductType, payload.product_type_id, "product type")
 
-    product = Product(**payload.model_dump(), created_by_member_id=member.id)
+    fields = payload.model_dump(exclude={"initial_purchase"})
+    product = Product(**fields, created_by_member_id=member.id)
     db.add(product)
     db.flush()
+
+    if payload.initial_purchase is not None:
+        opening = payload.initial_purchase
+        purchase = Purchase(
+            product_id=product.id,
+            quantity=opening.quantity,
+            gross_amount_cents=opening.amount,
+            shipping_cents=opening.shipping,
+            tax_cents=opening.tax,
+            fees_cents=opening.fees,
+            purchase_date=opening.purchase_date,
+            purchased_by_member_id=opening.purchased_by_member_id or member.id,
+            source=opening.source,
+            created_by_member_id=member.id,
+        )
+        db.add(purchase)
+        db.flush()
+        ledger.recompute_product(db, product.id)
+        ledger.record_audit(
+            db,
+            entity_type="purchase",
+            entity_id=purchase.id,
+            action="create",
+            member_id=member.id,
+            after=ledger.snapshot(purchase, ["quantity", "gross_amount_cents", "purchase_date"]),
+        )
+
     db.refresh(product)
-    return product
+    return _detail(db, product)
 
 
-@router.get("/{product_id}", response_model=ProductRead)
+def _detail(db: Session, product: Product) -> ProductDetail:
+    """Attach the derived figures to the ORM row as transient attributes.
+
+    They are not mapped columns, so nothing is persisted; it just lets one
+    `model_validate` read the whole shape instead of stitching dicts together.
+    """
+    product.stats = _stats_for(inventory.product_stats(db, [product.id]), product.id)
+    product.history = history.product_history(db, product.id)
+    return ProductDetail.model_validate(product, from_attributes=True)
+
+
+@router.get("/{product_id}", response_model=ProductDetail)
 def read_product(
     product_id: uuid.UUID,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
-) -> Product:
+) -> ProductDetail:
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return product
+    return _detail(db, product)
 
 
-@router.patch("/{product_id}", response_model=ProductRead)
+@router.patch("/{product_id}", response_model=ProductDetail)
 def update_product(
     product_id: uuid.UUID,
     payload: ProductUpdate,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
-) -> Product:
+) -> ProductDetail:
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -162,4 +238,33 @@ def update_product(
 
     db.flush()
     db.refresh(product)
-    return product
+    return _detail(db, product)
+
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(
+    product_id: uuid.UUID,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> Response:
+    """Delete a product created by mistake.
+
+    Only when nothing financial references it, voided rows included. A product with
+    history gets archived instead - deleting it would take the money with it.
+    """
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if inventory.has_any_transactions(db, product_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This product has transaction history and cannot be deleted. "
+                "Archive it instead to hide it without losing the record."
+            ),
+        )
+
+    db.delete(product)
+    db.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
