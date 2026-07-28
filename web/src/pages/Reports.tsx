@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { api, type GroupRow, type Period } from '../api'
-import { Card, Empty, FifoNote } from '../components/ui'
+import { Card, Chip, Empty, FifoNote } from '../components/ui'
 import { money, percent, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -24,21 +24,16 @@ export function Reports() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold lg:text-2xl">Reports</h1>
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">Reports</h1>
         <div className="flex flex-wrap gap-2">
           {PERIODS.map((option) => (
-            <button
+            <Chip
               key={option.value}
-              type="button"
+              active={period === option.value}
               onClick={() => setPeriod(option.value)}
-              className={`rounded-full border px-3 py-1.5 text-sm ${
-                period === option.value
-                  ? 'border-(--color-accent) bg-(--color-accent) text-(--color-ink)'
-                  : 'border-(--color-edge) text-(--color-muted)'
-              }`}
             >
               {option.label}
-            </button>
+            </Chip>
           ))}
         </div>
       </div>

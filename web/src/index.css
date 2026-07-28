@@ -1,14 +1,43 @@
 @import 'tailwindcss';
 
+/* Bundled, not fetched from a CDN: no render-blocking request and no third party
+   learning who uses this app. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/space-grotesk';
+
 @theme {
-  --color-ink: #0b1220;
-  --color-surface: #131c2e;
-  --color-edge: #23304a;
-  --color-muted: #8ca0c0;
-  --color-text: #e8eefc;
-  --color-accent: #38bdf8;
-  --color-gain: #34d399;
-  --color-loss: #f87171;
+  /* Surfaces. A slightly violet-tinted near-black reads warmer than flat navy and
+     makes the accent colours sit forward instead of vibrating against the page. */
+  --color-ink: #0a0e1a;
+  --color-surface: #121829;
+  --color-raised: #182036;
+  --color-edge: #232d47;
+  --color-edge-strong: #35426a;
+
+  --color-text: #eef2fb;
+  --color-muted: #8b9bc0;
+  --color-faint: #5f6f94;
+
+  --color-accent: #4cc4ff;
+  --color-accent-deep: #1d7fd4;
+  --color-gain: #3ddc97;
+  --color-loss: #ff6b6b;
+  --color-warn: #ffb454;
+
+  /* Per-game identity. Used as a small dot so a mixed inventory list groups at a
+     glance without a legend. */
+  --color-game-pokemon: #ffcb05;
+  --color-game-magic: #f0932b;
+  --color-game-yugioh: #a55eea;
+  --color-game-lorcana: #26de81;
+  --color-game-onepiece: #fc5c65;
+  --color-game-digimon: #45aaf2;
+  --color-game-other: #778ca3;
+
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  /* Numbers carry this app. A geometric face with real character makes the
+     scoreboard feel deliberate rather than like a default dashboard. */
+  --font-display: 'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, sans-serif;
 }
 
 html,
@@ -19,9 +48,113 @@ body,
 
 body {
   background-color: var(--color-ink);
-  color: #e8eefc;
-  /* Respect the notch / home indicator on phones. */
+  /* Two soft pools of light so a large dark screen has some depth instead of
+     reading as a flat sheet. */
+  background-image:
+    radial-gradient(70rem 40rem at 15% -10%, rgba(76, 196, 255, 0.07), transparent 60%),
+    radial-gradient(60rem 35rem at 100% 0%, rgba(165, 94, 234, 0.06), transparent 55%);
+  background-attachment: fixed;
+  color: var(--color-text);
+  font-family: var(--font-sans);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Money and quantities must line up column to column. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* Visible only for keyboard users, so pointer users never see a stray ring. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* The one flourish: a slow foil sweep across the headline profit tile, the way
+   light moves over a holo card when you tilt it. Deliberately low contrast. */
+@keyframes foil-sweep {
+  0% {
+    transform: translateX(-120%) rotate(8deg);
+  }
+  100% {
+    transform: translateX(320%) rotate(8deg);
+  }
+}
+
+.foil::after {
+  content: '';
+  position: absolute;
+  inset: -40% -10%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.06),
+    rgba(76, 196, 255, 0.1),
+    rgba(165, 94, 234, 0.08),
+    transparent
+  );
+  animation: foil-sweep 7s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.28s ease-out both;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+/* Motion is decoration here; none of it carries meaning, so it all goes away
+   for anyone who has asked for less. */
+@media (prefers-reduced-motion: reduce) {
+  .foil::after,
+  .skeleton::after {
+    animation: none;
+  }
+  .rise {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
 }

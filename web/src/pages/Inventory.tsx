@@ -3,8 +3,18 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../api'
+import { PackageSearch, Plus } from 'lucide-react'
+
 import { AddProductDialog } from '../components/forms'
-import { Button, Card, Empty, FIELD_CLASS, FifoNote } from '../components/ui'
+import {
+  Button,
+  Card,
+  Empty,
+  FIELD_CLASS,
+  FifoNote,
+  GameDot,
+  Skeleton,
+} from '../components/ui'
 import { money, toneFor } from '../format'
 
 /** Debounce so typing does not fire a request per keystroke. */
@@ -40,8 +50,9 @@ export function Inventory() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold lg:text-2xl">Inventory</h1>
-        <Button type="button" onClick={() => setAdding(true)} className="hidden lg:block">
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">Inventory</h1>
+        <Button type="button" onClick={() => setAdding(true)} className="hidden lg:inline-flex">
+          <Plus size={16} strokeWidth={2.5} />
           Add product
         </Button>
       </div>
@@ -79,15 +90,27 @@ export function Inventory() {
         </select>
       </div>
 
-      {products.isLoading && <p className="text-sm text-(--color-muted)">Loading…</p>}
+      {products.isLoading && (
+        <div className="space-y-2">
+          {[0, 1, 2, 3, 4].map((row) => (
+            <Skeleton key={row} className="h-16 w-full" />
+          ))}
+        </div>
+      )}
       {products.isError && (
-        <p className="text-sm text-red-400">{(products.error as Error).message}</p>
+        <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+          {(products.error as Error).message}
+        </p>
       )}
 
       {products.data && items.length === 0 && (
-        <Empty>
-          {debouncedSearch ? 'Nothing matches that search.' : 'No products yet.'}
-        </Empty>
+        <Card>
+          <Empty icon={<PackageSearch size={30} strokeWidth={1.5} />}>
+            {debouncedSearch
+              ? `Nothing matches “${debouncedSearch}”. Search is forgiving about spelling, so it is probably not here yet.`
+              : 'No products yet. Add your first one and record what you paid for it.'}
+          </Empty>
+        </Card>
       )}
 
       {items.length > 0 && (
@@ -108,18 +131,29 @@ export function Inventory() {
               </thead>
               <tbody className="divide-y divide-(--color-edge)">
                 {items.map((product) => (
-                  <tr key={product.id} className="hover:bg-(--color-surface)">
+                  <tr
+                    key={product.id}
+                    className="transition-colors hover:bg-(--color-raised)"
+                  >
                     <td className="px-4 py-3">
-                      <Link to={`/products/${product.id}`} className="text-(--color-accent)">
+                      <Link
+                        to={`/products/${product.id}`}
+                        className="font-medium text-(--color-text) transition-colors hover:text-(--color-accent)"
+                      >
                         {product.name}
                       </Link>
                       {product.set_name && (
-                        <span className="ml-2 text-xs text-(--color-muted)">
+                        <span className="ml-2 text-xs text-(--color-faint)">
                           {product.set_name}
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-(--color-muted)">{product.game.name}</td>
+                    <td className="px-4 py-3 text-(--color-muted)">
+                      <span className="inline-flex items-center gap-2">
+                        <GameDot slug={product.game.slug} />
+                        {product.game.name}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-(--color-muted)">
                       {product.product_type.name}
                     </td>
@@ -152,11 +186,12 @@ export function Inventory() {
             {items.map((product) => (
               <li key={product.id}>
                 <Link to={`/products/${product.id}`}>
-                  <Card>
+                  <Card interactive>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate font-medium">{product.name}</p>
-                        <p className="mt-0.5 text-xs text-(--color-muted)">
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-(--color-faint)">
+                          <GameDot slug={product.game.slug} />
                           {product.game.name} · {product.product_type.name}
                         </p>
                       </div>
@@ -192,8 +227,9 @@ export function Inventory() {
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="fixed inset-x-4 bottom-20 z-10 rounded-xl bg-(--color-accent) px-4 py-3.5 font-medium text-(--color-ink) shadow-lg lg:hidden"
+        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
       >
+        <Plus size={17} strokeWidth={2.5} />
         Add product
       </button>
 
