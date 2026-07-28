@@ -103,6 +103,33 @@ railway logs --service <api-service> --environment production --since 30m --filt
 Use `railway up --detach` for fire-and-forget manual deploys and `railway up --ci` when CI
 should print build output without long interactive watching.
 
+## Cloudflare Pages (web app)
+
+Project `tcg-tracking`, served at `https://tcg-tracking-4mn.pages.dev`.
+
+Wrangler authenticates from the `CLOUDFLARE_API_TOKEN` environment variable, so deploys need
+no browser login:
+
+```powershell
+cd web
+npm run build          # with the VITE_* values for the target environment
+cd ..
+npx wrangler pages deploy web/dist --project-name tcg-tracking --branch main
+```
+
+`VITE_*` values are baked in **at build time**, not read at runtime. Building with the wrong
+`VITE_API_URL` produces a bundle that quietly talks to the wrong backend, so set them on the
+build command (or in Cloudflare's build settings) rather than relying on a local `web/.env`.
+
+`web/public/_redirects` contains the SPA fallback (`/* /index.html 200`). Without it, any deep
+link such as `/products/new` 404s on refresh.
+
+Two things must know about this domain:
+
+- `ALLOWED_ORIGINS` on the Railway API, or the browser blocks every call as a CORS failure.
+- Firebase **Authentication -> Settings -> Authorized domains**, or Google sign-in fails with
+  `auth/unauthorized-domain`. Email/password is unaffected.
+
 ## Sentry
 
 Create separate runtime projects when the app has separate runtimes:
