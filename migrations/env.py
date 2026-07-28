@@ -12,9 +12,8 @@ from src.database import Base
 
 config = context.config
 
-# Production deploys must use DATABASE_URL, which should point at Supabase's pooler.
-# DIRECT_DATABASE_URL is only for local/manual maintenance because direct Supabase hosts
-# can be unreachable from some Railway regions or IPv4-only networks.
+# Production deploys must use DATABASE_URL, which points at Neon's pooled endpoint.
+# DIRECT_DATABASE_URL is the unpooled endpoint, used for local and manual maintenance only.
 app_env = (os.environ.get("APP_ENV") or settings.app_env).strip().lower()
 direct_db_url = (os.environ.get("DIRECT_DATABASE_URL") or "").strip()
 db_url = direct_db_url if direct_db_url and app_env != "production" else settings.database_url

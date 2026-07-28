@@ -1,8 +1,11 @@
-# Deployment Template Playbook
+# Deployment Playbook
 
-Use this as the first-pass deployment checklist for new projects built from this template.
-It captures the Railway, Supabase, Sentry, Firebase, EAS, CI/CD, and tooling defaults that
-should stay the same across similar apps.
+> **This project deviates from the template defaults.** It uses **Neon** for Postgres and
+> **Firebase Auth** for identity, not Supabase, and it ships a **web SPA** rather than an
+> Expo app. See [GOTCHAS.md](GOTCHAS.md) for the reasoning. The Expo, EAS and mobile
+> distribution sections below are inherited template guidance and do not apply here yet.
+
+It captures the Railway, Neon, Firebase, Sentry, CI/CD, and tooling defaults for this app.
 
 ## Same By Default
 
@@ -19,40 +22,64 @@ Reuse the same tooling and account access when it already covers the new project
 
 Change these every time:
 
-- Supabase URL, anon key, JWT secret, database password, pooler URL, and direct DB URL.
+- Neon project id, pooled connection URL, and direct connection URL.
+- Firebase project id and web app config (API key, auth domain).
 - Railway project id, service names, public domain, and service env values.
 - Sentry project slugs and runtime DSNs. The Sentry auth token can be shared; DSNs cannot.
-- Firebase Android app id and `google-services.json`.
-- Expo project id, app slug, Android package id, and iOS bundle id.
-- `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
-  and `EXPO_PUBLIC_SENTRY_DSN`.
-- `EAS_WEBHOOK_SECRET`; generate a fresh random value per app.
-- CORS origins and Vercel preview regex.
+- `VITE_API_URL`, `VITE_FIREBASE_*`, and `VITE_SENTRY_DSN` for the web app.
+- CORS origins.
 
-## Supabase
+## Neon (Postgres)
 
-Use Supabase before wiring Railway so all env vars point at one project from day one.
+Set Neon up before wiring Railway so every env var points at one project from day one.
 
-Railway persistent API/worker services should use the Supavisor session pooler on port `5432`
-as `DATABASE_URL`:
+`DATABASE_URL` is the **pooled** endpoint - the hostname containing `-pooler`:
 
 ```text
-postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+postgresql://<user>:<password>@ep-xxx-pooler.<region>.aws.neon.tech/<db>?sslmode=require
 ```
 
-Keep `DIRECT_DATABASE_URL` blank in Railway production. It is for local/manual maintenance.
+`DIRECT_DATABASE_URL` is the **unpooled** endpoint, used by Alembic and admin tasks. Keep it
+blank in Railway production; the deploy command runs migrations through the pooled URL.
 
-Start with conservative pool values:
+**Do not add client-side connection pooling.** `src/database.py` uses `NullPool` on purpose:
+Neon suspends compute only when there are zero open connections, so a persistent pool would
+hold the compute awake around the clock and consume the free tier's monthly allowance while
+nobody is using the app. Neon's own PgBouncer does the real pooling.
 
-```text
-DB_POOL_SIZE=4
-DB_MAX_OVERFLOW=2
-DB_POOL_TIMEOUT_SECONDS=15
-DB_POOL_RECYCLE_SECONDS=270
-```
+Project settings that matter on the free tier:
 
-The backend supports modern asymmetric Supabase JWTs and legacy HS256 tokens when
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_JWT_SECRET` all point at the same project.
+- Cap autoscaling at **0.25 CU**. The default `max 2` can burn the compute allowance up to 8x
+  faster than the floor rate during a burst.
+- Leave autosuspend at the plan default (~5 min idle).
+- Deploy the Railway service in a **US East** region to sit next to the Neon project; with
+  `NullPool` a cross-region round trip is paid on every request, not amortised across a pool.
+
+Watch usage with `neon projects list --org-id <org-id> --output json` and check that
+`active_time` and `cpu_used_sec` are not growing around the clock.
+
+## Firebase Auth
+
+The backend verifies Firebase ID tokens against Google's public JWKS. There is **no shared
+secret** to configure - only `FIREBASE_PROJECT_ID`, which is both the expected `aud` and the
+suffix of the expected `iss`.
+
+Two sign-in methods are enabled: **Email/Password** and **Google**.
+
+Because Google sign-in is on, anyone with a Google account can obtain a valid token for this
+project. Membership is therefore decided by **`ALLOWED_MEMBER_EMAILS`**, a comma-separated
+list checked on every request. It is required in production - the app refuses to start
+without it. The first member to sign in is provisioned as admin; everyone after defaults to
+`member`.
+
+Inviting someone is two steps: add their email to `ALLOWED_MEMBER_EMAILS`, and (for
+Email/Password sign-in) create their account in the Firebase console. Google users need only
+the first.
+
+Before the first deploy, add the production domain under **Authentication -> Settings ->
+Authorized domains**, or Google sign-in fails with `auth/unauthorized-domain`.
+
+The frontend project id must match `FIREBASE_PROJECT_ID` exactly, or every request 401s.
 
 ## Railway
 

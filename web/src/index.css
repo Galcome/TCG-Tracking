@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #0b1220;
+  --color-surface: #131c2e;
+  --color-edge: #23304a;
+  --color-muted: #8ca0c0;
+  --color-accent: #38bdf8;
+  --color-gain: #34d399;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: #e8eefc;
+  /* Respect the notch / home indicator on phones. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  -webkit-font-smoothing: antialiased;
+}
