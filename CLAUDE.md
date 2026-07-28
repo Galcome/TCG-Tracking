@@ -15,7 +15,7 @@ project-specific truth is:
 | Database | **Neon** Postgres (free tier) | Supabase Postgres |
 | Auth | **Firebase Auth** (RS256 ID tokens, JWKS) | Supabase JWT |
 | Connection pooling | **`NullPool`, deliberately** | QueuePool with tuned pool sizes |
-| Frontend | **Vite + React SPA** on Cloudflare Pages | Expo / React Native |
+| Frontend | **Vite + React SPA** on Firebase Hosting | Expo / React Native |
 
 Why: Supabase's free tier was at its project limit, and Railway Postgres priced out at
 roughly $2-4/month. `NullPool` is load-bearing - Neon only suspends compute when zero

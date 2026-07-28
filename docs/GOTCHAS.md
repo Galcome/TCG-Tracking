@@ -53,14 +53,21 @@ exists. A token carrying no email at all fails closed.
 
 ## Firebase Auth - Google Sign-In Breaks On A New Domain
 
-**Symptom:** Google sign-in works on localhost, then fails with `auth/unauthorized-domain`
-once deployed.
+**Symptom:** Google sign-in works on localhost, then fails once deployed. The login screen
+now names the code: `auth/unauthorized-domain`.
 
-**Cause:** Firebase only allows OAuth flows from domains on its authorized list. `localhost`
-is there by default; your Cloudflare Pages domain is not.
+**Cause:** Firebase only allows OAuth flows from domains on its authorized list. `localhost`,
+`<project>.web.app` and `<project>.firebaseapp.com` are there by default. Nothing else is.
 
-**Fix:** Firebase Console -> Authentication -> Settings -> Authorized domains, and add the
-production domain. Do this before the first real deploy, not after.
+**This is why the SPA is on Firebase Hosting.** It was briefly deployed to Cloudflare Pages
+and Google sign-in failed immediately. Per-deployment preview URLs make it worse: Cloudflare
+mints a new subdomain per deploy, and each one would need adding by hand.
+
+**Fix:** Deploy the SPA to Firebase Hosting so the domain is authorized for free. If a custom
+domain is ever added, register it in Firebase Console -> Authentication -> Settings ->
+Authorized domains **and** in the API's `ALLOWED_ORIGINS`, before pointing anyone at it.
+
+Email/password sign-in does not use the OAuth flow and is unaffected by this list.
 
 ---
 
@@ -87,7 +94,7 @@ Uvicorn or fail an HTTP health check.
 
 **This project deliberately breaks that rule**, because:
 
-- It deploys exactly **one** service to Railway. The web SPA goes to Cloudflare Pages.
+- It deploys exactly **one** service to Railway. The web SPA goes to Firebase Hosting.
 - The per-service "Railway config file" path is **dashboard-only** - the CLI cannot set it.
   With the config in `railway.api.json`, a CLI- or GitHub-created service silently falls back
   to the neutral root config, which has no `preDeployCommand`. **Migrations would never run**,

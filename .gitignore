@@ -57,3 +57,6 @@ htmlcov/
 
 # uv cache (lock file itself should be committed for apps)
 .uv/
+
+# Firebase CLI local cache
+.firebase/
