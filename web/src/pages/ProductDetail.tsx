@@ -10,7 +10,18 @@ import {
   RecordSaleDialog,
   VoidDialog,
 } from '../components/forms'
-import { Button, Card, Empty, FifoNote, Stat } from '../components/ui'
+import { ArrowLeft, Minus, Pencil, Plus, Receipt } from 'lucide-react'
+
+import {
+  Button,
+  Card,
+  Empty,
+  FifoNote,
+  GameDot,
+  Skeleton,
+  Stat,
+  StatSkeleton,
+} from '../components/ui'
 import { humanise, money, percent, shortDate, signedMoney, toneFor } from '../format'
 
 type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | null
@@ -41,9 +52,25 @@ export function ProductDetail() {
     onSuccess: () => queryClient.invalidateQueries(),
   })
 
-  if (product.isLoading) return <p className="text-sm text-(--color-muted)">Loading…</p>
+  if (product.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-9 w-72" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }, (_, index) => (
+            <StatSkeleton key={index} />
+          ))}
+        </div>
+        <Skeleton className="h-56 w-full" />
+      </div>
+    )
+  }
   if (product.isError)
-    return <p className="text-sm text-red-400">{(product.error as Error).message}</p>
+    return (
+      <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+        {(product.error as Error).message}
+      </p>
+    )
   if (!product.data) return null
 
   const item = product.data
@@ -52,30 +79,43 @@ export function ProductDetail() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/inventory" className="text-sm text-(--color-accent)">
-          ← Inventory
+        <Link
+          to="/inventory"
+          className="inline-flex items-center gap-1.5 text-sm text-(--color-muted) transition-colors hover:text-(--color-accent)"
+        >
+          <ArrowLeft size={15} />
+          Inventory
         </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold lg:text-2xl">{item.name}</h1>
-            <p className="mt-1 text-sm text-(--color-muted)">
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl font-bold lg:text-3xl">{item.name}</h1>
+            <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-(--color-muted)">
+              <GameDot slug={item.game.slug} />
               {item.game.name} · {item.product_type.name}
               {item.set_name && ` · ${item.set_name}`}
               {item.storage_location && ` · ${item.storage_location}`}
-              {item.is_archived && ' · Archived'}
+              {item.is_archived && (
+                <span className="rounded-full border border-(--color-edge) px-2 py-0.5 text-xs">
+                  Archived
+                </span>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => setDialog('purchase')}>
+              <Plus size={15} strokeWidth={2.5} />
               Add purchase
             </Button>
             <Button type="button" onClick={() => setDialog('sale')} variant="ghost">
+              <Receipt size={15} />
               Record sale
             </Button>
             <Button type="button" onClick={() => setDialog('adjust')} variant="ghost">
+              <Minus size={15} />
               Adjust stock
             </Button>
             <Button type="button" onClick={() => setDialog('edit')} variant="ghost">
+              <Pencil size={15} />
               Edit
             </Button>
           </div>

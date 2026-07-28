@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api, type Attention, type Period } from '../api'
-import { Card, Empty, FifoNote, Stat } from '../components/ui'
+import { Card, Chip, Empty, FifoNote, GameDot, Stat, StatSkeleton } from '../components/ui'
 import { money, moneyCompact, percent, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -32,27 +32,34 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold lg:text-2xl">Dashboard</h1>
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">Dashboard</h1>
         <div className="flex flex-wrap gap-2">
           {PERIODS.map((option) => (
-            <button
+            <Chip
               key={option.value}
-              type="button"
+              active={period === option.value}
               onClick={() => setPeriod(option.value)}
-              className={`rounded-full border px-3 py-1.5 text-sm ${
-                period === option.value
-                  ? 'border-(--color-accent) bg-(--color-accent) text-(--color-ink)'
-                  : 'border-(--color-edge) text-(--color-muted)'
-              }`}
             >
               {option.label}
-            </button>
+            </Chip>
           ))}
         </div>
       </div>
 
       {dashboard.isError && (
-        <p className="text-sm text-red-400">{(dashboard.error as Error).message}</p>
+        <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+          {(dashboard.error as Error).message}
+        </p>
+      )}
+
+      {dashboard.isLoading && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+          {Array.from({ length: 9 }, (_, index) => (
+            <div key={index} className={index < 3 ? 'col-span-2' : ''}>
+              <StatSkeleton />
+            </div>
+          ))}
+        </div>
       )}
 
       {data && (
@@ -65,6 +72,7 @@ export function Dashboard() {
                 value={signedMoney(data.realized_profit)}
                 tone={toneFor(data.realized_profit)}
                 emphasis
+                foil
                 hint={
                   data.sales_missing_cost
                     ? `${data.sales_missing_cost} of ${data.sale_count} sales excluded — cost unknown`
@@ -118,7 +126,10 @@ export function Dashboard() {
               <ul className="divide-y divide-(--color-edge)">
                 {byGame.data.map((row) => (
                   <li key={row.key} className="flex items-center justify-between px-4 py-3">
-                    <span className="text-sm">{row.label}</span>
+                    <span className="flex items-center gap-2.5 text-sm">
+                      <GameDot slug={row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')} />
+                      {row.label}
+                    </span>
                     <span className={`text-sm tabular-nums ${toneFor(row.realized_profit)}`}>
                       {signedMoney(row.realized_profit)}
                     </span>

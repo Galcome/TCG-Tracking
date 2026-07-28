@@ -1,14 +1,42 @@
 /**
- * Small shared pieces. Forms render as a centred dialog on desktop and a full-screen sheet
- * on mobile, from one component, so there is a single implementation per form.
+ * Shared interface pieces.
+ *
+ * Forms render as a centred dialog on desktop and a bottom sheet on mobile, from one
+ * component, so there is a single implementation per form.
  */
 
 import type { FormEvent, ReactNode } from 'react'
 import { useEffect } from 'react'
 
 export const FIELD_CLASS =
-  'mt-1 w-full rounded-lg border border-(--color-edge) bg-(--color-surface) px-3 py-2.5 ' +
-  'text-base outline-none focus:border-(--color-accent)'
+  'mt-1 w-full rounded-lg border border-(--color-edge) bg-(--color-ink)/60 px-3 py-2.5 ' +
+  'text-base text-(--color-text) outline-none transition-colors ' +
+  'placeholder:text-(--color-faint) hover:border-(--color-edge-strong) ' +
+  'focus:border-(--color-accent)'
+
+/** Game identity colours, matched by slug. Keeps a mixed list scannable. */
+const GAME_COLOURS: Record<string, string> = {
+  pokemon: 'var(--color-game-pokemon)',
+  'magic-the-gathering': 'var(--color-game-magic)',
+  'yu-gi-oh': 'var(--color-game-yugioh)',
+  lorcana: 'var(--color-game-lorcana)',
+  'one-piece': 'var(--color-game-onepiece)',
+  digimon: 'var(--color-game-digimon)',
+}
+
+export function gameColour(slug: string): string {
+  return GAME_COLOURS[slug] ?? 'var(--color-game-other)'
+}
+
+export function GameDot({ slug, className = '' }: { slug: string; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${className}`}
+      style={{ backgroundColor: gameColour(slug) }}
+    />
+  )
+}
 
 export function Field({
   label,
@@ -21,17 +49,29 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-sm text-(--color-muted)">{label}</span>
+      <span className="text-sm font-medium text-(--color-muted)">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-(--color-muted)">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-(--color-faint)">{hint}</span>}
     </label>
   )
 }
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = '',
+  interactive = false,
+}: {
+  children: ReactNode
+  className?: string
+  interactive?: boolean
+}) {
   return (
     <div
-      className={`rounded-xl border border-(--color-edge) bg-(--color-surface) p-4 ${className}`}
+      className={`rounded-xl border border-(--color-edge) bg-(--color-surface) p-4 shadow-sm ${
+        interactive
+          ? 'transition-colors duration-150 hover:border-(--color-edge-strong) hover:bg-(--color-raised)'
+          : ''
+      } ${className}`}
     >
       {children}
     </div>
@@ -44,23 +84,34 @@ export function Stat({
   tone = '',
   emphasis = false,
   hint,
+  foil = false,
 }: {
   label: string
   value: string
   tone?: string
   emphasis?: boolean
   hint?: string
+  /** The one flourish, reserved for the headline profit tile. */
+  foil?: boolean
 }) {
   return (
-    <Card>
-      <p className="text-xs uppercase tracking-wide text-(--color-muted)">{label}</p>
+    <div
+      className={`relative overflow-hidden rounded-xl border border-(--color-edge) bg-(--color-surface) p-4 shadow-sm ${
+        foil ? 'foil' : ''
+      }`}
+    >
+      <p className="text-[0.6875rem] font-medium uppercase tracking-[0.08em] text-(--color-faint)">
+        {label}
+      </p>
       <p
-        className={`mt-1 font-semibold tabular-nums ${emphasis ? 'text-2xl lg:text-3xl' : 'text-lg lg:text-xl'} ${tone}`}
+        className={`font-display mt-1.5 font-semibold tabular-nums ${
+          emphasis ? 'text-[1.75rem] leading-tight lg:text-[2.125rem]' : 'text-xl lg:text-2xl'
+        } ${tone}`}
       >
         {value}
       </p>
-      {hint && <p className="mt-1 text-xs text-(--color-muted)">{hint}</p>}
-    </Card>
+      {hint && <p className="mt-1.5 text-xs leading-snug text-(--color-faint)">{hint}</p>}
+    </div>
   )
 }
 
@@ -68,16 +119,43 @@ export function Button({
   children,
   variant = 'primary',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'ghost' | 'danger'
+}) {
   const styles = {
-    primary: 'bg-(--color-accent) text-(--color-ink) font-medium',
-    ghost: 'border border-(--color-edge) text-(--color-text)',
-    danger: 'border border-red-500/40 text-red-400',
+    primary:
+      'bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) text-(--color-ink) ' +
+      'font-semibold shadow-sm hover:brightness-110',
+    ghost:
+      'border border-(--color-edge) text-(--color-text) hover:border-(--color-edge-strong) ' +
+      'hover:bg-(--color-raised)',
+    danger: 'border border-(--color-loss)/40 text-(--color-loss) hover:bg-(--color-loss)/10',
   }[variant]
+
   return (
     <button
       {...props}
-      className={`rounded-lg px-4 py-2.5 text-sm disabled:opacity-50 ${styles} ${props.className ?? ''}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm transition-all duration-150 disabled:opacity-50 disabled:hover:brightness-100 ${styles} ${props.className ?? ''}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function Chip({
+  active,
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active: boolean }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={`rounded-full border px-3 py-1.5 text-sm transition-colors duration-150 ${
+        active
+          ? 'border-(--color-accent) bg-(--color-accent)/12 text-(--color-accent)'
+          : 'border-(--color-edge) text-(--color-muted) hover:border-(--color-edge-strong) hover:text-(--color-text)'
+      }`}
     >
       {children}
     </button>
@@ -101,7 +179,6 @@ export function Dialog({
   error?: string | null
   children: ReactNode
 }) {
-  // Escape closes, and the page behind must not scroll while a sheet is open on mobile.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
@@ -113,18 +190,21 @@ export function Dialog({
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 sm:items-center sm:p-6">
+    <div
+      className="fixed inset-0 z-30 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-6"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
       <form
         onSubmit={onSubmit}
-        className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-(--color-edge) bg-(--color-ink) p-5 sm:max-w-lg sm:rounded-2xl"
+        className="rise max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-(--color-edge-strong) bg-(--color-surface) p-5 shadow-2xl sm:max-w-lg sm:rounded-2xl"
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <h2 className="font-display text-lg font-semibold">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-(--color-muted)"
+            className="rounded p-1 text-(--color-faint) transition-colors hover:text-(--color-text)"
           >
             ✕
           </button>
@@ -132,7 +212,11 @@ export function Dialog({
 
         <div className="space-y-4">{children}</div>
 
-        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+        {error && (
+          <p className="mt-4 rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+            {error}
+          </p>
+        )}
 
         <div className="mt-6 flex gap-3">
           <Button type="button" variant="ghost" onClick={onClose} className="flex-1">
@@ -149,22 +233,46 @@ export function Dialog({
 
 export function Advanced({ children }: { children: ReactNode }) {
   return (
-    <details className="rounded-lg border border-(--color-edge) px-3 py-2">
-      <summary className="cursor-pointer text-sm text-(--color-accent)">Advanced</summary>
-      <div className="mt-3 space-y-4">{children}</div>
+    <details className="group rounded-lg border border-(--color-edge) px-3 py-2.5 transition-colors hover:border-(--color-edge-strong)">
+      <summary className="cursor-pointer list-none text-sm font-medium text-(--color-accent)">
+        <span className="inline-block transition-transform duration-150 group-open:rotate-90">
+          ›
+        </span>{' '}
+        Advanced
+      </summary>
+      <div className="mt-4 space-y-4">{children}</div>
     </details>
   )
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="py-10 text-center text-sm text-(--color-muted)">{children}</p>
+export function Empty({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+      {icon && <div className="text-(--color-faint)">{icon}</div>}
+      <p className="max-w-sm text-sm text-(--color-muted)">{children}</p>
+    </div>
+  )
+}
+
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`skeleton rounded-lg ${className}`} />
+}
+
+export function StatSkeleton() {
+  return (
+    <div className="rounded-xl border border-(--color-edge) bg-(--color-surface) p-4">
+      <Skeleton className="h-3 w-20" />
+      <Skeleton className="mt-3 h-7 w-28" />
+    </div>
+  )
 }
 
 /** Explains which cost-basis method the numbers use, per the brief. */
 export function FifoNote() {
   return (
-    <p className="text-xs text-(--color-muted)">
-      Cost basis: FIFO — the oldest stock is treated as sold first.
+    <p className="text-xs text-(--color-faint)">
+      Cost basis: <span className="font-medium text-(--color-muted)">FIFO</span> — the oldest
+      stock is treated as sold first.
     </p>
   )
 }
