@@ -101,6 +101,28 @@ Uvicorn or fail an HTTP health check.
 
 ---
 
+## Railway - Nixpacks Build Fails On `pip install uv==`
+
+**Symptom:** The build dies immediately with
+`ERROR: Could not find a version that satisfies the requirement uv==`, followed by a listing
+of every uv release ever published.
+
+**Cause:** Nixpacks' Python provider runs `pip install uv==$NIXPACKS_UV_VERSION`. When that
+variable is unset the command becomes a literal `pip install uv==`, which is not a valid
+specifier. Nothing in the repo is wrong - the builder just has no default.
+
+**Fix:** Set `NIXPACKS_UV_VERSION` on the service to the uv version that generated
+`uv.lock`, so `uv sync --frozen` stays reproducible:
+
+```powershell
+uv --version                                              # read the local version
+railway variables --service api --set "NIXPACKS_UV_VERSION=0.10.4"
+```
+
+Bump it whenever the local uv used to regenerate `uv.lock` changes.
+
+---
+
 ## Railway - Procfile vs railway.json Conflict
 
 **Symptom:** Railway runs the wrong start command, or migrations do not run before startup.
