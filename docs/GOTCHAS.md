@@ -78,17 +78,26 @@ name the same project. There is no shared secret to compare - the project id *is
 
 ---
 
-## Railway - One `railway.json` For API And Worker Services
+## Railway - This Project Puts The API Config In Root `railway.json`
 
-**Symptom:** A worker starts Uvicorn, or Railway probes `/health` on a service with no HTTP server.
+The template's rule is that root `railway.json` stays service-neutral and each service points
+at its own file (`railway.api.json`, etc.), because a root config with an API-only
+`startCommand` or `healthcheckPath` applies to *every* service and will make a worker boot
+Uvicorn or fail an HTTP health check.
 
-**Cause:** Railway config-as-code overrides service settings. A root `railway.json` with API-only
-`startCommand` or `healthcheckPath` applies to every service that uses it.
+**This project deliberately breaks that rule**, because:
 
-**Fix:** Keep root `railway.json` service-neutral. Configure service-specific files:
+- It deploys exactly **one** service to Railway. The web SPA goes to Cloudflare Pages.
+- The per-service "Railway config file" path is **dashboard-only** - the CLI cannot set it.
+  With the config in `railway.api.json`, a CLI- or GitHub-created service silently falls back
+  to the neutral root config, which has no `preDeployCommand`. **Migrations would never run**,
+  and the failure looks like a mysterious `relation does not exist` at runtime.
 
-- API: `/railway.api.json`
-- Worker: add a worker-specific config only after the project has a real worker entrypoint.
+**Reverse this the moment a second Railway service appears** (a worker, a scheduler):
+
+1. Move the `deploy` block from `railway.json` back into `railway.api.json`.
+2. Return root `railway.json` to build-only plus restart policy.
+3. Set each service's config file path in the Railway dashboard.
 
 ---
 

@@ -77,7 +77,8 @@ make db-revision message="add users"
 - Auth: Firebase Auth; accounts are created in the Firebase console
 - Backend observability: Sentry
 
-Root `railway.json` is service-neutral. Use `/railway.api.json` for API services. Add a
+Root `railway.json` carries the API deploy config because this project runs a single
+Railway service; see [Gotchas](docs/GOTCHAS.md) before adding a second. Add a
 worker-specific Railway config only after the project has a real worker entrypoint.
 
 ## Environment Variables

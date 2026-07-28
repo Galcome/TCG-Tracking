@@ -122,7 +122,9 @@ and generated secrets should change.
 - Keep direct database access separate in `DIRECT_DATABASE_URL` for Alembic
   migrations and one-off admin tasks.
 - Prefer service-specific Railway config files:
-  - `railway.api.json` for the API service.
+  - NOTE: this project keeps the API deploy config in root `railway.json` because it
+    runs one Railway service and the CLI cannot set per-service config paths. See
+    `docs/GOTCHAS.md` before adding a second service.
   - Add a worker-specific config only after the project has a real worker entrypoint.
   - `railway.json` stays service-neutral so a root config does not accidentally
     force every service to run the API command.

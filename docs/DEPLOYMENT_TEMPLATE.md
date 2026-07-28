@@ -86,7 +86,7 @@ The frontend project id must match `FIREBASE_PROJECT_ID` exactly, or every reque
 Root `railway.json` is intentionally service-neutral. Configure Railway services with the
 specific config file they need:
 
-- API service: `/railway.api.json`
+- API service: root `/railway.json` (this project only - see `GOTCHAS.md`)
 - Worker service: add a worker-specific Railway config only after the project has a real
   worker entrypoint.
 
