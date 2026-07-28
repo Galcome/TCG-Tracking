@@ -22,6 +22,7 @@ from src.schemas.product import (
     ProductUpdate,
 )
 from src.services import history, inventory, ledger
+from src.services.search import escape_like
 
 router = APIRouter()
 
@@ -35,11 +36,6 @@ SIMILARITY_THRESHOLD = 0.35
 
 STOCK_IN = "in"
 STOCK_OUT = "out"
-
-
-def _escape_like(value: str) -> str:
-    """Neutralise LIKE wildcards so a user typing '%' searches for a literal '%'."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _require_taxonomy(db: Session, model: type[Base], record_id: uuid.UUID, label: str) -> None:
@@ -74,7 +70,7 @@ def _apply_filters(
             )
         )
     if q:
-        pattern = f"%{_escape_like(q)}%"
+        pattern = f"%{escape_like(q)}%"
         stmt = stmt.where(
             or_(
                 Product.search_text.ilike(pattern, escape="\\"),

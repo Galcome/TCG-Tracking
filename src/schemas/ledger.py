@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.models.ledger import ADJUSTMENT_REASONS
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.schemas.taxonomy import TaxonomyRead
 
 MAX_QUANTITY = 1_000_000
 
@@ -144,6 +145,21 @@ class SaleUpdate(BaseModel):
         return self
 
 
+class ProductSummary(BaseModel):
+    """Just enough product for a sales row to render.
+
+    Defined here rather than imported from schemas.product because that module already
+    imports this one; duplicating four fields beats a circular import.
+    """
+
+    model_config = _READ_CONFIG
+
+    id: uuid.UUID
+    name: str
+    game: TaxonomyRead
+    product_type: TaxonomyRead
+
+
 class SaleRead(BaseModel):
     model_config = _READ_CONFIG
 
@@ -221,6 +237,25 @@ class AdjustmentRead(BaseModel):
 
 
 # ------------------------------------------------------------------------- history
+
+
+class SaleListItem(SaleRead):
+    """A sale plus its product, for the cross-product ledger.
+
+    The product is denormalised into the row so a client rendering 50 sales makes one
+    request, not 51.
+    """
+
+    product: ProductSummary
+
+
+class SaleList(BaseModel):
+    """Same envelope shape as ProductList, so paging works identically everywhere."""
+
+    items: list[SaleListItem]
+    total: int
+    limit: int
+    offset: int
 
 
 class TransactionRead(BaseModel):

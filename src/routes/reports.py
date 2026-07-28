@@ -80,6 +80,16 @@ def read_by_game(
     return reporting.by_game(db, period)
 
 
+@router.get("/reports/by-marketplace", response_model=list[GroupRead])
+def read_by_marketplace(
+    period: str = PeriodQuery,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    """Where things sold. Sales with no marketplace collapse into "Unspecified"."""
+    return reporting.by_marketplace(db, period)
+
+
 @router.get("/reports/by-seller", response_model=list[GroupRead])
 def read_by_seller(
     period: str = PeriodQuery,
