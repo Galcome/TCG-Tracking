@@ -1,29 +1,36 @@
 """Application settings loaded and validated automatically from .env."""
 
-from urllib.parse import quote, urlparse
-
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore" because .env is shared with docker-compose, which reads its own
+    # keys (POSTGRES_HOST_PORT) from the same file. Required settings still fail loudly
+    # when absent; this only tolerates keys the app does not claim.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_env: str = "development"
     app_role: str = "api"
     debug: bool = False
+
+    # Runtime traffic uses the Neon pooled endpoint (the "-pooler" hostname).
+    # DIRECT_DATABASE_URL is the unpooled endpoint, for Alembic and admin tasks.
     database_url: str
     direct_database_url: str | None = None
-    direct_db_password: str | None = None
-    db_pool_size: int = 4
-    db_max_overflow: int = 2
-    db_pool_timeout_seconds: int = 15
-    db_pool_recycle_seconds: int = 270
 
-    # Supabase auth token verification.
-    supabase_url: str = ""
-    supabase_anon_key: str = ""
-    supabase_jwt_secret: str
+    # Firebase Auth token verification. ID tokens are RS256, signed by Google.
+    firebase_project_id: str
+
+    # Who may use the store ledger. Comma-separated emails, case-insensitive.
+    #
+    # Google sign-in is enabled on the Firebase project, so *any* Google account can
+    # obtain a structurally valid token for it. A valid token proves identity, not
+    # membership - this list is what proves membership. Empty means "allow any
+    # authenticated user", which is refused in production by the validator below.
+    allowed_member_emails: str = ""
 
     # CORS. "*" is allowed for local/dev only.
     allowed_origins: str = "*"
@@ -32,26 +39,15 @@ class Settings(BaseSettings):
     # Sentry.
     sentry_dsn: str = ""
 
-    def resolved_direct_database_url(self) -> str | None:
-        """Return a direct Supabase Postgres URL without hardcoding project refs."""
-        if self.direct_database_url:
-            return self.direct_database_url
-        if not self.direct_db_password:
-            return None
-
-        host = urlparse(self.supabase_url).hostname or ""
-        project_ref = host.split(".", 1)[0] if host.endswith(".supabase.co") else ""
-        if not project_ref:
-            return None
-
-        password = quote(self.direct_db_password)
-        return f"postgresql+psycopg://postgres:{password}@db.{project_ref}.supabase.co:5432/postgres"
-
-    @field_validator("database_url")
+    @field_validator("database_url", "direct_database_url")
     @classmethod
-    def ensure_psycopg3_scheme(cls, value: str) -> str:
+    def ensure_psycopg3_scheme(cls, value: str | None) -> str | None:
         """SQLAlchemy needs postgresql+psycopg:// for the psycopg v3 driver."""
+        if value is None:
+            return None
         db_url = value.strip().strip("'").strip('"')
+        if not db_url:
+            return None
         if db_url.startswith("DATABASE_URL="):
             db_url = db_url.replace("DATABASE_URL=", "", 1)
         if db_url.startswith("postgresql://"):
@@ -86,6 +82,29 @@ class Settings(BaseSettings):
         if self.app_env == "production" and "*" in origins:
             raise ValueError("ALLOWED_ORIGINS cannot include '*' in production.")
         return self
+
+    @model_validator(mode="after")
+    def validate_prod_member_allowlist(self) -> "Settings":
+        if self.app_env == "production" and not self.member_email_allowlist:
+            raise ValueError(
+                "ALLOWED_MEMBER_EMAILS must list the store's members in production. "
+                "Google sign-in is enabled, so without it any Google account could "
+                "sign in and provision itself as a member."
+            )
+        return self
+
+    @property
+    def member_email_allowlist(self) -> set[str]:
+        return {
+            email.strip().lower()
+            for email in self.allowed_member_emails.split(",")
+            if email.strip()
+        }
+
+    @property
+    def firebase_issuer(self) -> str:
+        """The `iss` claim Firebase stamps on every ID token for this project."""
+        return f"https://securetoken.google.com/{self.firebase_project_id}"
 
     @property
     def cors_origins(self) -> list[str]:

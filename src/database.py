@@ -7,23 +7,33 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Neon suspends compute only when there are zero open connections. A persistent
+# client-side pool would hold connections open around the clock and burn the free
+# tier's monthly compute allowance while nobody is using the app, so we deliberately
+# do not pool: each request opens and closes its own connection, and Neon suspends
+# after its idle timeout. Neon's own PgBouncer sits in front of Postgres and does the
+# real pooling, so this costs a TCP+TLS handshake per request, not a backend spawn.
+#
+# If this ever moves to an always-on database, swap NullPool back for QueuePool.
+CONNECT_TIMEOUT_SECONDS = 10
+
 engine = create_engine(
     settings.database_url,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-    pool_timeout=settings.db_pool_timeout_seconds,
-    pool_recycle=settings.db_pool_recycle_seconds,
-    pool_use_lifo=True,
+    poolclass=NullPool,
     echo=settings.debug,
-    # PgBouncer/Supavisor transaction-mode poolers do not support prepared statements.
-    # Keep this off by default so a pasted transaction-pooler URL does not take the app down.
-    connect_args={"prepare_threshold": None},
+    connect_args={
+        # PgBouncer transaction-mode pooling does not support prepared statements.
+        "prepare_threshold": None,
+        # Neon cold-starts a suspended compute on first connect; fail fast rather
+        # than hanging a request forever if it cannot be reached.
+        "connect_timeout": CONNECT_TIMEOUT_SECONDS,
+    },
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

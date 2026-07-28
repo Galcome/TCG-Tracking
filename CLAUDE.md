@@ -1,6 +1,31 @@
-# Agent Instructions - Production Projects
+# Agent Instructions - TCG Card Investments
 
 Loaded automatically. The global agent instructions also apply when present.
+
+---
+
+## Project Stack Deviations - Read First
+
+This repo was cloned from the Supabase-default production template. **It does not use
+Supabase.** Anything below that says "Supabase" is inherited template text; the
+project-specific truth is:
+
+| Layer | This project | Template default |
+| --- | --- | --- |
+| Database | **Neon** Postgres (free tier) | Supabase Postgres |
+| Auth | **Firebase Auth** (RS256 ID tokens, JWKS) | Supabase JWT |
+| Connection pooling | **`NullPool`, deliberately** | QueuePool with tuned pool sizes |
+| Frontend | **Vite + React SPA** on Firebase Hosting | Expo / React Native |
+
+Why: Supabase's free tier was at its project limit, and Railway Postgres priced out at
+roughly $2-4/month. `NullPool` is load-bearing - Neon only suspends compute when zero
+connections are open, so a persistent pool would silently consume the free tier's monthly
+allowance while nobody is using the app.
+
+Read `docs/GOTCHAS.md` before touching database, auth, or deployment config.
+
+Money is stored as **integer cents (`BIGINT`)**, never floats or `NUMERIC`, so that
+cost-basis allocation reconciles exactly. Cost basis is **FIFO**.
 
 ---
 
@@ -71,8 +96,8 @@ and act on it:
 **Project kickoff - confirm before the first feature commit:**
 
 1. Deployment target: Railway is the default for the backend.
-2. Supabase project age: projects created after mid-2024 use ES256 asymmetric
-   JWTs; older projects may still use HS256.
+2. Auth: Firebase ID tokens. `FIREBASE_PROJECT_ID` must match the frontend's project
+   exactly - it is both the expected `aud` and the `iss` suffix.
 3. `docs/GOTCHAS.md`: read it before changing deployment, auth, database, or CI.
 4. The skeleton must deploy, authenticate, and hit one real protected route
    before product features are built on top.
@@ -97,7 +122,9 @@ and generated secrets should change.
 - Keep direct database access separate in `DIRECT_DATABASE_URL` for Alembic
   migrations and one-off admin tasks.
 - Prefer service-specific Railway config files:
-  - `railway.api.json` for the API service.
+  - NOTE: this project keeps the API deploy config in root `railway.json` because it
+    runs one Railway service and the CLI cannot set per-service config paths. See
+    `docs/GOTCHAS.md` before adding a second service.
   - Add a worker-specific config only after the project has a real worker entrypoint.
   - `railway.json` stays service-neutral so a root config does not accidentally
     force every service to run the API command.
@@ -310,8 +337,8 @@ PRD clearly calls for another stack.
 | Package management | uv + pyproject.toml |
 | Web framework | FastAPI |
 | Config | pydantic-settings |
-| Auth | Supabase JWT, ES256 for new projects and HS256 only for legacy |
-| Database | Supabase PostgreSQL |
+| Auth | Firebase Auth (RS256 ID tokens verified via Google JWKS) |
+| Database | Neon PostgreSQL (`NullPool` - see deviations above) |
 | ORM | SQLAlchemy 2.x |
 | Migrations | Alembic |
 | Local DB | Docker Compose |
