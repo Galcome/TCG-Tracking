@@ -37,6 +37,9 @@ node_modules/
 web/dist/
 *.tsbuildinfo
 
+# Wrangler local cache - holds the Cloudflare account id and email
+.wrangler/
+
 # IDE
 .vscode/
 .idea/
