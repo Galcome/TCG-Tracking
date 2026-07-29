@@ -34,6 +34,15 @@ class DashboardRead(BaseModel):
     products_with_negative_stock: int
 
 
+class UnitsByAgeRead(BaseModel):
+    model_config = _CONFIG
+
+    d0_30: int
+    d31_90: int
+    d91_180: int
+    d180_plus: int
+
+
 class GroupRead(BaseModel):
     model_config = _CONFIG
 
@@ -47,6 +56,17 @@ class GroupRead(BaseModel):
     units_in_stock: int
     sale_count: int
     sales_missing_cost: int
+
+    units_sold: int
+    units_purchased: int
+    #: Quantity-weighted mean shelf time in days. null when no sale here has a known one.
+    avg_days_held: int | None
+    #: Units sold over units bought, whole-life rather than period-scoped.
+    sell_through: float | None
+    #: Realized profit per day of shelf time. null when hold time is unknown or zero.
+    profit_per_day: MoneyOutOptional = Field(validation_alias="profit_per_day_cents")
+    #: Units on hand now, bucketed by how long they have been sitting.
+    units_by_age: UnitsByAgeRead
 
 
 class AttentionRead(BaseModel):
@@ -78,6 +98,24 @@ def read_by_game(
     db: Session = Depends(db_session),
 ):
     return reporting.by_game(db, period)
+
+
+@router.get("/reports/by-product", response_model=list[GroupRead])
+def read_by_product(
+    period: str = PeriodQuery,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    return reporting.by_product(db, period)
+
+
+@router.get("/reports/by-product-type", response_model=list[GroupRead])
+def read_by_product_type(
+    period: str = PeriodQuery,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    return reporting.by_product_type(db, period)
 
 
 @router.get("/reports/by-marketplace", response_model=list[GroupRead])

@@ -18,10 +18,10 @@ from datetime import date
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from src.models.ledger import STATUS_ACTIVE, Purchase, Sale
+from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.member import Member
 from src.models.product import Product
-from src.models.taxonomy import Game
+from src.models.taxonomy import Game, ProductType
 from src.services.inventory import product_stats
 
 PERIOD_ALL = "all"
@@ -32,6 +32,9 @@ PERIODS = (PERIOD_ALL, PERIOD_YTD, PERIOD_MTD, PERIOD_30D)
 
 #: Display label for sales with no marketplace recorded. Not a stored value.
 UNSPECIFIED_MARKETPLACE = "Unspecified"
+
+#: Upper bounds, in days, of the stock-ageing buckets.
+AGE_BUCKETS = (30, 90, 180)
 
 
 def period_start(period: str, today: date | None = None) -> date | None:
@@ -77,6 +80,27 @@ class Dashboard:
 
 
 @dataclass
+class UnitsByAge:
+    """Units *currently on hand*, bucketed by how long they have been sitting."""
+
+    d0_30: int = 0
+    d31_90: int = 0
+    d91_180: int = 0
+    d180_plus: int = 0
+
+    def add(self, days: int, quantity: int) -> None:
+        first, second, third = AGE_BUCKETS
+        if days <= first:
+            self.d0_30 += quantity
+        elif days <= second:
+            self.d31_90 += quantity
+        elif days <= third:
+            self.d91_180 += quantity
+        else:
+            self.d180_plus += quantity
+
+
+@dataclass
 class GroupRow:
     key: str
     label: str
@@ -88,11 +112,40 @@ class GroupRow:
     sale_count: int = 0
     sales_missing_cost: int = 0
 
+    units_sold: int = 0
+    units_purchased: int = 0
+    #: Quantity-weighted mean shelf time across this group's sales. None when no sale in
+    #: the group has a known hold time.
+    avg_days_held: int | None = None
+    units_by_age: UnitsByAge = field(default_factory=UnitsByAge)
+
     @property
     def roi(self) -> float | None:
         if self.cost_of_sales_cents <= 0:
             return None
         return self.realized_profit_cents / self.cost_of_sales_cents
+
+    @property
+    def sell_through(self) -> float | None:
+        """Units sold over units bought, over the whole life of the stock.
+
+        Deliberately not period-scoped: units bought this month against units sold this
+        month can exceed 1 wildly when old stock moves, which tells you nothing.
+        """
+        if self.units_purchased <= 0:
+            return None
+        return self.units_sold / self.units_purchased
+
+    @property
+    def profit_per_day_cents(self) -> int | None:
+        """Realized profit per day of shelf time - the return-on-time figure.
+
+        None when hold time is unknown or zero: dividing by zero days would report an
+        infinite rate for something bought and sold the same day.
+        """
+        if not self.avg_days_held:
+            return None
+        return round(self.realized_profit_cents / self.avg_days_held)
 
 
 _NET = (
@@ -161,93 +214,223 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     return result
 
 
-def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
-    """Performance grouped by game, best first."""
+# --------------------------------------------------------------------- groupings
+#
+# Five reports slice the same figures five ways, so the aggregation lives in one place and
+# each public function only says what to group on and how to label it.
+
+
+@dataclass
+class _Grouping:
+    """How one report slices the ledger.
+
+    `sale_key` groups the sales aggregate. `product_key` maps a product to the same key so
+    stock can be attributed - it is None for reports grouped on a property of the sale
+    (marketplace, seller), where "inventory in this group" has no meaning.
+    """
+
+    sale_key: object
+    labels: dict
+    product_key: dict[uuid.UUID, object] | None
+    #: Include groups holding stock but with no sales yet.
+    keep_unsold: bool = False
+
+
+def _weighted_days(pairs: list[tuple[int, int | None]]) -> int | None:
+    """Quantity-weighted mean of (quantity, days) pairs, ignoring unknown hold times."""
+    known = [(quantity, days) for quantity, days in pairs if days is not None]
+    total = sum(quantity for quantity, _ in known)
+    if not total:
+        return None
+    return round(sum(quantity * days for quantity, days in known) / total)
+
+
+def _grouped(db: Session, grouping: _Grouping, period: str, today: date | None) -> list[GroupRow]:
     start = period_start(period, today)
-    rows: dict[uuid.UUID, GroupRow] = {}
+    rows: dict[object, GroupRow] = {
+        key: GroupRow(key=str(key), label=label) for key, label in grouping.labels.items()
+    }
 
-    for game_id, name in db.execute(select(Game.id, Game.name)):
-        rows[game_id] = GroupRow(key=str(game_id), label=name)
+    def row_for(key: object) -> GroupRow:
+        return rows.setdefault(key, GroupRow(key=str(key), label=str(key)))
 
-    sales = (
+    def in_period(stmt):
+        if start is None:
+            return stmt
+        return stmt.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
+
+    sales = in_period(
         select(
-            Product.game_id,
+            grouping.sale_key,
             func.coalesce(func.sum(_NET_KNOWN), 0),
             func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
             func.coalesce(func.sum(Sale.gross_amount_cents), 0),
             func.count(),
             func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
+            func.coalesce(func.sum(Sale.quantity), 0),
         )
         .join(Product, Product.id == Sale.product_id)
         .where(Sale.status == STATUS_ACTIVE)
-        .group_by(Product.game_id)
+        .group_by(grouping.sale_key)
     )
-    if start is not None:
-        sales = sales.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
 
-    for game_id, net_known, cost, gross, count, unknown in db.execute(sales):
-        row = rows.setdefault(game_id, GroupRow(key=str(game_id), label="Unknown"))
+    for key, net_known, cost, gross, count, unknown, units in db.execute(sales):
+        row = row_for(key)
         row.cost_of_sales_cents = int(cost)
         row.realized_profit_cents = int(net_known) - int(cost)
         row.revenue_cents = int(gross)
         row.sale_count = int(count)
         row.sales_missing_cost = int(unknown)
+        row.units_sold = int(units)
 
-    # `rows` was seeded from every game and `game_by_product` from every product, so the
-    # lookup always lands - no defensive branch needed.
-    game_by_product = dict(db.execute(select(Product.id, Product.game_id)).all())
-    for product_id, stats in product_stats(db).items():
-        row = rows[game_by_product[product_id]]
-        row.inventory_at_cost_cents += stats.remaining_cost_cents
-        row.units_in_stock += max(stats.quantity_on_hand, 0)
+    # Hold time is already weighted per sale, so it cannot be averaged in the same
+    # aggregate as the money without under-weighting large sales.
+    hold = in_period(
+        select(grouping.sale_key, Sale.quantity, Sale.days_held_weighted)
+        .join(Product, Product.id == Sale.product_id)
+        .where(Sale.status == STATUS_ACTIVE)
+    )
+    per_group: dict[object, list[tuple[int, int | None]]] = {}
+    for key, quantity, days in db.execute(hold):
+        per_group.setdefault(key, []).append((int(quantity), days))
+    for key, pairs in per_group.items():
+        row_for(key).avg_days_held = _weighted_days(pairs)
 
-    ranked = [row for row in rows.values() if row.sale_count or row.units_in_stock]
+    if grouping.product_key is not None:
+        _attach_stock(db, grouping.product_key, row_for, today)
+
+    ranked = [
+        row
+        for row in rows.values()
+        if row.sale_count or (grouping.keep_unsold and row.units_in_stock)
+    ]
     ranked.sort(key=lambda row: (-row.realized_profit_cents, row.label))
     return ranked
+
+
+def _attach_stock(
+    db: Session, product_key: dict[uuid.UUID, object], row_for, today: date | None
+) -> None:
+    """Stock, inventory value, lifetime purchases and stock ageing, per group.
+
+    All as-of-now and lifetime: a date filter cannot change what is physically on the
+    shelf today.
+    """
+    for product_id, stats in product_stats(db).items():
+        key = product_key.get(product_id)
+        if key is not None:
+            row = row_for(key)
+            row.inventory_at_cost_cents += stats.remaining_cost_cents
+            row.units_in_stock += max(stats.quantity_on_hand, 0)
+
+    purchased = (
+        select(Purchase.product_id, func.coalesce(func.sum(Purchase.quantity), 0))
+        .where(Purchase.status == STATUS_ACTIVE)
+        .group_by(Purchase.product_id)
+    )
+    for product_id, quantity in db.execute(purchased):
+        key = product_key.get(product_id)
+        if key is not None:
+            row_for(key).units_purchased += int(quantity)
+
+    reference = today or date.today()
+    for product_id, purchase_date, remaining in _remaining_lots(db):
+        key = product_key.get(product_id)
+        # An undated lot cannot be aged; leaving it out beats inventing a date.
+        if key is not None and purchase_date is not None:
+            row_for(key).units_by_age.add((reference - purchase_date).days, int(remaining))
+
+
+def _remaining_lots(db: Session):
+    """Purchase lots with stock left, as (product_id, purchase_date, units_left).
+
+    Remaining is the lot's quantity minus whatever the costing engine already allocated
+    away from it, which is exactly what `cost_allocations` records.
+    """
+    consumed = (
+        select(
+            CostAllocation.purchase_id.label("purchase_id"),
+            func.sum(CostAllocation.quantity).label("used"),
+        )
+        .where(CostAllocation.purchase_id.is_not(None))
+        .group_by(CostAllocation.purchase_id)
+        .subquery()
+    )
+    remaining = Purchase.quantity - func.coalesce(consumed.c.used, 0)
+
+    return db.execute(
+        select(Purchase.product_id, Purchase.purchase_date, remaining)
+        .outerjoin(consumed, consumed.c.purchase_id == Purchase.id)
+        .where(Purchase.status == STATUS_ACTIVE, remaining > 0)
+    ).all()
+
+
+def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
+    """Performance grouped by game, best first."""
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=Product.game_id,
+            labels=dict(db.execute(select(Game.id, Game.name)).all()),
+            product_key=dict(db.execute(select(Product.id, Product.game_id)).all()),
+            keep_unsold=True,
+        ),
+        period,
+        today,
+    )
+
+
+def by_product(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
+    """Performance grouped by individual product."""
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=Product.id,
+            labels=dict(db.execute(select(Product.id, Product.name)).all()),
+            product_key={row[0]: row[0] for row in db.execute(select(Product.id)).all()},
+            keep_unsold=True,
+        ),
+        period,
+        today,
+    )
+
+
+def by_product_type(
+    db: Session, period: str = PERIOD_ALL, today: date | None = None
+) -> list[GroupRow]:
+    """Performance grouped by product type - sealed against singles against slabs."""
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=Product.product_type_id,
+            labels=dict(db.execute(select(ProductType.id, ProductType.name)).all()),
+            product_key=dict(db.execute(select(Product.id, Product.product_type_id)).all()),
+            keep_unsold=True,
+        ),
+        period,
+        today,
+    )
 
 
 def by_marketplace(
     db: Session, period: str = PERIOD_ALL, today: date | None = None
 ) -> list[GroupRow]:
-    """Where things actually sold, best first.
+    """Where things actually sold.
 
     A sale with no marketplace recorded is real revenue, so it collapses into a single
-    "Unspecified" row rather than being dropped.
+    "Unspecified" row rather than being dropped. Stock is not attributed - a product does
+    not live in a marketplace.
     """
-    start = period_start(period, today)
-    label = func.coalesce(Sale.marketplace, UNSPECIFIED_MARKETPLACE)
-
-    sales = (
-        select(
-            label,
-            func.coalesce(func.sum(_NET_KNOWN), 0),
-            func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
-            func.coalesce(func.sum(Sale.gross_amount_cents), 0),
-            func.count(),
-            func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
-        )
-        .where(Sale.status == STATUS_ACTIVE)
-        .group_by(label)
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=func.coalesce(Sale.marketplace, UNSPECIFIED_MARKETPLACE),
+            labels={},
+            product_key=None,
+        ),
+        period,
+        today,
     )
-    if start is not None:
-        sales = sales.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
-
-    rows: list[GroupRow] = []
-    for name, net_known, cost, gross, count, unknown in db.execute(sales):
-        rows.append(
-            GroupRow(
-                key=name,
-                label=name,
-                realized_profit_cents=int(net_known) - int(cost),
-                cost_of_sales_cents=int(cost),
-                revenue_cents=int(gross),
-                sale_count=int(count),
-                sales_missing_cost=int(unknown),
-            )
-        )
-
-    rows.sort(key=lambda row: (-row.realized_profit_cents, row.label))
-    return rows
 
 
 def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
@@ -256,37 +439,16 @@ def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     These are performance figures, not ownership. Every unit belongs to the store; this
     only says who moved it.
     """
-    start = period_start(period, today)
-    rows: dict[uuid.UUID, GroupRow] = {}
-    for member_id, name in db.execute(select(Member.id, Member.display_name)):
-        rows[member_id] = GroupRow(key=str(member_id), label=name)
-
-    sales = (
-        select(
-            Sale.sold_by_member_id,
-            func.coalesce(func.sum(_NET_KNOWN), 0),
-            func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
-            func.coalesce(func.sum(Sale.gross_amount_cents), 0),
-            func.count(),
-            func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
-        )
-        .where(Sale.status == STATUS_ACTIVE, Sale.sold_by_member_id.is_not(None))
-        .group_by(Sale.sold_by_member_id)
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=Sale.sold_by_member_id,
+            labels=dict(db.execute(select(Member.id, Member.display_name)).all()),
+            product_key=None,
+        ),
+        period,
+        today,
     )
-    if start is not None:
-        sales = sales.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
-
-    for member_id, net_known, cost, gross, count, unknown in db.execute(sales):
-        row = rows.setdefault(member_id, GroupRow(key=str(member_id), label="Unknown"))
-        row.cost_of_sales_cents = int(cost)
-        row.realized_profit_cents = int(net_known) - int(cost)
-        row.revenue_cents = int(gross)
-        row.sale_count = int(count)
-        row.sales_missing_cost = int(unknown)
-
-    ranked = [row for row in rows.values() if row.sale_count]
-    ranked.sort(key=lambda row: (-row.realized_profit_cents, row.label))
-    return ranked
 
 
 @dataclass
@@ -330,14 +492,19 @@ def attention(db: Session) -> Attention:
 
 
 __all__ = [
+    "AGE_BUCKETS",
     "Attention",
     "Dashboard",
     "GroupRow",
     "PERIODS",
+    "UNSPECIFIED_MARKETPLACE",
+    "UnitsByAge",
     "attention",
     "by_game",
+    "by_marketplace",
+    "by_product",
+    "by_product_type",
     "by_seller",
     "dashboard",
     "period_start",
 ]
-

@@ -129,6 +129,7 @@ def recompute_product(db: Session, product_id: uuid.UUID) -> None:
         outcome = result.consumers.get(sale.id)
         sale.cost_basis_cents = outcome.cost_basis_cents if outcome else None
         sale.has_unknown_cost = bool(outcome and outcome.has_unknown_cost)
+        sale.days_held_weighted = outcome.days_held_weighted if outcome else None
 
     for adjustment in db.scalars(_active(InventoryAdjustment, product_id)):
         outcome = result.consumers.get(adjustment.id)

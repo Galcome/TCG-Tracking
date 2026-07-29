@@ -140,6 +140,10 @@ class Sale(Base, _LedgerEntry):
     cost_basis_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     has_unknown_cost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    #: Quantity-weighted shelf time of the units sold, in days. Engine-maintained.
+    #: NULL when any consumed lot has no purchase date - never a guess.
+    days_held_weighted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     @property
     def net_proceeds_cents(self) -> int:
         return (
