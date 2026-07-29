@@ -36,6 +36,12 @@ class DashboardRead(BaseModel):
     undated_sales: int
     products_with_negative_stock: int
 
+    #: Lifetime cash. These three ignore `period` - see the note on the dataclass.
+    net_proceeds: MoneyOut = Field(validation_alias="net_proceeds_cents")
+    fees_paid: MoneyOut = Field(validation_alias="fees_paid_cents")
+    #: Negative means money is on the shelf rather than in the bank, not that it was lost.
+    cash_balance: MoneyOut = Field(validation_alias="cash_balance_cents")
+
 
 class UnitsByAgeRead(BaseModel):
     model_config = _CONFIG
