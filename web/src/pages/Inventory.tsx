@@ -3,11 +3,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../api'
-import { PackageSearch, Plus } from 'lucide-react'
+import { PackageSearch } from 'lucide-react'
 
-import { AddProductDialog } from '../components/forms'
+import { PageHeader } from '../components/AppShell'
 import {
-  Button,
   Card,
   Empty,
   FIELD_CLASS,
@@ -27,11 +26,10 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-export function Inventory({ onRecordSale }: { onRecordSale: () => void }) {
+export function Inventory({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
-  const [stock, setStock] = useState('')
-  const [adding, setAdding] = useState(false)
+  const [stock, setStock] = useState('in')
   const debouncedSearch = useDebounced(search, 250)
 
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
@@ -49,27 +47,7 @@ export function Inventory({ onRecordSale }: { onRecordSale: () => void }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">Inventory</h1>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => setAdding(true)}
-          className="lg:hidden"
-        >
-          <Plus size={15} strokeWidth={2.5} />
-          Add product
-        </Button>
-        <div className="hidden gap-2 lg:flex">
-          <Button type="button" variant="ghost" onClick={() => setAdding(true)}>
-            <Plus size={16} strokeWidth={2.5} />
-            Add product
-          </Button>
-          <Button type="button" onClick={onRecordSale}>
-            Record sale
-          </Button>
-        </div>
-      </div>
+      <PageHeader title="Inventory" onRecordSale={onRecordSale} onAddProduct={onAddProduct} />
 
       {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
           horizontal scrollbar on desktop. */}
@@ -98,9 +76,9 @@ export function Inventory({ onRecordSale }: { onRecordSale: () => void }) {
           onChange={(e) => setStock(e.target.value)}
           className={`${FIELD_CLASS} mt-0 sm:w-40`}
         >
-          <option value="">All stock</option>
           <option value="in">In stock</option>
           <option value="out">Sold out</option>
+          <option value="">All products</option>
         </select>
       </div>
 
@@ -238,15 +216,6 @@ export function Inventory({ onRecordSale }: { onRecordSale: () => void }) {
       )}
 
       {/* Mobile primary action, thumb-reachable above the tab bar. */}
-      <button
-        type="button"
-        onClick={onRecordSale}
-        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
-      >
-        Record sale
-      </button>
-
-      {adding && <AddProductDialog onClose={() => setAdding(false)} />}
     </div>
   )
 }

@@ -223,6 +223,49 @@ class AdjustmentCreate(BaseModel):
         return self
 
 
+class AdjustmentUpdate(BaseModel):
+    """Corrections to a stock adjustment.
+
+    Same rules as creating one: a non-zero delta, a known reason, and a cost only when
+    stock is being added.
+    """
+
+    quantity_delta: int | None = Field(default=None, ge=-MAX_QUANTITY, le=MAX_QUANTITY)
+    reason: str | None = None
+    cost: MoneyIn | None = None
+    adjustment_date: date | None = None
+    member_id: uuid.UUID | None = None
+    notes: str | None = None
+    #: Recorded on the audit entry, not on the adjustment.
+    audit_reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @field_validator("quantity_delta")
+    @classmethod
+    def non_zero(cls, value: int | None) -> int | None:
+        if value == 0:
+            raise ValueError("an adjustment of zero changes nothing")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def known_reason(cls, value: str | None) -> str | None:
+        if value is not None and value not in ADJUSTMENT_REASONS:
+            raise ValueError(f"reason must be one of: {', '.join(ADJUSTMENT_REASONS)}")
+        return value
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "AdjustmentUpdate":
+        for name in ("quantity_delta", "reason", "adjustment_date"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
 class AdjustmentRead(BaseModel):
     model_config = _READ_CONFIG
 

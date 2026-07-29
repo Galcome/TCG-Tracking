@@ -29,7 +29,7 @@ function saleRoi(sale: SaleRow): number | null {
   return Number(sale.realized_profit) / Number(sale.cost_basis)
 }
 
-export function Sales({ onRecordSale }: { onRecordSale: () => void }) {
+export function Sales({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
   const [period, setPeriod] = useState<Period>('all')
   const [search, setSearch] = useState('')
   const [marketplace, setMarketplace] = useState('')
@@ -109,7 +109,7 @@ export function Sales({ onRecordSale }: { onRecordSale: () => void }) {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Sales">
+      <PageHeader title="Sales" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
         <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
           {PERIODS.map((option) => (
             <button
@@ -343,14 +343,6 @@ export function Sales({ onRecordSale }: { onRecordSale: () => void }) {
           </p>
         </>
       )}
-
-      <button
-        type="button"
-        onClick={onRecordSale}
-        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
-      >
-        Record sale
-      </button>
     </div>
   )
 }
