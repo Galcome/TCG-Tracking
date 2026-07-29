@@ -1,5 +1,8 @@
 """Dashboard and reporting endpoints."""
 
+import uuid
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -77,6 +80,20 @@ class AttentionRead(BaseModel):
     negative_stock_products: list[dict]
 
 
+class AgingLotRead(BaseModel):
+    model_config = _CONFIG
+
+    purchase_id: uuid.UUID
+    product_id: uuid.UUID
+    product_name: str
+    game_slug: str
+    units: int
+    cost: MoneyOut = Field(validation_alias="cost_cents")
+    purchase_date: date | None
+    #: null when the lot has no purchase date, so the UI can say so rather than bucket it.
+    days_held: int | None
+
+
 PeriodQuery = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$")
 
 
@@ -133,6 +150,19 @@ def read_by_seller(
     db: Session = Depends(db_session),
 ):
     return reporting.by_seller(db, period)
+
+
+@router.get("/reports/aging", response_model=list[AgingLotRead])
+def read_aging(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    """Unsold stock, oldest money first, one row per purchase lot.
+
+    Not period-scoped: what is sitting on the shelf today is not a function of a date
+    range, and filtering it by one would hide the oldest stock exactly when it matters.
+    """
+    return reporting.aging_lots(db)
 
 
 @router.get("/reports/attention", response_model=AttentionRead)

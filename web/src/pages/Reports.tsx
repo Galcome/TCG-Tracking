@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
+import { ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { api, type GroupBy, type GroupRow, type Period } from '../api'
+import { api, type AgingLot, type GroupBy, type GroupRow, type Period } from '../api'
 import { PageHeader, type PageActions } from '../components/AppShell'
-import { Card, Empty, FifoNote, Skeleton, gameColour } from '../components/ui'
-import { money, moneyCompact, percent, signedMoney, toneFor } from '../format'
+import { Card, Empty, FifoNote, GameDot, Skeleton, gameColour } from '../components/ui'
+import { money, moneyCompact, percent, shortDate, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
   { value: 'all', label: 'All time' },
@@ -133,7 +134,9 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
 
       {rows.data && sorted.length === 0 && (
         <Card>
-          <Empty>Nothing sold or in stock for this period.</Empty>
+          {/* Deliberately about this grouping, not the store: Money asleep sits below and
+              may well be listing stock, which "nothing in stock" would contradict. */}
+          <Empty>No {noun} has anything to report for this period.</Empty>
         </Card>
       )}
 
@@ -145,10 +148,14 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
             label={GROUPS.find((g) => g.value === groupBy)!.label}
             href={groupBy === 'product' ? (row) => `/products/${row.key}` : undefined}
           />
-          <MoneyAsleep rows={sorted} />
-          <FifoNote />
         </>
       )}
+
+      {/* Outside the grouping block on purpose: what is sitting on the shelf does not
+          change because the table above is grouped by seller. */}
+      <MoneyAsleep />
+
+      {sorted.length > 0 && <FifoNote />}
     </div>
   )
 }
@@ -422,58 +429,140 @@ function AgeBar({ units }: { units: GroupRow['units_by_age'] }) {
 }
 
 /** Cost sitting in stock, by how long it has been sitting there. */
-function MoneyAsleep({ rows }: { rows: GroupRow[] }) {
-  const totals = rows.reduce(
-    (acc, row) => ({
-      d0_30: acc.d0_30 + row.units_by_age.d0_30,
-      d31_90: acc.d31_90 + row.units_by_age.d31_90,
-      d91_180: acc.d91_180 + row.units_by_age.d91_180,
-      d180_plus: acc.d180_plus + row.units_by_age.d180_plus,
-    }),
-    { d0_30: 0, d31_90: 0, d91_180: 0, d180_plus: 0 },
-  )
-  const units = totals.d0_30 + totals.d31_90 + totals.d91_180 + totals.d180_plus
-  if (units === 0) return null
+/** Upper bound in days, matching AGE_BUCKETS on the server. `null` is the open end. */
+const BANDS: { label: string; upTo: number | null; colour: string }[] = [
+  { label: '0-30 days', upTo: 30, colour: 'var(--color-gain)' },
+  { label: '31-90 days', upTo: 90, colour: 'var(--color-warn)' },
+  { label: '91-180 days', upTo: 180, colour: 'var(--color-game-magic)' },
+  { label: '180+ days', upTo: null, colour: 'var(--color-loss)' },
+]
 
-  const inventory = rows.reduce((sum, row) => sum + Number(row.inventory_at_cost), 0)
-  const bands = [
-    { label: '0-30 days', value: totals.d0_30, colour: 'var(--color-gain)' },
-    { label: '31-90 days', value: totals.d31_90, colour: 'var(--color-warn)' },
-    { label: '91-180 days', value: totals.d91_180, colour: 'var(--color-game-magic)' },
-    { label: '180+ days', value: totals.d180_plus, colour: 'var(--color-loss)' },
-  ]
+function bandFor(days: number): string {
+  return (BANDS.find((band) => band.upTo !== null && days <= band.upTo) ?? BANDS[3]).label
+}
+
+/** Lots with no purchase date cannot be aged, and are shown as such rather than guessed. */
+const UNKNOWN_AGE = 'Unknown age'
+
+/**
+ * How long unsold stock has been sitting, and what it is.
+ *
+ * Fetches its own data rather than reading the grouped rows the rest of the page uses:
+ * stock ageing has nothing to do with whether you are grouping by channel or by seller,
+ * and reading those rows meant this section silently vanished on the groupings that carry
+ * no per-product stock.
+ */
+function MoneyAsleep() {
+  const lots = useQuery({ queryKey: ['aging'], queryFn: api.aging })
+  const [open, setOpen] = useState<string | null>(null)
+
+  const groups = useMemo(() => {
+    const byBand = new Map<string, AgingLot[]>()
+    for (const lot of lots.data ?? []) {
+      const key = lot.days_held === null ? UNKNOWN_AGE : bandFor(lot.days_held)
+      byBand.set(key, [...(byBand.get(key) ?? []), lot])
+    }
+    const labels = [...BANDS.map((band) => band.label), UNKNOWN_AGE]
+    return labels
+      .map((label) => {
+        const rows = byBand.get(label) ?? []
+        return {
+          label,
+          rows,
+          colour: BANDS.find((band) => band.label === label)?.colour ?? 'var(--color-faint)',
+          units: rows.reduce((sum, lot) => sum + lot.units, 0),
+          cost: rows.reduce((sum, lot) => sum + Number(lot.cost), 0),
+        }
+      })
+      // An empty Unknown age band is the normal case and should not take up a row.
+      .filter((band) => band.label !== UNKNOWN_AGE || band.rows.length > 0)
+  }, [lots.data])
+
+  if (!lots.data || lots.data.length === 0) return null
+
+  const total = groups.reduce((sum, band) => sum + band.cost, 0)
+  const peak = Math.max(...groups.map((band) => band.cost), 1)
 
   return (
     <section>
       <div className="mb-2.5">
         <h2 className="font-display text-sm font-semibold">Money asleep</h2>
         <p className="text-xs text-(--color-faint)">
-          {moneyCompact(inventory.toFixed(2))} of stock on hand, by how long it has been sitting.
-          Units are exact; the cost split is proportional.
+          {moneyCompact(total.toFixed(2))} of stock on hand, by how long it has been sitting.
+          Open a band to see what is in it. Where a purchase covered several units, its cost
+          is split evenly across them.
         </p>
       </div>
-      <Card>
-        <ul className="space-y-3">
-          {bands.map((band) => (
-            <li key={band.label}>
-              <div className="flex items-baseline justify-between text-sm">
-                <span>{band.label}</span>
-                <span className="tabular-nums text-(--color-muted)">
-                  {band.value} unit{band.value === 1 ? '' : 's'} ·{' '}
-                  {moneyCompact(((inventory * band.value) / units).toFixed(2))}
-                </span>
-              </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-(--color-raised)">
-                <span
-                  className="block h-full rounded-full"
-                  style={{
-                    width: `${(band.value / units) * 100}%`,
-                    backgroundColor: band.colour,
-                  }}
-                />
-              </div>
-            </li>
-          ))}
+      <Card className="p-0">
+        <ul className="divide-y divide-(--color-edge)">
+          {groups.map((band) => {
+            const expanded = open === band.label
+            return (
+              <li key={band.label}>
+                <button
+                  type="button"
+                  onClick={() => setOpen(expanded ? null : band.label)}
+                  disabled={band.rows.length === 0}
+                  className="w-full px-4 py-3 text-left transition-colors hover:bg-(--color-raised) disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
+                >
+                  <span className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-1.5">
+                      {band.rows.length > 0 && (
+                        <ChevronRight
+                          size={14}
+                          className={`transition-transform ${expanded ? 'rotate-90' : ''}`}
+                        />
+                      )}
+                      {band.label}
+                    </span>
+                    <span className="tabular-nums text-(--color-muted)">
+                      {band.units} unit{band.units === 1 ? '' : 's'} ·{' '}
+                      {moneyCompact(band.cost.toFixed(2))}
+                    </span>
+                  </span>
+                  <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-(--color-raised)">
+                    <span
+                      className="block h-full rounded-full"
+                      style={{
+                        width: `${(band.cost / peak) * 100}%`,
+                        backgroundColor: band.colour,
+                      }}
+                    />
+                  </span>
+                </button>
+
+                {expanded && (
+                  <ul className="divide-y divide-(--color-edge) border-t border-(--color-edge) bg-(--color-ink)/30">
+                    {band.rows.map((lot) => (
+                      <li key={lot.purchase_id}>
+                        <Link
+                          to={`/products/${lot.product_id}`}
+                          className="flex items-baseline justify-between gap-3 px-4 py-2.5 pl-9 text-sm transition-colors hover:bg-(--color-raised)"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <GameDot slug={lot.game_slug} />
+                            <span className="truncate">{lot.product_name}</span>
+                          </span>
+                          <span className="shrink-0 text-right text-xs text-(--color-muted)">
+                            {/* Not "2 × $900" - that reads as $1,800. The cost is the
+                                total for the units left, not a unit price. */}
+                            <span className="tabular-nums">
+                              {lot.units} unit{lot.units === 1 ? '' : 's'} · {money(lot.cost)}
+                            </span>
+                            <span className="ml-2 tabular-nums text-(--color-faint)">
+                              {lot.days_held === null
+                                ? 'no purchase date'
+                                : `${lot.days_held}d · bought ${shortDate(lot.purchase_date)}`}
+                            </span>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )
+          })}
         </ul>
       </Card>
     </section>

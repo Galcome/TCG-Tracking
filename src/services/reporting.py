@@ -334,18 +334,23 @@ def _attach_stock(
             row_for(key).units_purchased += int(quantity)
 
     reference = today or date.today()
-    for product_id, purchase_date, remaining in _remaining_lots(db):
-        key = product_key.get(product_id)
+    for lot in _remaining_lots(db):
+        key = product_key.get(lot.product_id)
         # An undated lot cannot be aged; leaving it out beats inventing a date.
-        if key is not None and purchase_date is not None:
-            row_for(key).units_by_age.add((reference - purchase_date).days, int(remaining))
+        if key is not None and lot.purchase_date is not None:
+            row_for(key).units_by_age.add(
+                (reference - lot.purchase_date).days, int(lot.remaining)
+            )
 
 
 def _remaining_lots(db: Session):
-    """Purchase lots with stock left, as (product_id, purchase_date, units_left).
+    """Purchase lots with stock left, with what was paid for them.
 
     Remaining is the lot's quantity minus whatever the costing engine already allocated
     away from it, which is exactly what `cost_allocations` records.
+
+    Columns are labelled and read by name: both callers want different subsets, and
+    positional unpacking makes adding one a silent reshuffle.
     """
     consumed = (
         select(
@@ -359,10 +364,76 @@ def _remaining_lots(db: Session):
     remaining = Purchase.quantity - func.coalesce(consumed.c.used, 0)
 
     return db.execute(
-        select(Purchase.product_id, Purchase.purchase_date, remaining)
+        select(
+            Purchase.id.label("purchase_id"),
+            Purchase.product_id.label("product_id"),
+            Purchase.purchase_date.label("purchase_date"),
+            Purchase.quantity.label("bought"),
+            _LANDED.label("landed_cents"),
+            remaining.label("remaining"),
+        )
         .outerjoin(consumed, consumed.c.purchase_id == Purchase.id)
         .where(Purchase.status == STATUS_ACTIVE, remaining > 0)
     ).all()
+
+
+@dataclass
+class AgingLot:
+    """One purchase lot still sitting on the shelf.
+
+    Lot-level rather than product-level on purpose: a product bought three times has three
+    different ages, and averaging them hides the one that has been there a year.
+    """
+
+    purchase_id: uuid.UUID
+    product_id: uuid.UUID
+    product_name: str
+    game_slug: str
+    units: int
+    cost_cents: int
+    purchase_date: date | None
+    #: None when the lot has no purchase date. Such a lot cannot be aged, and guessing
+    #: would put invented money in a bucket.
+    days_held: int | None
+
+
+def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
+    """Unsold stock, oldest money first. Undated lots sort last."""
+    reference = today or date.today()
+    products = {
+        row.id: row
+        for row in db.execute(
+            select(Product.id, Product.name, Game.slug.label("game_slug")).join(
+                Game, Game.id == Product.game_id
+            )
+        ).all()
+    }
+
+    rows: list[AgingLot] = []
+    for lot in _remaining_lots(db):
+        product = products.get(lot.product_id)
+        if product is None:  # pragma: no cover - a purchase always has its product
+            continue
+        rows.append(
+            AgingLot(
+                purchase_id=lot.purchase_id,
+                product_id=lot.product_id,
+                product_name=product.name,
+                game_slug=product.game_slug,
+                units=int(lot.remaining),
+                # Proportional, matching what the section has always claimed. Not the
+                # engine's largest-remainder split, which allocates against a consuming
+                # sale and has no meaning for units nobody has sold.
+                cost_cents=round(int(lot.landed_cents) * int(lot.remaining) / int(lot.bought)),
+                purchase_date=lot.purchase_date,
+                days_held=(
+                    (reference - lot.purchase_date).days if lot.purchase_date is not None else None
+                ),
+            )
+        )
+
+    rows.sort(key=lambda row: (row.days_held is None, -(row.days_held or 0), row.product_name))
+    return rows
 
 
 def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
@@ -490,12 +561,14 @@ def attention(db: Session) -> Attention:
 
 __all__ = [
     "AGE_BUCKETS",
+    "AgingLot",
     "Attention",
     "Dashboard",
     "GroupRow",
     "PERIODS",
     "UNSPECIFIED_MARKETPLACE",
     "UnitsByAge",
+    "aging_lots",
     "attention",
     "by_game",
     "by_marketplace",
