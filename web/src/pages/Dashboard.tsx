@@ -364,15 +364,20 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
   )
 }
 
+/**
+ * Shown only when a figure above it is untrustworthy, so an empty dashboard is a quiet
+ * one. Selling out is not a fault and no longer appears here.
+ */
 function AttentionRibbon({ attention }: { attention: Attention }) {
   const items: string[] = []
-  if (attention.sales_missing_cost)
-    items.push(`${attention.sales_missing_cost} sales missing purchase costs`)
-  if (attention.products_with_negative_stock)
-    items.push(`${attention.products_with_negative_stock} products with negative inventory`)
-  if (attention.undated_sales) items.push(`${attention.undated_sales} sales without a date`)
-  if (attention.products_out_of_stock)
-    items.push(`${attention.products_out_of_stock} products sold out`)
+  const { sales_missing_cost: unknownCost, products_with_negative_stock: negative } = attention
+
+  if (unknownCost) {
+    items.push(`${unknownCost} sale${unknownCost === 1 ? '' : 's'} with no known cost`)
+  }
+  if (negative) {
+    items.push(`${negative} product${negative === 1 ? '' : 's'} showing negative stock`)
+  }
 
   if (!items.length) return null
 

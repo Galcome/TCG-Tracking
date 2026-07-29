@@ -74,8 +74,6 @@ class AttentionRead(BaseModel):
 
     sales_missing_cost: int
     products_with_negative_stock: int
-    undated_sales: int
-    products_out_of_stock: int
     negative_stock_products: list[dict]
 
 
@@ -142,5 +140,5 @@ def read_attention(
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
-    """Data problems worth fixing, per the brief's attention indicators."""
+    """States where a number on screen cannot be trusted. Empty when the ledger is sound."""
     return reporting.attention(db)

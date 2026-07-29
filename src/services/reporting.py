@@ -453,12 +453,19 @@ def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
 
 @dataclass
 class Attention:
-    """Things the dashboard should nag about, per the brief."""
+    """Ways the ledger is currently lying, and nothing else.
+
+    Selling out used to be listed here, which had it backwards - it is the goal, not a
+    fault, and it meant a working store carried a permanent warning. Undated sales left
+    too: the dashboard already states that count in its own line, and a caveat repeated as
+    a red banner trains people to ignore the banner.
+
+    What is left are the two states where a number on screen cannot be trusted: profit
+    reported without a known cost, and stock the ledger says is negative.
+    """
 
     sales_missing_cost: int = 0
     products_with_negative_stock: int = 0
-    undated_sales: int = 0
-    products_out_of_stock: int = 0
     negative_stock_products: list[dict] = field(default_factory=list)
 
 
@@ -477,17 +484,7 @@ def attention(db: Session) -> Attention:
                     "quantity": stats.quantity_on_hand,
                 }
             )
-        elif stats.quantity_on_hand == 0 and stats.quantity_purchased:
-            result.products_out_of_stock += 1
 
-    result.undated_sales = int(
-        db.scalar(
-            select(func.count())
-            .select_from(Sale)
-            .where(Sale.status == STATUS_ACTIVE, Sale.sale_date.is_(None))
-        )
-        or 0
-    )
     return result
 
 
