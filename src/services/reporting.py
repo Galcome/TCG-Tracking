@@ -30,6 +30,9 @@ PERIOD_MTD = "mtd"
 PERIOD_30D = "30d"
 PERIODS = (PERIOD_ALL, PERIOD_YTD, PERIOD_MTD, PERIOD_30D)
 
+#: Display label for sales with no marketplace recorded. Not a stored value.
+UNSPECIFIED_MARKETPLACE = "Unspecified"
+
 
 def period_start(period: str, today: date | None = None) -> date | None:
     """First day included in the period, or None for all time."""
@@ -201,6 +204,50 @@ def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) ->
     ranked = [row for row in rows.values() if row.sale_count or row.units_in_stock]
     ranked.sort(key=lambda row: (-row.realized_profit_cents, row.label))
     return ranked
+
+
+def by_marketplace(
+    db: Session, period: str = PERIOD_ALL, today: date | None = None
+) -> list[GroupRow]:
+    """Where things actually sold, best first.
+
+    A sale with no marketplace recorded is real revenue, so it collapses into a single
+    "Unspecified" row rather than being dropped.
+    """
+    start = period_start(period, today)
+    label = func.coalesce(Sale.marketplace, UNSPECIFIED_MARKETPLACE)
+
+    sales = (
+        select(
+            label,
+            func.coalesce(func.sum(_NET_KNOWN), 0),
+            func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
+            func.coalesce(func.sum(Sale.gross_amount_cents), 0),
+            func.count(),
+            func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
+        )
+        .where(Sale.status == STATUS_ACTIVE)
+        .group_by(label)
+    )
+    if start is not None:
+        sales = sales.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
+
+    rows: list[GroupRow] = []
+    for name, net_known, cost, gross, count, unknown in db.execute(sales):
+        rows.append(
+            GroupRow(
+                key=name,
+                label=name,
+                realized_profit_cents=int(net_known) - int(cost),
+                cost_of_sales_cents=int(cost),
+                revenue_cents=int(gross),
+                sale_count=int(count),
+                sales_missing_cost=int(unknown),
+            )
+        )
+
+    rows.sort(key=lambda row: (-row.realized_profit_cents, row.label))
+    return rows
 
 
 def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:

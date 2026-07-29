@@ -11,13 +11,15 @@ recoverable.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
 from src.models.ledger import STATUS_ACTIVE, InventoryAdjustment, Purchase, Sale
 from src.models.member import Member
 from src.models.product import Product
+from src.models.taxonomy import Game
 from src.schemas.ledger import (
     AdjustmentCreate,
     AdjustmentRead,
@@ -25,11 +27,14 @@ from src.schemas.ledger import (
     PurchaseRead,
     PurchaseUpdate,
     SaleCreate,
+    SaleList,
+    SaleListItem,
     SaleRead,
     SaleUpdate,
     VoidRequest,
 )
-from src.services import inventory, ledger
+from src.services import inventory, ledger, reporting
+from src.services.search import escape_like
 
 router = APIRouter()
 
@@ -45,6 +50,50 @@ PURCHASE_FIELDS = {
     "source": "source",
     "notes": "notes",
 }
+
+DEFAULT_SALE_LIMIT = 50
+MAX_SALE_LIMIT = 200
+
+#: Marketplace value used when a sale never recorded where it sold.
+UNSPECIFIED_MARKETPLACE = "Unspecified"
+
+
+def _sale_filters(
+    q: str | None,
+    marketplace: str | None,
+    sold_by_member_id: uuid.UUID | None,
+    game: str | None,
+    period: str,
+) -> list:
+    """Shared WHERE clauses so the count and the page can never disagree."""
+    filters: list = []
+
+    search = (q or "").strip()
+    if search:
+        filters.append(Product.search_text.ilike(f"%{escape_like(search)}%", escape="\\"))
+
+    if marketplace:
+        # "Unspecified" is a display label for NULL, not a stored value.
+        if marketplace == UNSPECIFIED_MARKETPLACE:
+            filters.append(Sale.marketplace.is_(None))
+        else:
+            filters.append(Sale.marketplace == marketplace)
+
+    if sold_by_member_id is not None:
+        filters.append(Sale.sold_by_member_id == sold_by_member_id)
+
+    if game:
+        filters.append(Product.game_id.in_(select(Game.id).where(Game.slug == game)))
+
+    start = reporting.period_start(period)
+    if start is not None:
+        # Undated sales cannot belong to a period; excluding them is the same rule the
+        # dashboard uses, so the two never disagree.
+        filters.append(Sale.sale_date.is_not(None))
+        filters.append(Sale.sale_date >= start)
+
+    return filters
+
 
 SALE_FIELDS = {
     "quantity": "quantity",
@@ -207,6 +256,61 @@ def void_purchase(
 
 
 # --------------------------------------------------------------------------- sales
+
+
+@router.get("/sales", response_model=SaleList)
+def list_sales(
+    q: str | None = Query(default=None, max_length=200, description="Product name"),
+    marketplace: str | None = Query(default=None, max_length=120),
+    sold_by_member_id: uuid.UUID | None = Query(default=None),
+    game: str | None = Query(default=None, max_length=60, description="Game slug"),
+    period: str = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$"),
+    limit: int = Query(default=DEFAULT_SALE_LIMIT, ge=1, le=MAX_SALE_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> SaleList:
+    """The sales ledger across every product.
+
+    Voided sales are included and flagged via `status` rather than hidden - a voided sale
+    is the explanation for a number changing, so the ledger has to show it.
+    """
+    filters = _sale_filters(q, marketplace, sold_by_member_id, game, period)
+
+    total = db.scalar(
+        select(func.count())
+        .select_from(Sale)
+        .join(Product, Product.id == Sale.product_id)
+        .where(*filters)
+    )
+
+    # Newest first. created_at breaks ties so paging is stable, and an explicit order is
+    # required before any limit().
+    rows = db.scalars(
+        select(Sale)
+        .join(Product, Product.id == Sale.product_id)
+        .where(*filters)
+        .order_by(Sale.sale_date.desc().nullslast(), Sale.created_at.desc(), Sale.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).unique().all()
+
+    # One extra query for every product on this page, rather than one per row.
+    products = {
+        product.id: product
+        for product in db.scalars(
+            select(Product).where(Product.id.in_({row.product_id for row in rows}))
+        ).unique()
+    }
+    for sale in rows:
+        sale.product = products[sale.product_id]
+
+    return SaleList(
+        items=[SaleListItem.model_validate(row, from_attributes=True) for row in rows],
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/sales", response_model=SaleRead, status_code=status.HTTP_201_CREATED)
