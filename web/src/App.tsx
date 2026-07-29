@@ -4,7 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { api } from './api'
 import { AppShell } from './components/AppShell'
-import { RecordSaleDialog } from './components/forms'
+import { AddProductDialog, RecordSaleDialog } from './components/forms'
 import { Dashboard } from './pages/Dashboard'
 import { Inventory } from './pages/Inventory'
 import { Login } from './pages/Login'
@@ -19,6 +19,7 @@ export function App() {
   // Recording a sale is reachable from every screen, so the dialog lives here rather
   // than being duplicated per page.
   const [recordingSale, setRecordingSale] = useState(false)
+  const [addingProduct, setAddingProduct] = useState(false)
 
   // The first authenticated call provisions the member row server-side.
   const me = useQuery({ queryKey: ['me'], queryFn: api.me, enabled: Boolean(user), retry: false })
@@ -44,19 +45,22 @@ export function App() {
   }
 
   const openSale = () => setRecordingSale(true)
+  const openProduct = () => setAddingProduct(true)
+  const actions = { onRecordSale: openSale, onAddProduct: openProduct }
 
   return (
-    <AppShell member={me.data} onSignOut={signOut}>
+    <AppShell member={me.data} onSignOut={signOut} onRecordSale={openSale}>
       <Routes>
-        <Route path="/" element={<Dashboard onRecordSale={openSale} />} />
-        <Route path="/inventory" element={<Inventory onRecordSale={openSale} />} />
-        <Route path="/sales" element={<Sales onRecordSale={openSale} />} />
+        <Route path="/" element={<Dashboard {...actions} />} />
+        <Route path="/inventory" element={<Inventory {...actions} />} />
+        <Route path="/sales" element={<Sales {...actions} />} />
         <Route path="/products/:productId" element={<ProductDetail />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<Reports {...actions} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
       {recordingSale && <RecordSaleDialog onClose={() => setRecordingSale(false)} />}
+      {addingProduct && <AddProductDialog onClose={() => setAddingProduct(false)} />}
     </AppShell>
   )
 }

@@ -9,13 +9,13 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, LayoutDashboard, LogOut, Package, ScrollText } from 'lucide-react'
+import { BarChart3, LayoutDashboard, LogOut, Package, Plus, ScrollText } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 
 import { api, type Member } from '../api'
 import { signedMoney, toneFor } from '../format'
-import { gameColour } from './ui'
+import { Button, gameColour } from './ui'
 
 const NAV = [
   { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
@@ -144,10 +144,12 @@ function MemberCard({ member, onSignOut }: { member: Member | undefined; onSignO
 export function AppShell({
   member,
   onSignOut,
+  onRecordSale,
   children,
 }: {
   member: Member | undefined
   onSignOut: () => void
+  onRecordSale: () => void
   children: ReactNode
 }) {
   return (
@@ -212,6 +214,15 @@ export function AppShell({
         </main>
       </div>
 
+      {/* Mobile primary action, once for the whole app rather than per page. */}
+      <button
+        type="button"
+        onClick={onRecordSale}
+        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
+      >
+        Record sale
+      </button>
+
       <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-(--color-edge) bg-(--color-ink)/95 backdrop-blur lg:hidden">
         {NAV.map(({ to, label, Icon, end }) => (
           <NavLink
@@ -233,12 +244,22 @@ export function AppShell({
   )
 }
 
-/** Shared page header: eyebrow, title, period chips, and the two primary actions. */
+/**
+ * Shared page header: eyebrow, title, whatever the page passes (period chips), and the
+ * two primary actions.
+ *
+ * The actions live here rather than in each page, because wiring them per page is exactly
+ * how the Dashboard ended up with no way to add anything.
+ */
 export function PageHeader({
   title,
+  onRecordSale,
+  onAddProduct,
   children,
 }: {
   title: string
+  onRecordSale?: () => void
+  onAddProduct?: () => void
   children?: ReactNode
 }) {
   return (
@@ -251,7 +272,24 @@ export function PageHeader({
           {title}
         </h1>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2.5">{children}</div>
+      <div className="flex flex-wrap items-center justify-end gap-2.5">
+        {children}
+        {/* Desktop only: on a phone these duplicate the thumb-reachable button the
+            shell renders above the tab bar. */}
+        <span className="hidden items-center gap-2.5 lg:flex">
+          {onAddProduct && (
+            <Button type="button" variant="ghost" onClick={onAddProduct}>
+              <Plus size={15} strokeWidth={2.5} />
+              Add product
+            </Button>
+          )}
+          {onRecordSale && (
+            <Button type="button" onClick={onRecordSale}>
+              Record sale
+            </Button>
+          )}
+        </span>
+      </div>
     </header>
   )
 }

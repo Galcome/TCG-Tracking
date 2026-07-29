@@ -34,7 +34,7 @@ function slugOf(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 }
 
-export function Reports() {
+export function Reports({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
   const [period, setPeriod] = useState<Period>('all')
   const [groupBy, setGroupBy] = useState<GroupBy>('game')
   const [sort, setSort] = useState<SortKey>('profit')
@@ -62,7 +62,7 @@ export function Reports() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Reports">
+      <PageHeader title="Reports" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
         <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
           {PERIODS.map((option) => (
             <button

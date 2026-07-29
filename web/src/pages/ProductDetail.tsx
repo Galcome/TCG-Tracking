@@ -7,6 +7,7 @@ import {
   AddPurchaseDialog,
   AdjustStockDialog,
   EditProductDialog,
+  EditTransactionDialog,
   RecordSaleDialog,
   VoidDialog,
 } from '../components/forms'
@@ -33,6 +34,7 @@ export function ProductDetail() {
 
   const [dialog, setDialog] = useState<Dialog>(null)
   const [voiding, setVoiding] = useState<Transaction | null>(null)
+  const [editing, setEditing] = useState<Transaction | null>(null)
 
   const product = useQuery({
     queryKey: ['product', productId],
@@ -213,13 +215,22 @@ export function ProductDetail() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       {row.status !== 'voided' && (
-                        <button
-                          type="button"
-                          onClick={() => setVoiding(row)}
-                          className="text-xs text-(--color-muted) hover:text-(--color-loss)"
-                        >
-                          Void
-                        </button>
+                        <span className="flex justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setEditing(row)}
+                            className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVoiding(row)}
+                            className="text-xs text-(--color-muted) transition-colors hover:text-(--color-loss)"
+                          >
+                            Void
+                          </button>
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -262,6 +273,9 @@ export function ProductDetail() {
       {dialog === 'edit' && <EditProductDialog product={item} onClose={() => setDialog(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />
+      )}
+      {editing && (
+        <EditTransactionDialog transaction={editing} onClose={() => setEditing(null)} />
       )}
     </div>
   )

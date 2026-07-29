@@ -364,6 +364,26 @@ export const api = {
   createSale: (sale: NewSale) =>
     request<unknown>('/api/v1/sales', { method: 'POST', body: JSON.stringify(sale) }),
 
+  /** Editing any transaction re-runs FIFO for that product, so profit on other
+   *  sales can move. `reason` is recorded on the audit entry, not on the row. */
+  updatePurchase: (id: string, changes: Record<string, unknown>) =>
+    request<unknown>(`/api/v1/purchases/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  updateSale: (id: string, changes: Record<string, unknown>) =>
+    request<unknown>(`/api/v1/sales/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  updateAdjustment: (id: string, changes: Record<string, unknown>) =>
+    request<unknown>(`/api/v1/adjustments/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
   createAdjustment: (adjustment: NewAdjustment) =>
     request<unknown>('/api/v1/adjustments', {
       method: 'POST',

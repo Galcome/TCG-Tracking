@@ -24,6 +24,7 @@ from src.models.taxonomy import Game
 from src.schemas.ledger import (
     AdjustmentCreate,
     AdjustmentRead,
+    AdjustmentUpdate,
     PurchaseCreate,
     PurchaseRead,
     PurchaseUpdate,
@@ -486,6 +487,54 @@ def create_adjustment(
         member_id=member.id,
         after=ledger.snapshot(adjustment, ["quantity_delta", "reason", "adjustment_date"]),
         reason=payload.reason,
+    )
+    db.refresh(adjustment)
+    return adjustment
+
+
+ADJUSTMENT_FIELDS = {
+    "quantity_delta": "quantity_delta",
+    "reason": "reason",
+    "cost": "landed_cost_cents",
+    "adjustment_date": "adjustment_date",
+    "member_id": "member_id",
+    "notes": "notes",
+}
+
+
+@router.patch("/adjustments/{adjustment_id}", response_model=AdjustmentRead)
+def update_adjustment(
+    adjustment_id: uuid.UUID,
+    payload: AdjustmentUpdate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> InventoryAdjustment:
+    adjustment = _require_active(db, InventoryAdjustment, adjustment_id, "Adjustment")
+    changes = payload.model_dump(exclude_unset=True)
+    audit_reason = changes.pop("audit_reason", None)
+
+    before = _apply(adjustment, changes, ADJUSTMENT_FIELDS)
+
+    # Checked against the merged row, not the payload: changing only the cost on an
+    # existing negative adjustment would otherwise slip past and hit the database CHECK
+    # as a 500 instead of a validation error.
+    if adjustment.landed_cost_cents is not None and adjustment.quantity_delta < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A cost can only be given when adding stock",
+        )
+
+    db.flush()
+    ledger.recompute_product(db, adjustment.product_id)
+    ledger.record_audit(
+        db,
+        entity_type="adjustment",
+        entity_id=adjustment.id,
+        action="update",
+        member_id=member.id,
+        before=before,
+        after=_after(adjustment, before),
+        reason=audit_reason,
     )
     db.refresh(adjustment)
     return adjustment

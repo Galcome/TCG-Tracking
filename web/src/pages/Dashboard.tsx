@@ -26,7 +26,7 @@ function marketplaceColour(name: string): string {
   return MARKETPLACES.find((m) => m.name === name)?.colour ?? 'var(--color-game-other)'
 }
 
-export function Dashboard({ onRecordSale }: { onRecordSale: () => void }) {
+export function Dashboard({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
   const [period, setPeriod] = useState<Period>('all')
 
   const summary = useQuery({
@@ -51,7 +51,7 @@ export function Dashboard({ onRecordSale }: { onRecordSale: () => void }) {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Dashboard">
+      <PageHeader title="Dashboard" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
         <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
           {PERIODS.map((option) => (
             <button
@@ -208,14 +208,6 @@ export function Dashboard({ onRecordSale }: { onRecordSale: () => void }) {
           from period figures.
         </p>
       )}
-
-      <button
-        type="button"
-        onClick={onRecordSale}
-        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
-      >
-        Record sale
-      </button>
     </div>
   )
 }

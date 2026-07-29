@@ -38,6 +38,20 @@ STOCK_IN = "in"
 STOCK_OUT = "out"
 
 
+def _matches_stock(stock: str | None, quantity_on_hand: int) -> bool:
+    """Whether a product belongs in the requested stock view.
+
+    `in` means "not zero", which deliberately includes *negative* stock. An oversell means
+    the ledger disagrees with the shelf, and this list is the screen where that gets
+    fixed - hiding it here is how the error becomes permanent.
+    """
+    if stock == STOCK_IN:
+        return quantity_on_hand != 0
+    if stock == STOCK_OUT:
+        return quantity_on_hand == 0
+    return True
+
+
 def _require_taxonomy(db: Session, model: type[Base], record_id: uuid.UUID, label: str) -> None:
     if db.get(model, record_id) is None:
         raise HTTPException(
@@ -100,12 +114,6 @@ def list_products(
     search = (q or "").strip() or None
 
     filtered = _apply_filters(select(Product), search, game, product_type, include_archived)
-    total = db.scalar(
-        _apply_filters(
-            select(func.count()).select_from(Product), search, game, product_type, include_archived
-        )
-    )
-
     if search:
         filtered = filtered.order_by(
             func.word_similarity(search, Product.search_text).desc(),
@@ -115,24 +123,26 @@ def list_products(
     else:
         filtered = filtered.order_by(Product.name.asc(), Product.id.asc())
 
-    items = db.scalars(filtered.limit(limit).offset(offset)).unique().all()
-    stats_by_product = inventory.product_stats(db, [item.id for item in items])
+    # Stock is an aggregate over three tables, so it cannot be filtered in the same query.
+    # It is therefore applied here - but *before* paging, not after. Filtering a page and
+    # then reporting its length as the total is how "60 products" becomes "30" on load.
+    # `product_stats` runs a fixed number of queries whatever the size, so this is cheap
+    # at store scale.
+    matched = db.scalars(filtered).unique().all()
+    stats_by_product = inventory.product_stats(db, [item.id for item in matched])
 
-    rows = []
-    for item in items:
+    kept = []
+    for item in matched:
         stats = _stats_for(stats_by_product, item.id)
-        # Stock filtering happens here rather than in SQL: quantity is an aggregate over
-        # three tables, and this list is tens of rows, not millions.
-        if stock == STOCK_IN and stats.quantity_on_hand <= 0:
-            continue
-        if stock == STOCK_OUT and stats.quantity_on_hand > 0:
+        if not _matches_stock(stock, stats.quantity_on_hand):
             continue
         item.stats = stats
-        rows.append(ProductRead.model_validate(item, from_attributes=True))
+        kept.append(item)
 
+    page = kept[offset : offset + limit]
     return ProductList(
-        items=rows,
-        total=total or 0 if stock is None else len(rows),
+        items=[ProductRead.model_validate(item, from_attributes=True) for item in page],
+        total=len(kept),
         limit=limit,
         offset=offset,
     )

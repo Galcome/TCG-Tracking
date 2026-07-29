@@ -8,7 +8,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
-import { ADJUSTMENT_REASONS, MARKETPLACES, api, type Product } from '../api'
+import {
+  ADJUSTMENT_REASONS,
+  MARKETPLACES,
+  api,
+  type Product,
+  type Transaction,
+} from '../api'
 import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
 import { Advanced, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
 
@@ -843,6 +849,179 @@ export function VoidDialog({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Entered twice"
+          className={FIELD_CLASS}
+        />
+      </Field>
+    </Dialog>
+  )
+}
+
+/**
+ * Correcting a transaction after the fact.
+ *
+ * One dialog for all three kinds rather than three near-identical ones: they differ only
+ * in their middle block, and share the date, notes, audit reason and the warning.
+ *
+ * Only fields the user actually touches are sent, so an untouched field is never
+ * overwritten and the audit diff stays honest about what changed.
+ */
+export function EditTransactionDialog({
+  transaction,
+  onClose,
+}: {
+  transaction: Transaction
+  onClose: () => void
+}) {
+  const members = useQuery({ queryKey: ['members'], queryFn: api.members })
+
+  const [quantity, setQuantity] = useState(String(Math.abs(transaction.quantity)))
+  const [amount, setAmount] = useState(transaction.amount ?? '')
+  const [occurredOn, setOccurredOn] = useState(transaction.occurred_on ?? todayIso())
+  const [label, setLabel] = useState(transaction.label ?? '')
+  const [member, setMember] = useState(transaction.member_id ?? '')
+  const [notes, setNotes] = useState(transaction.notes ?? '')
+  const [auditReason, setAuditReason] = useState('')
+
+  const update = useLedgerMutation((changes: Record<string, unknown>) => {
+    if (transaction.kind === 'purchase') return api.updatePurchase(transaction.id, changes)
+    if (transaction.kind === 'sale') return api.updateSale(transaction.id, changes)
+    return api.updateAdjustment(transaction.id, changes)
+  }, onClose)
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const changes: Record<string, unknown> = {}
+
+    if (transaction.kind === 'adjustment') {
+      // The sign lives in the field for an adjustment - the user types -2, not 2.
+      if (Number(quantity) !== transaction.quantity) changes.quantity_delta = Number(quantity)
+      if (label !== (transaction.label ?? '')) changes.reason = label
+      if (occurredOn !== transaction.occurred_on) changes.adjustment_date = occurredOn
+      if (member !== (transaction.member_id ?? '')) changes.member_id = member || null
+      if (auditReason.trim()) changes.audit_reason = auditReason.trim()
+    } else {
+      if (Number(quantity) !== Math.abs(transaction.quantity)) changes.quantity = Number(quantity)
+      if (amount !== (transaction.amount ?? '')) changes.amount = amount
+      if (occurredOn !== transaction.occurred_on) {
+        changes[transaction.kind === 'purchase' ? 'purchase_date' : 'sale_date'] = occurredOn
+      }
+      if (label !== (transaction.label ?? '')) {
+        changes[transaction.kind === 'purchase' ? 'source' : 'marketplace'] = label || null
+      }
+      if (member !== (transaction.member_id ?? '')) {
+        changes[
+          transaction.kind === 'purchase' ? 'purchased_by_member_id' : 'sold_by_member_id'
+        ] = member || null
+      }
+      if (auditReason.trim()) changes.reason = auditReason.trim()
+    }
+
+    if (notes !== (transaction.notes ?? '')) changes.notes = notes.trim() || null
+
+    update.mutate(changes)
+  }
+
+  const isAdjustment = transaction.kind === 'adjustment'
+
+  return (
+    <Dialog
+      title={`Edit ${transaction.kind}`}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel="Save changes"
+      busy={update.isPending}
+      error={update.error ? (update.error as Error).message : null}
+    >
+      <p className="rounded-lg border border-(--color-warn)/40 bg-(--color-warn)/10 p-3 text-sm text-(--color-warn)">
+        Editing re-runs FIFO for this product. Profit on sales that already looked settled
+        can move as a result — that is correct, and the change is recorded in the audit
+        trail.
+      </p>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field
+          label={isAdjustment ? 'Change' : 'Quantity'}
+          hint={isAdjustment ? 'Negative removes stock' : undefined}
+        >
+          <input
+            required
+            type="number"
+            min={isAdjustment ? undefined : 1}
+            inputMode="numeric"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+
+        {isAdjustment ? (
+          <Field label="Reason">
+            <select
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className={FIELD_CLASS}
+            >
+              {ADJUSTMENT_REASONS.map((option) => (
+                <option key={option} value={option}>
+                  {humanise(option)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label={transaction.kind === 'purchase' ? 'Total paid' : 'Total received'}>
+            <input
+              required
+              {...MONEY_INPUT}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className={FIELD_CLASS}
+            />
+          </Field>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Date">
+          <input
+            required
+            type="date"
+            value={occurredOn}
+            onChange={(e) => setOccurredOn(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+        <Field label={transaction.kind === 'sale' ? 'Sold by' : 'Member'}>
+          <select
+            value={member}
+            onChange={(e) => setMember(e.target.value)}
+            className={FIELD_CLASS}
+          >
+            <option value="">Unassigned</option>
+            {members.data?.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.display_name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      {!isAdjustment && (
+        <Field label={transaction.kind === 'purchase' ? 'Bought from' : 'Sold on'}>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} className={FIELD_CLASS} />
+        </Field>
+      )}
+
+      <Field label="Notes">
+        <input value={notes} onChange={(e) => setNotes(e.target.value)} className={FIELD_CLASS} />
+      </Field>
+
+      <Field label="Why the change?" hint="Optional, stored on the audit entry">
+        <input
+          value={auditReason}
+          onChange={(e) => setAuditReason(e.target.value)}
+          placeholder="Receipt said 500, not 300"
           className={FIELD_CLASS}
         />
       </Field>
