@@ -74,6 +74,9 @@ class LotState:
     supply_id: uuid.UUID
     quantity_remaining: int
     cost_remaining_cents: int | None
+    #: When this stock was acquired. Carried through so consumers can report how long
+    #: the units they took had been sitting, and so remaining stock can be aged.
+    occurred_on: date | None = None
 
 
 @dataclass
@@ -82,6 +85,10 @@ class ConsumerResult:
     quantity: int
     cost_basis_cents: int | None  #: None when any unit had unknown cost
     has_unknown_cost: bool
+    #: Quantity-weighted mean days between each consumed lot's purchase and this event.
+    #: None when any consumed unit has no purchase date - the same "never guess" rule
+    #: the cost side follows. 0 is a real answer (bought and sold the same day).
+    days_held_weighted: int | None = None
 
 
 @dataclass
@@ -146,6 +153,7 @@ def allocate(events: list[Event]) -> CostingResult:
                 supply_id=event.id,
                 quantity_remaining=event.quantity,
                 cost_remaining_cents=event.landed_cost_cents,
+                occurred_on=event.occurred_on,
             )
             open_lots.append(lot)
             result.lots[event.id] = lot
@@ -167,6 +175,9 @@ def _consume(
     outstanding = event.quantity
     cost_basis = 0
     unknown = False
+    # Sum of quantity x days-held across the lots taken, for the weighted mean below.
+    weighted_days = 0
+    days_unknown = event.occurred_on is None
 
     while outstanding > 0 and open_lots:
         lot = open_lots[0]
@@ -175,6 +186,7 @@ def _consume(
             continue
 
         taken = min(outstanding, lot.quantity_remaining)
+        held = _days_held(lot.occurred_on, event.occurred_on)
         slice_cost = _take_from_lot(lot, taken, unit_costs)
 
         result.allocations.append(
@@ -190,12 +202,18 @@ def _consume(
         else:
             cost_basis += slice_cost
 
+        if held is None:
+            days_unknown = True
+        else:
+            weighted_days += taken * held
+
         outstanding -= taken
 
     if outstanding > 0:
         # More was sold than was ever bought. Record the shortfall explicitly rather than
-        # silently pretending those units were free.
+        # silently pretending those units were free - or that they were held for no time.
         unknown = True
+        days_unknown = True
         result.allocations.append(
             Allocation(
                 consumer_id=event.id,
@@ -210,7 +228,22 @@ def _consume(
         quantity=event.quantity,
         cost_basis_cents=None if unknown else cost_basis,
         has_unknown_cost=unknown,
+        days_held_weighted=None if days_unknown else round(weighted_days / event.quantity),
     )
+
+
+def _days_held(acquired_on: date | None, consumed_on: date | None) -> int | None:
+    """Shelf time in days, or None when either date is missing.
+
+    Never negative, and not because it is clamped: events are processed in date order
+    with supply ahead of consumers, so a lot is only ever available to a consumer that
+    sorts after it. A sale dated before every lot finds nothing to draw from and becomes
+    a shortfall - unknown cost and unknown shelf time - rather than borrowing from the
+    future.
+    """
+    if acquired_on is None or consumed_on is None:
+        return None
+    return (consumed_on - acquired_on).days
 
 
 def _take_from_lot(

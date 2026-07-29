@@ -175,6 +175,9 @@ class SaleRead(BaseModel):
     cost_basis: MoneyOutOptional = Field(validation_alias="cost_basis_cents")
     realized_profit: MoneyOutOptional = Field(validation_alias="realized_profit_cents")
     has_unknown_cost: bool
+    #: Quantity-weighted shelf time of the units sold. null when any consumed lot has
+    #: no purchase date - never a guess. 0 is real: bought and sold the same day.
+    days_held_weighted: int | None
     sale_date: date | None
     sold_by_member_id: uuid.UUID | None
     marketplace: str | None
