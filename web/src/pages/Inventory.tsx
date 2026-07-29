@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../api'
-import { PackageSearch } from 'lucide-react'
+import { History, PackageSearch, Pencil, Receipt } from 'lucide-react'
 
 import { PageHeader, type PageActions } from '../components/AppShell'
+import { EditItemDialog } from '../components/forms'
 import {
   Card,
   Empty,
@@ -26,7 +27,21 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced
 }
 
+/** Small enough to sit in a table row, big enough to see. */
+function RowButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-text) transition-colors hover:border-(--color-accent) hover:bg-(--color-accent)/10 hover:text-(--color-accent)"
+    >
+      {children}
+    </button>
+  )
+}
+
 export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
+  const [editing, setEditing] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
   const [stock, setStock] = useState('in')
@@ -126,15 +141,11 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                 {items.map((product) => (
                   <tr
                     key={product.id}
-                    className="transition-colors hover:bg-(--color-raised)"
+                    onClick={() => setEditing(product.id)}
+                    className="cursor-pointer transition-colors hover:bg-(--color-raised)"
                   >
                     <td className="px-4 py-3">
-                      <Link
-                        to={`/products/${product.id}`}
-                        className="font-medium text-(--color-text) transition-colors hover:text-(--color-accent)"
-                      >
-                        {product.name}
-                      </Link>
+                      <span className="font-medium text-(--color-text)">{product.name}</span>
                       {product.set_name && (
                         <span className="ml-2 text-xs text-(--color-faint)">
                           {product.set_name}
@@ -168,20 +179,26 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     >
                       {money(product.stats.realized_profit)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      <span className="flex justify-end gap-3">
-                        <button
-                          type="button"
-                          onClick={() => onRecordSale(product)}
-                          className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
-                        >
+                    {/* The row itself edits, so these must not also trigger it. */}
+                    <td
+                      className="whitespace-nowrap px-4 py-3 text-right"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span className="flex justify-end gap-2">
+                        <RowButton onClick={() => onRecordSale(product)}>
+                          <Receipt size={13} />
                           Sell
-                        </button>
+                        </RowButton>
+                        <RowButton onClick={() => setEditing(product.id)}>
+                          <Pencil size={13} />
+                          Edit
+                        </RowButton>
                         <Link
                           to={`/products/${product.id}`}
-                          className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
+                          className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:bg-(--color-raised) hover:text-(--color-text)"
                         >
-                          Edit
+                          <History size={13} />
+                          History
                         </Link>
                       </span>
                     </td>
@@ -195,45 +212,66 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
           <ul className="space-y-2 lg:hidden">
             {items.map((product) => (
               <li key={product.id}>
-                <Link to={`/products/${product.id}`}>
-                  <Card interactive>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{product.name}</p>
-                        <p className="mt-1 flex items-center gap-1.5 text-xs text-(--color-faint)">
-                          <GameDot slug={product.game.slug} />
-                          {product.game.name} · {product.product_type.name}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p
-                          className={`text-sm tabular-nums ${
-                            product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
-                          }`}
-                        >
-                          {product.stats.quantity_on_hand} in stock
-                        </p>
-                        <p className="text-xs tabular-nums text-(--color-muted)">
-                          {money(product.stats.remaining_cost)}
-                        </p>
-                      </div>
+                <Card interactive>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(product.id)}
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{product.name}</p>
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-(--color-faint)">
+                        <GameDot slug={product.game.slug} />
+                        {product.game.name} · {product.product_type.name}
+                      </p>
                     </div>
-                  </Card>
-                </Link>
+                    <div className="shrink-0 text-right">
+                      <p
+                        className={`text-sm tabular-nums ${
+                          product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
+                        }`}
+                      >
+                        {product.stats.quantity_on_hand} in stock
+                      </p>
+                      <p className="text-xs tabular-nums text-(--color-muted)">
+                        {money(product.stats.remaining_cost)}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="mt-3 flex gap-2 border-t border-(--color-edge) pt-3">
+                    <RowButton onClick={() => onRecordSale(product)}>
+                      <Receipt size={13} />
+                      Sell
+                    </RowButton>
+                    <RowButton onClick={() => setEditing(product.id)}>
+                      <Pencil size={13} />
+                      Edit
+                    </RowButton>
+                    <Link
+                      to={`/products/${product.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:text-(--color-text)"
+                    >
+                      <History size={13} />
+                      History
+                    </Link>
+                  </div>
+                </Card>
               </li>
             ))}
           </ul>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <FifoNote />
             {products.data && (
-              <p className="text-xs text-(--color-muted)">{items.length} shown</p>
+              <p className="text-xs text-(--color-muted)">
+                Click a row to edit it · {items.length} shown
+              </p>
             )}
           </div>
         </>
       )}
 
-      {/* Mobile primary action, thumb-reachable above the tab bar. */}
+      {editing && <EditItemDialog productId={editing} onClose={() => setEditing(null)} />}
     </div>
   )
 }

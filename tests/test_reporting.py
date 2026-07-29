@@ -482,6 +482,55 @@ def test_history_is_newest_first_and_includes_voided_rows(client, make_product):
     assert history[0]["quantity"] == -1, "sales are negative in a stock-movement list"
 
 
+def test_history_separates_a_purchase_landed_total_from_its_editable_parts(
+    client, make_product
+):
+    """`amount` is what the row should read; `base_amount` is what an edit writes back.
+
+    Showing the landed total in an edit form and PATCHing it as `amount` adds shipping and
+    tax a second time, so the two have to be distinguishable over the wire.
+    """
+    product = make_product()
+    client.post(
+        "/api/v1/purchases",
+        json={
+            "product_id": product["id"],
+            "quantity": 1,
+            "amount": "180.00",
+            "shipping": "15.00",
+            "tax": "5.00",
+        },
+    )
+
+    row = client.get(f"/api/v1/products/{product['id']}").json()["history"][0]
+
+    assert row["amount"] == "200.00", "history reads the landed cost"
+    assert row["base_amount"] == "180.00"
+    assert row["shipping"] == "15.00"
+    assert row["tax"] == "5.00"
+    assert row["fees"] == "0.00"
+
+    # Saving the form back untouched must be a no-op, not a 10% price rise.
+    client.patch(f"/api/v1/purchases/{row['id']}", json={"amount": row["base_amount"]})
+    assert client.get(f"/api/v1/products/{product['id']}").json()["history"][0]["amount"] == (
+        "200.00"
+    )
+
+
+def test_history_leaves_the_purchase_only_fields_empty_on_other_kinds(client, make_product):
+    product = make_product()
+    buy(client, product["id"], 1, "100.00")
+    sell(client, product["id"], 1, "150.00")
+
+    sale = next(
+        row
+        for row in client.get(f"/api/v1/products/{product['id']}").json()["history"]
+        if row["kind"] == "sale"
+    )
+    assert sale["base_amount"] is None
+    assert sale["shipping"] is None
+
+
 def test_history_shows_adjustment_reasons(client, make_product):
     product = make_product()
     buy(client, product["id"], 2, "200.00")

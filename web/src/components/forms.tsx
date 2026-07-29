@@ -13,6 +13,7 @@ import {
   MARKETPLACES,
   api,
   type Product,
+  type ProductDetail,
   type Transaction,
 } from '../api'
 import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
@@ -732,42 +733,115 @@ export function AdjustStockDialog({ product, onClose }: { product: Product; onCl
   )
 }
 
-export function EditProductDialog({ product, onClose }: { product: Product; onClose: () => void }) {
+/**
+ * Everything about one item, in one place.
+ *
+ * What the item *is* and what was paid for it are one thought to the person holding the
+ * box, even though they are two tables here. Splitting them across two screens meant
+ * "Edit" led to another Edit, and the cost - the number the whole product exists to
+ * track - was not on either.
+ *
+ * Fees and shipping stay on the full transaction editor: they are rare, and folding them
+ * into one "paid" box would lose which was which.
+ */
+export function EditItemDialog({
+  productId,
+  onClose,
+}: {
+  productId: string
+  onClose: () => void
+}) {
+  const item = useQuery({ queryKey: ['product', productId], queryFn: () => api.product(productId) })
+
+  if (!item.data) {
+    return (
+      <Dialog
+        title="Edit item"
+        onClose={onClose}
+        onSubmit={(event) => event.preventDefault()}
+        submitLabel="Save changes"
+        busy
+        error={item.error ? (item.error as Error).message : null}
+      >
+        <p className="text-sm text-(--color-muted)">Loading…</p>
+      </Dialog>
+    )
+  }
+
+  return <EditItemForm item={item.data} onClose={onClose} />
+}
+
+/** Split out so the fields can be initialised from loaded data instead of guarded state. */
+function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => void }) {
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
 
-  const [name, setName] = useState(product.name)
-  const [gameId, setGame] = useState(product.game.id)
-  const [typeId, setType] = useState(product.product_type.id)
-  const [setName_, setSetName] = useState(product.set_name ?? '')
-  const [storage, setStorage] = useState(product.storage_location ?? '')
+  const [name, setName] = useState(item.name)
+  const [gameId, setGame] = useState(item.game.id)
+  const [typeId, setType] = useState(item.product_type.id)
+  const [setLabel, setSetLabel] = useState(item.set_name ?? '')
+  const [storage, setStorage] = useState(item.storage_location ?? '')
 
-  const update = useLedgerMutation(
-    (changes: Parameters<typeof api.updateProduct>[1]) => api.updateProduct(product.id, changes),
-    onClose,
+  const purchases = item.history.filter(
+    (row) => row.kind === 'purchase' && row.status !== 'voided',
   )
+  const [rows, setRows] = useState(() =>
+    Object.fromEntries(
+      purchases.map((row) => [
+        row.id,
+        // base_amount, never `amount` - the latter already includes shipping and tax.
+        { quantity: String(row.quantity), amount: row.base_amount ?? '', date: row.occurred_on ?? '' },
+      ]),
+    ),
+  )
+
+  function edit(id: string, field: 'quantity' | 'amount' | 'date', value: string) {
+    setRows((current) => ({ ...current, [id]: { ...current[id], [field]: value } }))
+  }
+
+  const save = useLedgerMutation<void>(async () => {
+    const productChanges: Parameters<typeof api.updateProduct>[1] = {}
+    if (name.trim() !== item.name) productChanges.name = name.trim()
+    if (gameId !== item.game.id) productChanges.game_id = gameId
+    if (typeId !== item.product_type.id) productChanges.product_type_id = typeId
+    if (setLabel.trim() !== (item.set_name ?? '')) productChanges.set_name = setLabel.trim() || null
+    if (storage.trim() !== (item.storage_location ?? '')) {
+      productChanges.storage_location = storage.trim() || null
+    }
+    if (Object.keys(productChanges).length > 0) {
+      await api.updateProduct(item.id, productChanges)
+    }
+
+    // One at a time: each edit re-runs FIFO for the product, and concurrent recomputes
+    // would race over the same lot allocations.
+    for (const purchase of purchases) {
+      const row = rows[purchase.id]
+      const changes: Record<string, unknown> = {}
+      if (Number(row.quantity) !== purchase.quantity) changes.quantity = Number(row.quantity)
+      if (row.amount !== (purchase.base_amount ?? '')) changes.amount = row.amount
+      if (row.date !== (purchase.occurred_on ?? '')) changes.purchase_date = row.date
+      if (Object.keys(changes).length > 0) {
+        await api.updatePurchase(purchase.id, changes)
+      }
+    }
+  }, onClose)
 
   return (
     <Dialog
-      title="Edit product"
+      title="Edit item"
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()
-        update.mutate({
-          name: name.trim(),
-          game_id: gameId,
-          product_type_id: typeId,
-          set_name: setName_.trim() || null,
-          storage_location: storage.trim() || null,
-        })
+        save.mutate()
       }}
       submitLabel="Save changes"
-      busy={update.isPending}
-      error={update.error ? (update.error as Error).message : null}
+      busy={save.isPending}
+      error={save.error ? (save.error as Error).message : null}
     >
       <Field label="Name">
         <input
           required
+          autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           className={FIELD_CLASS}
@@ -793,20 +867,90 @@ export function EditProductDialog({ product, onClose }: { product: Product; onCl
           </select>
         </Field>
       </div>
-      <Field label="Set">
-        <input
-          value={setName_}
-          onChange={(e) => setSetName(e.target.value)}
-          className={FIELD_CLASS}
-        />
-      </Field>
-      <Field label="Storage location">
-        <input
-          value={storage}
-          onChange={(e) => setStorage(e.target.value)}
-          className={FIELD_CLASS}
-        />
-      </Field>
+
+      <div>
+        <p className="text-sm font-medium text-(--color-muted)">What you paid</p>
+        {purchases.length === 0 ? (
+          <p className="mt-1.5 text-sm text-(--color-faint)">
+            No purchase recorded, so this item has no cost. Add one from the item page.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-3">
+            {purchases.map((purchase) => {
+              const extras =
+                Number(purchase.shipping ?? 0) + Number(purchase.tax ?? 0) + Number(purchase.fees ?? 0)
+              return (
+                <div
+                  key={purchase.id}
+                  className="rounded-lg border border-(--color-edge) bg-(--color-ink)/40 p-3"
+                >
+                  <div className="grid grid-cols-3 gap-3">
+                    <Field label="Qty">
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={rows[purchase.id].quantity}
+                        onChange={(e) => edit(purchase.id, 'quantity', e.target.value)}
+                        className={FIELD_CLASS}
+                      />
+                    </Field>
+                    <Field label="Total paid">
+                      <input
+                        required
+                        {...MONEY_INPUT}
+                        value={rows[purchase.id].amount}
+                        onChange={(e) => edit(purchase.id, 'amount', e.target.value)}
+                        className={FIELD_CLASS}
+                      />
+                    </Field>
+                    <Field label="Date">
+                      <input
+                        required
+                        type="date"
+                        value={rows[purchase.id].date}
+                        onChange={(e) => edit(purchase.id, 'date', e.target.value)}
+                        className={FIELD_CLASS}
+                      />
+                    </Field>
+                  </div>
+                  {extras > 0 && (
+                    <p className="mt-2 text-xs text-(--color-faint)">
+                      Plus {money(extras.toFixed(2))} shipping, tax and fees —{' '}
+                      {money(purchase.amount)} landed. Edit those on the item page.
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {purchases.length > 0 && (
+        <p className="text-xs text-(--color-faint)">
+          Changing a cost re-runs FIFO, so profit on sales that already looked settled can
+          move. That is correct, and it is recorded in the audit trail.
+        </p>
+      )}
+
+      <Advanced>
+        <Field label="Set">
+          <input
+            value={setLabel}
+            onChange={(e) => setSetLabel(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+        <Field label="Storage location">
+          <input
+            value={storage}
+            onChange={(e) => setStorage(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+      </Advanced>
     </Dialog>
   )
 }
@@ -880,7 +1024,15 @@ export function EditTransactionDialog({
   const [quantity, setQuantity] = useState(
     String(transaction.kind === 'adjustment' ? transaction.quantity : Math.abs(transaction.quantity)),
   )
-  const [amount, setAmount] = useState(transaction.amount ?? '')
+  // A purchase's `amount` is the landed total; editing that back as `amount` would add
+  // shipping and tax on top a second time. Purchases edit their own components.
+  const isPurchase = transaction.kind === 'purchase'
+  const [amount, setAmount] = useState(
+    (isPurchase ? transaction.base_amount : transaction.amount) ?? '',
+  )
+  const [shipping, setShipping] = useState(transaction.shipping ?? '')
+  const [tax, setTax] = useState(transaction.tax ?? '')
+  const [fees, setFees] = useState(transaction.fees ?? '')
   const [occurredOn, setOccurredOn] = useState(transaction.occurred_on ?? todayIso())
   const [label, setLabel] = useState(transaction.label ?? '')
   const [member, setMember] = useState(transaction.member_id ?? '')
@@ -906,7 +1058,14 @@ export function EditTransactionDialog({
       if (auditReason.trim()) changes.audit_reason = auditReason.trim()
     } else {
       if (Number(quantity) !== Math.abs(transaction.quantity)) changes.quantity = Number(quantity)
-      if (amount !== (transaction.amount ?? '')) changes.amount = amount
+      if (amount !== ((isPurchase ? transaction.base_amount : transaction.amount) ?? '')) {
+        changes.amount = amount
+      }
+      if (isPurchase) {
+        if (shipping !== (transaction.shipping ?? '')) changes.shipping = shipping
+        if (tax !== (transaction.tax ?? '')) changes.tax = tax
+        if (fees !== (transaction.fees ?? '')) changes.fees = fees
+      }
       if (occurredOn !== transaction.occurred_on) {
         changes[transaction.kind === 'purchase' ? 'purchase_date' : 'sale_date'] = occurredOn
       }
@@ -974,7 +1133,10 @@ export function EditTransactionDialog({
             </select>
           </Field>
         ) : (
-          <Field label={transaction.kind === 'purchase' ? 'Total paid' : 'Total received'}>
+          <Field
+            label={isPurchase ? 'Total paid' : 'Total received'}
+            hint={isPurchase ? 'Before shipping, tax and fees' : undefined}
+          >
             <input
               required
               {...MONEY_INPUT}
@@ -1013,9 +1175,40 @@ export function EditTransactionDialog({
       </div>
 
       {!isAdjustment && (
-        <Field label={transaction.kind === 'purchase' ? 'Bought from' : 'Sold on'}>
+        <Field label={isPurchase ? 'Bought from' : 'Sold on'}>
           <input value={label} onChange={(e) => setLabel(e.target.value)} className={FIELD_CLASS} />
         </Field>
+      )}
+
+      {isPurchase && (
+        <Advanced>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Shipping">
+              <input
+                {...MONEY_INPUT}
+                value={shipping}
+                onChange={(e) => setShipping(e.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Tax">
+              <input
+                {...MONEY_INPUT}
+                value={tax}
+                onChange={(e) => setTax(e.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Fees">
+              <input
+                {...MONEY_INPUT}
+                value={fees}
+                onChange={(e) => setFees(e.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+          </div>
+        </Advanced>
       )}
 
       <Field label="Notes">

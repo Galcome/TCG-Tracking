@@ -6,7 +6,7 @@ import { api, type Transaction } from '../api'
 import {
   AddPurchaseDialog,
   AdjustStockDialog,
-  EditProductDialog,
+  EditItemDialog,
   EditTransactionDialog,
   RecordSaleDialog,
   VoidDialog,
@@ -185,7 +185,12 @@ export function ProductDetail() {
                 {item.history.map((row) => (
                   <tr
                     key={row.id}
-                    className={row.status === 'voided' ? 'text-(--color-muted) line-through' : ''}
+                    onClick={() => row.status !== 'voided' && setEditing(row)}
+                    className={
+                      row.status === 'voided'
+                        ? 'text-(--color-muted) line-through'
+                        : 'cursor-pointer transition-colors hover:bg-(--color-raised)'
+                    }
                   >
                     <td className="whitespace-nowrap px-4 py-3">{shortDate(row.occurred_on)}</td>
                     <td className="px-4 py-3">
@@ -213,20 +218,24 @@ export function ProductDetail() {
                     >
                       {row.kind === 'sale' ? signedMoney(row.profit) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td
+                      className="whitespace-nowrap px-4 py-3 text-right"
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       {row.status !== 'voided' && (
-                        <span className="flex justify-end gap-3">
+                        <span className="flex justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => setEditing(row)}
-                            className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-text) transition-colors hover:border-(--color-accent) hover:bg-(--color-accent)/10 hover:text-(--color-accent)"
                           >
+                            <Pencil size={13} />
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => setVoiding(row)}
-                            className="text-xs text-(--color-muted) transition-colors hover:text-(--color-loss)"
+                            className="rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss)"
                           >
                             Void
                           </button>
@@ -270,7 +279,7 @@ export function ProductDetail() {
       {dialog === 'adjust' && (
         <AdjustStockDialog product={item} onClose={() => setDialog(null)} />
       )}
-      {dialog === 'edit' && <EditProductDialog product={item} onClose={() => setDialog(null)} />}
+      {dialog === 'edit' && <EditItemDialog productId={item.id} onClose={() => setDialog(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />
       )}

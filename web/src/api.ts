@@ -100,7 +100,13 @@ export interface Transaction {
   id: string
   occurred_on: string | null
   quantity: number
+  /** For a purchase this is the landed total — display it, but never PATCH it back. */
   amount: string | null
+  /** Purchases only: the editable components behind `amount`. */
+  base_amount: string | null
+  shipping: string | null
+  tax: string | null
+  fees: string | null
   cost: string | null
   profit: string | null
   has_unknown_cost: boolean
