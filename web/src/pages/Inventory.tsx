@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 
 import { api } from '../api'
 import { History, PackageSearch, Pencil, Receipt } from 'lucide-react'
@@ -13,6 +12,8 @@ import {
   FIELD_CLASS,
   FifoNote,
   GameDot,
+  RowAction,
+  RowLink,
   Skeleton,
 } from '../components/ui'
 import { money, toneFor } from '../format'
@@ -25,19 +26,6 @@ function useDebounced<T>(value: T, delayMs: number): T {
     return () => clearTimeout(timer)
   }, [value, delayMs])
   return debounced
-}
-
-/** Small enough to sit in a table row, big enough to see. */
-function RowButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-text) transition-colors hover:border-(--color-accent) hover:bg-(--color-accent)/10 hover:text-(--color-accent)"
-    >
-      {children}
-    </button>
-  )
 }
 
 export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
@@ -185,21 +173,18 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       onClick={(event) => event.stopPropagation()}
                     >
                       <span className="flex justify-end gap-2">
-                        <RowButton onClick={() => onRecordSale(product)}>
+                        <RowAction onClick={() => onRecordSale(product)}>
                           <Receipt size={13} />
                           Sell
-                        </RowButton>
-                        <RowButton onClick={() => setEditing(product.id)}>
+                        </RowAction>
+                        <RowAction onClick={() => setEditing(product.id)}>
                           <Pencil size={13} />
                           Edit
-                        </RowButton>
-                        <Link
-                          to={`/products/${product.id}`}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:bg-(--color-raised) hover:text-(--color-text)"
-                        >
+                        </RowAction>
+                        <RowLink to={`/products/${product.id}`}>
                           <History size={13} />
                           History
-                        </Link>
+                        </RowLink>
                       </span>
                     </td>
                   </tr>
@@ -239,21 +224,18 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     </div>
                   </button>
                   <div className="mt-3 flex gap-2 border-t border-(--color-edge) pt-3">
-                    <RowButton onClick={() => onRecordSale(product)}>
+                    <RowAction onClick={() => onRecordSale(product)}>
                       <Receipt size={13} />
                       Sell
-                    </RowButton>
-                    <RowButton onClick={() => setEditing(product.id)}>
+                    </RowAction>
+                    <RowAction onClick={() => setEditing(product.id)}>
                       <Pencil size={13} />
                       Edit
-                    </RowButton>
-                    <Link
-                      to={`/products/${product.id}`}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:text-(--color-text)"
-                    >
+                    </RowAction>
+                    <RowLink to={`/products/${product.id}`}>
                       <History size={13} />
                       History
-                    </Link>
+                    </RowLink>
                   </div>
                 </Card>
               </li>

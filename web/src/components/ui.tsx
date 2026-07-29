@@ -7,6 +7,7 @@
 
 import type { FormEvent, ReactNode } from 'react'
 import { useEffect } from 'react'
+import { Link } from 'react-router-dom'
 
 export const FIELD_CLASS =
   'mt-1 w-full rounded-lg border border-(--color-edge) bg-(--color-ink)/60 px-3 py-2.5 ' +
@@ -139,6 +140,46 @@ export function Button({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * A row-level action. Small enough for a table row, bordered so it reads as a control -
+ * the previous grey text links were invisible against the numbers beside them.
+ *
+ * `danger` is for the destructive one, and it stays quiet until hovered so a row of
+ * actions is not permanently shouting.
+ */
+export function RowAction({
+  tone = 'normal',
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'normal' | 'danger' }) {
+  const hover =
+    tone === 'danger'
+      ? 'text-(--color-muted) hover:border-(--color-loss)/50 hover:text-(--color-loss)'
+      : 'text-(--color-text) hover:border-(--color-accent) hover:bg-(--color-accent)/10 hover:text-(--color-accent)'
+
+  return (
+    <button
+      type="button"
+      {...props}
+      className={`inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs transition-colors ${hover} ${props.className ?? ''}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** The same control as a link, for actions that are really navigation. */
+export function RowLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="inline-flex items-center gap-1.5 rounded-md border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:bg-(--color-raised) hover:text-(--color-text)"
+    >
+      {children}
+    </Link>
   )
 }
 

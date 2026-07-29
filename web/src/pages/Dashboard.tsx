@@ -3,8 +3,9 @@ import { AlertTriangle, ArrowUpRight } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { api, MARKETPLACES, type Attention, type Period } from '../api'
+import { api, MARKETPLACES, saleAsTransaction, type Attention, type Period, type SaleRow } from '../api'
 import { PageHeader, type PageActions } from '../components/AppShell'
+import { EditTransactionDialog } from '../components/forms'
 import { Card, Empty, Skeleton, gameColour } from '../components/ui'
 import { money, moneyCompact, percent, shortDate, signedMoney, toneFor } from '../format'
 
@@ -27,6 +28,7 @@ function marketplaceColour(name: string): string {
 }
 
 export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
+  const [editing, setEditing] = useState<SaleRow | null>(null)
   const [period, setPeriod] = useState<Period>('all')
 
   const summary = useQuery({
@@ -158,16 +160,18 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
         {recent.data?.items.length ? (
           <ul className="divide-y divide-(--color-edge)">
             {recent.data.items.map((sale) => (
-              <li key={sale.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+              <li key={sale.id}>
+                {/* Recent sales is where a mistake gets noticed, so it opens the same
+                    editor the Sales ledger uses rather than being a read-only list. */}
+                <button
+                  type="button"
+                  onClick={() => sale.status !== 'voided' && setEditing(sale)}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-(--color-raised)"
+                >
                 <span className="w-20 shrink-0 text-xs text-(--color-faint)">
                   {shortDate(sale.sale_date)}
                 </span>
-                <Link
-                  to={`/products/${sale.product_id}`}
-                  className="min-w-0 flex-1 truncate transition-colors hover:text-(--color-accent)"
-                >
-                  {sale.product.name}
-                </Link>
+                <span className="min-w-0 flex-1 truncate">{sale.product.name}</span>
                 <span
                   className="hidden shrink-0 rounded-full px-2 py-0.5 text-xs sm:inline-block"
                   style={{
@@ -188,6 +192,7 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
                 >
                   {sale.has_unknown_cost ? 'Unknown' : signedMoney(sale.realized_profit)}
                 </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -207,6 +212,13 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
           {data.undated_sales} sale{data.undated_sales === 1 ? '' : 's'} without a date are excluded
           from period figures.
         </p>
+      )}
+
+      {editing && (
+        <EditTransactionDialog
+          transaction={saleAsTransaction(editing)}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   )

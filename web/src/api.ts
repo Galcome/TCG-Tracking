@@ -107,6 +107,10 @@ export interface Transaction {
   shipping: string | null
   tax: string | null
   fees: string | null
+  /** Sales only: the deductions behind `amount`, which is gross. */
+  platform_fees: string | null
+  payment_fees: string | null
+  shipping_paid: string | null
   cost: string | null
   profit: string | null
   has_unknown_cost: boolean
@@ -213,6 +217,37 @@ export interface SaleRow {
   marketplace: string | null
   notes: string | null
   status: string
+}
+
+/**
+ * A ledger sale seen as a history row, so the Sales list and the Dashboard can open the
+ * same editor the product page uses instead of each growing their own.
+ *
+ * Quantity flips negative: a history row describes stock movement, and the editor turns it
+ * back into a positive count.
+ */
+export function saleAsTransaction(sale: SaleRow): Transaction {
+  return {
+    kind: 'sale',
+    id: sale.id,
+    occurred_on: sale.sale_date,
+    quantity: -sale.quantity,
+    amount: sale.amount,
+    base_amount: null,
+    shipping: null,
+    tax: null,
+    fees: null,
+    platform_fees: sale.platform_fees,
+    payment_fees: sale.payment_fees,
+    shipping_paid: sale.shipping_paid,
+    cost: sale.cost_basis,
+    profit: sale.realized_profit,
+    has_unknown_cost: sale.has_unknown_cost,
+    member_id: sale.sold_by_member_id,
+    label: sale.marketplace,
+    notes: sale.notes,
+    status: sale.status,
+  }
 }
 
 export interface SalePage {

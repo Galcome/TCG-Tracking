@@ -1033,6 +1033,9 @@ export function EditTransactionDialog({
   const [shipping, setShipping] = useState(transaction.shipping ?? '')
   const [tax, setTax] = useState(transaction.tax ?? '')
   const [fees, setFees] = useState(transaction.fees ?? '')
+  const [platformFees, setPlatformFees] = useState(transaction.platform_fees ?? '')
+  const [paymentFees, setPaymentFees] = useState(transaction.payment_fees ?? '')
+  const [shippingPaid, setShippingPaid] = useState(transaction.shipping_paid ?? '')
   const [occurredOn, setOccurredOn] = useState(transaction.occurred_on ?? todayIso())
   const [label, setLabel] = useState(transaction.label ?? '')
   const [member, setMember] = useState(transaction.member_id ?? '')
@@ -1065,6 +1068,14 @@ export function EditTransactionDialog({
         if (shipping !== (transaction.shipping ?? '')) changes.shipping = shipping
         if (tax !== (transaction.tax ?? '')) changes.tax = tax
         if (fees !== (transaction.fees ?? '')) changes.fees = fees
+      } else {
+        if (platformFees !== (transaction.platform_fees ?? '')) {
+          changes.platform_fees = platformFees
+        }
+        if (paymentFees !== (transaction.payment_fees ?? '')) changes.payment_fees = paymentFees
+        if (shippingPaid !== (transaction.shipping_paid ?? '')) {
+          changes.shipping_paid = shippingPaid
+        }
       }
       if (occurredOn !== transaction.occurred_on) {
         changes[transaction.kind === 'purchase' ? 'purchase_date' : 'sale_date'] = occurredOn
@@ -1180,33 +1191,64 @@ export function EditTransactionDialog({
         </Field>
       )}
 
-      {isPurchase && (
+      {!isAdjustment && (
         <Advanced>
           <div className="grid grid-cols-3 gap-3">
-            <Field label="Shipping">
-              <input
-                {...MONEY_INPUT}
-                value={shipping}
-                onChange={(e) => setShipping(e.target.value)}
-                className={FIELD_CLASS}
-              />
-            </Field>
-            <Field label="Tax">
-              <input
-                {...MONEY_INPUT}
-                value={tax}
-                onChange={(e) => setTax(e.target.value)}
-                className={FIELD_CLASS}
-              />
-            </Field>
-            <Field label="Fees">
-              <input
-                {...MONEY_INPUT}
-                value={fees}
-                onChange={(e) => setFees(e.target.value)}
-                className={FIELD_CLASS}
-              />
-            </Field>
+            {isPurchase ? (
+              <>
+                <Field label="Shipping">
+                  <input
+                    {...MONEY_INPUT}
+                    value={shipping}
+                    onChange={(e) => setShipping(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+                <Field label="Tax">
+                  <input
+                    {...MONEY_INPUT}
+                    value={tax}
+                    onChange={(e) => setTax(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+                <Field label="Fees">
+                  <input
+                    {...MONEY_INPUT}
+                    value={fees}
+                    onChange={(e) => setFees(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="Platform fees">
+                  <input
+                    {...MONEY_INPUT}
+                    value={platformFees}
+                    onChange={(e) => setPlatformFees(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+                <Field label="Payment fees">
+                  <input
+                    {...MONEY_INPUT}
+                    value={paymentFees}
+                    onChange={(e) => setPaymentFees(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+                <Field label="Shipping paid">
+                  <input
+                    {...MONEY_INPUT}
+                    value={shippingPaid}
+                    onChange={(e) => setShippingPaid(e.target.value)}
+                    className={FIELD_CLASS}
+                  />
+                </Field>
+              </>
+            )}
           </div>
         </Advanced>
       )}
