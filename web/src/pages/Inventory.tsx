@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import { api } from '../api'
-import { History, PackageSearch, Pencil, Receipt } from 'lucide-react'
+import { History, PackageSearch, Pencil, Plus, Receipt } from 'lucide-react'
 
 import { PageHeader, type PageActions } from '../components/AppShell'
 import { EditItemDialog } from '../components/forms'
@@ -26,6 +26,21 @@ function useDebounced<T>(value: T, delayMs: number): T {
     return () => clearTimeout(timer)
   }, [value, delayMs])
   return debounced
+}
+
+/**
+ * Why the list came up empty, which is not always "you own nothing".
+ *
+ * The stock filter defaults to In stock, so a store that has sold everything used to be
+ * told it had no products at all - while the Sales ledger listed what it had sold.
+ */
+function emptyMessage(search: string, stock: string): string {
+  if (search) {
+    return `Nothing matches “${search}”. Search is forgiving about spelling, so it is probably not here yet.`
+  }
+  if (stock === 'in') return 'Nothing in stock right now. Sold-out items are still under Sold out.'
+  if (stock === 'out') return 'Nothing is sold out — everything you have bought is still on the shelf.'
+  return 'No products yet. Add your first one and record what you paid for it.'
 }
 
 export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
@@ -101,9 +116,18 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
       {products.data && items.length === 0 && (
         <Card>
           <Empty icon={<PackageSearch size={30} strokeWidth={1.5} />}>
-            {debouncedSearch
-              ? `Nothing matches “${debouncedSearch}”. Search is forgiving about spelling, so it is probably not here yet.`
-              : 'No products yet. Add your first one and record what you paid for it.'}
+            {emptyMessage(debouncedSearch, stock)}
+            {/* Always offered, whichever way the list came up empty. Telling someone to
+                add their first product and giving them nothing to press is how this
+                screen used to end - and on a phone there was no other route at all. */}
+            <button
+              type="button"
+              onClick={onAddProduct}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-(--color-edge-strong) px-3.5 py-2 text-sm font-medium text-(--color-text) transition-colors hover:border-(--color-accent) hover:text-(--color-accent)"
+            >
+              <Plus size={15} strokeWidth={2.5} />
+              Add product
+            </button>
           </Empty>
         </Card>
       )}

@@ -151,11 +151,13 @@ export function AppShell({
   member,
   onSignOut,
   onRecordSale,
+  onAddProduct,
   children,
 }: {
   member: Member | undefined
   onSignOut: () => void
   onRecordSale: () => void
+  onAddProduct: () => void
   children: ReactNode
 }) {
   return (
@@ -220,14 +222,35 @@ export function AppShell({
         </main>
       </div>
 
-      {/* Mobile primary action, once for the whole app rather than per page. */}
-      <button
-        type="button"
-        onClick={onRecordSale}
-        className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
-      >
-        Record sale
-      </button>
+      {/* The mobile action bar, once for the whole app rather than per page.
+          Both actions live here because the page headers hide theirs below `lg:`, and for
+          a while that left a phone able to sell stock it already had and never able to
+          acquire any.
+          Positions are fixed rather than reordered per page: a button that moves is a
+          button that gets mis-tapped, and both of these write to the ledger. */}
+      <div className="fixed inset-x-4 bottom-20 z-10 flex gap-2 lg:hidden">
+        {/* Called with no arguments on purpose. `onClick={onRecordSale}` hands React's
+            click event to the handler, and App reads that first argument as the product
+            to pre-select - so the dialog got a MouseEvent, read .game.slug off it, and
+            took the whole app down. PageHeader always wrapped it; this did not. */}
+        <button
+          type="button"
+          onClick={() => onRecordSale()}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg"
+        >
+          Record sale
+        </button>
+        {/* Opaque on purpose: the bar floats over scrolling content, and the primary
+            button only reads as solid because it is a filled gradient. */}
+        <button
+          type="button"
+          onClick={() => onAddProduct()}
+          className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-(--color-edge-strong) bg-(--color-surface) px-4 py-3.5 text-sm font-semibold text-(--color-text) shadow-lg"
+        >
+          <Plus size={16} strokeWidth={2.5} />
+          Add product
+        </button>
+      </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-(--color-edge) bg-(--color-ink)/95 backdrop-blur lg:hidden">
         {NAV.map(({ to, label, Icon, end }) => (
@@ -280,8 +303,8 @@ export function PageHeader({
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2.5">
         {children}
-        {/* Desktop only: on a phone these duplicate the thumb-reachable button the
-            shell renders above the tab bar. */}
+        {/* Desktop only: on a phone both of these are in the shell's action bar above the
+            tab bar, where a thumb reaches them. */}
         <span className="hidden items-center gap-2.5 lg:flex">
           {onAddProduct && (
             <Button type="button" variant="ghost" onClick={onAddProduct}>
