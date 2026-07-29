@@ -283,11 +283,10 @@ export const MARKETPLACES = [
   { name: 'Other', feePercent: 0, colour: '#8b9bc0' },
 ] as const
 
+/** Only the two states where a displayed number is untrustworthy. Empty means sound. */
 export interface Attention {
   sales_missing_cost: number
   products_with_negative_stock: number
-  undated_sales: number
-  products_out_of_stock: number
   negative_stock_products: { id: string; name: string; quantity: number }[]
 }
 

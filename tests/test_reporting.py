@@ -416,14 +416,27 @@ def test_attention_lists_data_problems(client, make_product):
     assert body["negative_stock_products"][0]["quantity"] == -2
 
 
-def test_attention_counts_sold_out_products(client, make_product):
+def test_selling_out_is_not_something_to_warn_about(client, make_product):
+    """Clearing your stock is the goal. It used to raise a permanent dashboard warning."""
     product = make_product()
     buy(client, product["id"], 1, "100.00")
     sell(client, product["id"], 1, "150.00")
 
     body = client.get("/api/v1/reports/attention").json()
-    assert body["products_out_of_stock"] == 1
-    assert body["products_with_negative_stock"] == 0
+    assert body == {
+        "sales_missing_cost": 0,
+        "products_with_negative_stock": 0,
+        "negative_stock_products": [],
+    }
+
+
+def test_undated_sales_are_reported_by_the_dashboard_and_not_the_warnings(client):
+    """The same count in two places, one of them red, taught people to ignore the red.
+
+    It stays on the dashboard, which states it as a caveat under the figures it affects.
+    """
+    assert "undated_sales" in client.get("/api/v1/dashboard").json()
+    assert "undated_sales" not in client.get("/api/v1/reports/attention").json()
 
 
 def test_attention_is_clean_for_a_healthy_store(client, make_product):
@@ -435,8 +448,6 @@ def test_attention_is_clean_for_a_healthy_store(client, make_product):
     assert body == {
         "sales_missing_cost": 0,
         "products_with_negative_stock": 0,
-        "undated_sales": 0,
-        "products_out_of_stock": 0,
         "negative_stock_products": [],
     }
 
