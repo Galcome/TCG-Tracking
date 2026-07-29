@@ -50,7 +50,12 @@ export function App() {
   const actions = { onRecordSale: openSale, onAddProduct: openProduct }
 
   return (
-    <AppShell member={me.data} onSignOut={signOut} onRecordSale={openSale}>
+    <AppShell
+      member={me.data}
+      onSignOut={signOut}
+      onRecordSale={openSale}
+      onAddProduct={openProduct}
+    >
       <Routes>
         <Route path="/" element={<Dashboard {...actions} />} />
         <Route path="/inventory" element={<Inventory {...actions} />} />
