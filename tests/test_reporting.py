@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import select
 
+from src.models.ledger import Purchase
 from src.models.taxonomy import Game, ProductType
 from src.services import reporting
 
@@ -399,6 +400,80 @@ def test_optional_text_survives_when_it_has_content(client, make_product):
     ).json()
     assert purchase["source"] == "Facebook Marketplace"
     assert purchase["notes"] == "sealed"
+
+
+# ----------------------------------------------------------------------------- aging
+
+
+def test_aging_lists_unsold_stock_oldest_first(client, make_product):
+    product = make_product("Slow Box")
+    buy(client, product["id"], 2, "200.00", on=TODAY - timedelta(days=200))
+    buy(client, product["id"], 1, "150.00", on=TODAY - timedelta(days=5))
+
+    rows = client.get("/api/v1/reports/aging").json()
+
+    assert [row["days_held"] for row in rows] == [200, 5], "oldest money first"
+    assert rows[0]["units"] == 2
+    assert rows[0]["cost"] == "200.00"
+    assert rows[0]["product_name"] == "Slow Box"
+    assert rows[0]["game_slug"] == "pokemon"
+
+
+def test_aging_counts_only_what_is_left_of_a_partly_sold_lot(client, make_product):
+    """A lot half consumed by a sale is half asleep, not fully."""
+    product = make_product()
+    buy(client, product["id"], 4, "400.00", on=TODAY - timedelta(days=40))
+    sell(client, product["id"], 3, "500.00")
+
+    rows = client.get("/api/v1/reports/aging").json()
+
+    assert len(rows) == 1
+    assert rows[0]["units"] == 1
+    assert rows[0]["cost"] == "100.00", "one unit's share of the lot, not the whole lot"
+
+
+def test_a_fully_sold_lot_is_not_asleep(client, make_product):
+    product = make_product()
+    buy(client, product["id"], 1, "100.00")
+    sell(client, product["id"], 1, "150.00")
+
+    assert client.get("/api/v1/reports/aging").json() == []
+
+
+def undated_purchase(db, product_id: str, quantity: int, cents: int) -> None:
+    """A lot with no purchase date, which the API cannot create but imports produce."""
+    db.add(
+        Purchase(
+            product_id=uuid.UUID(product_id),
+            quantity=quantity,
+            gross_amount_cents=cents,
+            purchase_date=None,
+        )
+    )
+    db.commit()
+
+
+def test_an_undated_lot_is_reported_without_an_age_rather_than_dropped(db, client, make_product):
+    """Omitting it silently would understate stock on hand. It has no age, so it says so."""
+    product = make_product()
+    undated_purchase(db, product["id"], 3, 30000)
+
+    rows = client.get("/api/v1/reports/aging").json()
+
+    assert len(rows) == 1
+    assert rows[0]["days_held"] is None
+    assert rows[0]["purchase_date"] is None
+    assert rows[0]["units"] == 3
+    assert rows[0]["cost"] == "300.00"
+
+
+def test_undated_lots_sort_after_every_dated_one(db, client, make_product):
+    product = make_product()
+    undated_purchase(db, product["id"], 1, 10000)
+    buy(client, product["id"], 1, "100.00", on=TODAY - timedelta(days=300))
+
+    rows = client.get("/api/v1/reports/aging").json()
+    assert [row["days_held"] for row in rows] == [300, None]
 
 
 # ------------------------------------------------------------------------ attention

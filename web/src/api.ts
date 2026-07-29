@@ -190,6 +190,18 @@ export interface GroupRow {
 
 export type GroupBy = 'game' | 'product' | 'product-type' | 'marketplace' | 'seller'
 
+/** One purchase lot with units still on the shelf. `days_held` null means no known date. */
+export interface AgingLot {
+  purchase_id: string
+  product_id: string
+  product_name: string
+  game_slug: string
+  units: number
+  cost: string
+  purchase_date: string | null
+  days_held: number | null
+}
+
 export interface ProductSummary {
   id: string
   name: string
@@ -469,5 +481,7 @@ export const api = {
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
+  /** Not period-scoped: what is on the shelf today is not a function of a date range. */
+  aging: () => request<AgingLot[]>('/api/v1/reports/aging'),
   attention: () => request<Attention>('/api/v1/reports/attention'),
 }
