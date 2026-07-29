@@ -197,3 +197,58 @@ databases down with it.
 
 **Fix:** New backend env vars must be added to `src/config.py`, `.env.example`,
 `tests/conftest.py`, and `.github/workflows/ci.yml` together.
+
+---
+
+## End-To-End Tests Poison The Development Database
+
+**Symptom:** `npm run test:e2e` passes, then `uv run pytest` fails ~56 tests on
+store-wide aggregates that were right five minutes ago.
+
+**Cause:** The suite drives the real app, so it writes real rows. Anything asserting on a
+dashboard or report total then sees browser-test data.
+
+**Fix:** Already handled - `tests/e2e/prepare.py` creates and migrates a separate
+database, `<your db>_e2e`, and refuses to manage any name that does not say `e2e`.
+Override with `E2E_DATABASE_URL` if you need it elsewhere. If a run does land in the
+development database, reset it:
+
+```bash
+uv run alembic downgrade base && uv run alembic upgrade head
+```
+
+---
+
+## Overriding DATABASE_URL At Runtime Silently Does Nothing
+
+**Symptom:** You set `os.environ["DATABASE_URL"]` before importing the app, and it still
+connects to the old database.
+
+**Cause:** `src/config.py` exposes `settings` as a module-level instance, and
+`src/database.py` builds the engine from that object at import time. Once anything has
+imported `src.config`, the environment is no longer consulted - and importing a helper
+that itself imports `src.config` is enough to lock it in.
+
+**Fix:** Mutate the object, not the environment, and do it before importing
+`src.main`/`src.database`:
+
+```python
+from src.config import settings
+settings.database_url = "..."
+from src.main import app  # noqa: E402
+```
+
+`tests/e2e/server.py` does exactly this.
+
+---
+
+## Playwright Reuses A Server Pointed At The Wrong Database
+
+**Symptom:** The e2e suite passes but writes end up in the development database anyway.
+
+**Cause:** `reuseExistingServer: true` makes Playwright probe the port, find *something*
+answering, and carry on. A server left running from an earlier run is configured however
+it was configured then.
+
+**Fix:** The config sets `reuseExistingServer: false` for both servers. If a port is
+already taken the run fails loudly, which is the outcome you want.
