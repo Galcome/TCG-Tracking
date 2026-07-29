@@ -9,6 +9,7 @@ recoverable.
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,11 +30,14 @@ from src.schemas.ledger import (
     SaleCreate,
     SaleList,
     SaleListItem,
+    SalePreview,
+    SalePreviewRequest,
     SaleRead,
     SaleUpdate,
     VoidRequest,
 )
 from src.services import inventory, ledger, reporting
+from src.services.costing import Event, allocate
 from src.services.search import escape_like
 
 router = APIRouter()
@@ -310,6 +314,60 @@ def list_sales(
         total=total or 0,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post("/sales/preview", response_model=SalePreview)
+def preview_sale(
+    payload: SalePreviewRequest,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> SalePreview:
+    """What a sale would do, without doing it.
+
+    Runs the real costing engine over the product's history plus this hypothetical sale,
+    so the form can show FIFO cost basis and profit for these exact units. Nothing is
+    written, and the client never has to re-implement the engine or do money arithmetic
+    in JavaScript.
+    """
+    _require_product(db, payload.product_id)
+
+    events, _sources = ledger.load_events(db, payload.product_id)
+    hypothetical = Event(
+        id=uuid.uuid4(),
+        quantity=payload.quantity,
+        is_supply=False,
+        occurred_on=payload.sale_date,
+        # Sorts last among events sharing its date: it is the newest thing entered, so it
+        # draws on whatever earlier sales left behind.
+        created_at=datetime.max.replace(tzinfo=UTC),
+    )
+    result = allocate([*events, hypothetical])
+    outcome = result.consumers[hypothetical.id]
+
+    fees = payload.platform_fees + payload.payment_fees + payload.shipping_paid
+    net = payload.amount - fees
+    profit = None if outcome.cost_basis_cents is None else net - outcome.cost_basis_cents
+    roi = (
+        profit / outcome.cost_basis_cents
+        if profit is not None and outcome.cost_basis_cents
+        else None
+    )
+
+    available = inventory.quantity_on_hand(db, payload.product_id)
+    return SalePreview(
+        quantity=payload.quantity,
+        gross=payload.amount,
+        fees=fees,
+        net_proceeds=net,
+        cost_basis=outcome.cost_basis_cents,
+        realized_profit=profit,
+        roi=roi,
+        has_unknown_cost=outcome.has_unknown_cost,
+        quantity_available=available,
+        quantity_remaining=available - payload.quantity,
+        remaining_cost=result.remaining_cost_cents,
+        exceeds_stock=payload.quantity > available,
     )
 
 

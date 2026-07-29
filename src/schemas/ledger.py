@@ -242,6 +242,43 @@ class AdjustmentRead(BaseModel):
 # ------------------------------------------------------------------------- history
 
 
+class SalePreviewRequest(BaseModel):
+    """A hypothetical sale, for the live-math panel in the record-sale form."""
+
+    product_id: uuid.UUID
+    quantity: int = Field(gt=0, le=MAX_QUANTITY)
+    amount: MoneyIn = 0
+    platform_fees: MoneyIn = 0
+    payment_fees: MoneyIn = 0
+    shipping_paid: MoneyIn = 0
+    sale_date: date = Field(default_factory=date.today)
+
+
+class SalePreview(BaseModel):
+    """What this sale would do, computed by the real engine without writing anything.
+
+    Exists so the client never re-implements FIFO or does money arithmetic in
+    JavaScript, where 19.99 * 100 is not 1999.
+    """
+
+    quantity: int
+    gross: MoneyOut
+    fees: MoneyOut
+    net_proceeds: MoneyOut
+    #: null when the units have no known cost - never render it as zero.
+    cost_basis: MoneyOutOptional
+    realized_profit: MoneyOutOptional
+    roi: float | None
+    has_unknown_cost: bool
+
+    #: Stock available before this sale, and what would remain after it.
+    quantity_available: int
+    quantity_remaining: int
+    remaining_cost: MoneyOut
+    #: True when this would sell more than is recorded, which needs allow_oversell.
+    exceeds_stock: bool
+
+
 class SaleListItem(SaleRead):
     """A sale plus its product, for the cross-product ledger.
 

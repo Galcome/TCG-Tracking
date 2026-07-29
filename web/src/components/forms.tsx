@@ -8,9 +8,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
-import { ADJUSTMENT_REASONS, api, type Product } from '../api'
-import { humanise, todayIso } from '../format'
-import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
+import { ADJUSTMENT_REASONS, MARKETPLACES, api, type Product } from '../api'
+import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
+import { Advanced, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
 
 function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
   const queryClient = useQueryClient()
@@ -287,33 +287,80 @@ export function AddPurchaseDialog({
     </Dialog>
   )
 }
-
-export function RecordSaleDialog({ product, onClose }: { product: Product; onClose: () => void }) {
+export function RecordSaleDialog({
+  product,
+  onClose,
+}: {
+  /** Omitted when opened from a page header - the dialog then asks which product. */
+  product?: Product
+  onClose: () => void
+}) {
   const members = useQuery({ queryKey: ['members'], queryFn: api.members })
+  const [picked, setPicked] = useState<Product | undefined>(product)
 
   const [quantity, setQuantity] = useState('1')
   const [amount, setAmount] = useState('')
   const [saleDate, setDate] = useState(todayIso())
   const [soldBy, setSoldBy] = useState('')
+  const [marketplace, setMarketplace] = useState('')
   const [platformFees, setPlatformFees] = useState('')
   const [paymentFees, setPaymentFees] = useState('')
   const [shippingPaid, setShippingPaid] = useState('')
-  const [marketplace, setMarketplace] = useState('')
+  const [notes, setNotes] = useState('')
   const [allowOversell, setAllowOversell] = useState(false)
 
   const create = useLedgerMutation(api.createSale, onClose)
-  const stock = product.stats.quantity_on_hand
-  const oversellRefused =
-    create.error instanceof Error && create.error.message.includes('in stock')
+
+  // Computed by the server running the real FIFO engine. Doing it here would mean
+  // re-implementing the engine in TypeScript and doing money arithmetic in floats, both
+  // of which this project deliberately avoids.
+  const preview = useQuery({
+    queryKey: [
+      'salePreview',
+      picked?.id,
+      quantity,
+      amount,
+      platformFees,
+      paymentFees,
+      shippingPaid,
+      saleDate,
+    ],
+    enabled: Boolean(picked) && Number(quantity) > 0,
+    queryFn: () =>
+      api.previewSale({
+        product_id: picked!.id,
+        quantity: Number(quantity),
+        amount: amount || '0',
+        platform_fees: platformFees || '0',
+        payment_fees: paymentFees || '0',
+        shipping_paid: shippingPaid || '0',
+        sale_date: saleDate,
+      }),
+  })
+
+  function chooseMarketplace(name: string, feePercent: number) {
+    setMarketplace(name)
+    // Suggest the channel's usual cut so the common case needs no arithmetic. It stays
+    // editable, because a promo or a store-credit deal changes it.
+    if (amount && feePercent > 0) {
+      setPlatformFees(((Number(amount) * feePercent) / 100).toFixed(2))
+    }
+  }
+
+  if (!picked) {
+    return <ProductPickerDialog onClose={onClose} onPick={setPicked} />
+  }
+
+  const math = preview.data
 
   return (
     <Dialog
-      title={`Record sale — ${product.name}`}
+      title="Record sale"
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()
         create.mutate({
-          product_id: product.id,
+          product_id: picked.id,
           quantity: Number(quantity),
           amount,
           platform_fees: platformFees || undefined,
@@ -321,18 +368,40 @@ export function RecordSaleDialog({ product, onClose }: { product: Product; onClo
           shipping_paid: shippingPaid || undefined,
           sale_date: saleDate,
           sold_by_member_id: soldBy || null,
-          marketplace: marketplace.trim() || null,
+          marketplace: marketplace || null,
+          notes: notes.trim() || null,
           allow_oversell: allowOversell,
         })
       }}
-      submitLabel="Save"
+      submitLabel="Record sale"
       busy={create.isPending}
       error={create.error ? (create.error as Error).message : null}
     >
-      <p className="text-sm text-(--color-muted)">
-        {stock} in stock
-        {stock <= 0 && ' — recording a sale will leave stock negative'}
-      </p>
+      <div className="flex items-center gap-3 rounded-lg border border-(--color-edge) bg-(--color-ink)/50 p-3">
+        <span
+          aria-hidden="true"
+          className="flex h-11 w-9 shrink-0 items-center justify-center rounded-md"
+          style={{ background: `${gameColour(picked.game.slug)}22` }}
+        >
+          <GameDot slug={picked.game.slug} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{picked.name}</p>
+          <p className="text-xs text-(--color-faint)">
+            {picked.game.name} · {picked.product_type.name} · {picked.stats.quantity_on_hand} in
+            stock · {money(picked.stats.average_unit_cost, '—')} avg cost
+          </p>
+        </div>
+        {!product && (
+          <button
+            type="button"
+            onClick={() => setPicked(undefined)}
+            className="shrink-0 text-xs text-(--color-accent)"
+          >
+            Change
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Quantity">
@@ -358,6 +427,27 @@ export function RecordSaleDialog({ product, onClose }: { product: Product; onClo
         </Field>
       </div>
 
+      <div>
+        <span className="text-sm font-medium text-(--color-muted)">Sold on</span>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {MARKETPLACES.map((option) => (
+            <button
+              key={option.name}
+              type="button"
+              onClick={() => chooseMarketplace(option.name, option.feePercent)}
+              className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                marketplace === option.name
+                  ? 'border-transparent font-medium text-(--color-ink)'
+                  : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+              }`}
+              style={marketplace === option.name ? { backgroundColor: option.colour } : undefined}
+            >
+              {option.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <Field label="Sold by">
           <select value={soldBy} onChange={(e) => setSoldBy(e.target.value)} className={FIELD_CLASS}>
@@ -380,8 +470,48 @@ export function RecordSaleDialog({ product, onClose }: { product: Product; onClo
         </Field>
       </div>
 
-      {oversellRefused && (
-        <label className="flex items-start gap-2 rounded-lg border border-amber-500/40 p-3 text-sm">
+      <Field label="Platform fees" hint="Suggested from the channel; edit if it differed">
+        <input
+          {...MONEY_INPUT}
+          value={platformFees}
+          onChange={(e) => setPlatformFees(e.target.value)}
+          className={FIELD_CLASS}
+        />
+      </Field>
+
+      {math && (
+        <div className="space-y-2 rounded-lg border border-(--color-edge) bg-(--color-ink)/50 p-3.5 text-sm">
+          <MathRow label="Gross" value={money(math.gross)} />
+          <MathRow
+            label="Fees"
+            value={Number(math.fees) > 0 ? money((-Number(math.fees)).toFixed(2)) : money('0')}
+            tone={Number(math.fees) > 0 ? 'text-(--color-loss)' : ''}
+          />
+          <MathRow
+            label="Cost basis (FIFO)"
+            value={math.has_unknown_cost ? 'Unknown' : money(math.cost_basis)}
+            tone={math.has_unknown_cost ? 'text-(--color-warn)' : ''}
+          />
+          <div className="border-t border-(--color-edge) pt-2">
+            <MathRow
+              label="Realized profit"
+              value={math.has_unknown_cost ? 'Unknown' : signedMoney(math.realized_profit)}
+              tone={math.has_unknown_cost ? 'text-(--color-warn)' : toneFor(math.realized_profit)}
+              strong
+            />
+            {math.roi !== null && (
+              <MathRow label="ROI" value={percent(math.roi)} tone={toneFor(math.roi)} />
+            )}
+          </div>
+          <p className="pt-1 text-xs text-(--color-faint)">
+            Leaves {math.quantity_remaining} unit{math.quantity_remaining === 1 ? '' : 's'} on hand
+            · {money(math.remaining_cost)} inventory at cost
+          </p>
+        </div>
+      )}
+
+      {math?.exceeds_stock && (
+        <label className="flex items-start gap-2 rounded-lg border border-(--color-warn)/40 bg-(--color-warn)/10 p-3 text-sm">
           <input
             type="checkbox"
             checked={allowOversell}
@@ -389,22 +519,15 @@ export function RecordSaleDialog({ product, onClose }: { product: Product; onClo
             className="mt-1"
           />
           <span>
-            Record it anyway. The missing units will have no known cost, so this sale's profit
-            will show as Unknown until the purchase is entered.
+            This sells {math.quantity - math.quantity_available} more than recorded. Book it anyway
+            — those units will have no known cost, so this sale keeps a profit of Unknown until the
+            purchase is entered.
           </span>
         </label>
       )}
 
       <Advanced>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Platform fees">
-            <input
-              {...MONEY_INPUT}
-              value={platformFees}
-              onChange={(e) => setPlatformFees(e.target.value)}
-              className={FIELD_CLASS}
-            />
-          </Field>
+        <div className="grid grid-cols-2 gap-3">
           <Field label="Payment fees">
             <input
               {...MONEY_INPUT}
@@ -422,15 +545,106 @@ export function RecordSaleDialog({ product, onClose }: { product: Product; onClo
             />
           </Field>
         </div>
-        <Field label="Sold on">
-          <input
-            value={marketplace}
-            onChange={(e) => setMarketplace(e.target.value)}
-            placeholder="eBay, Facebook, in person…"
-            className={FIELD_CLASS}
-          />
+        <Field label="Notes">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={FIELD_CLASS} />
         </Field>
       </Advanced>
+    </Dialog>
+  )
+}
+
+function MathRow({
+  label,
+  value,
+  tone = '',
+  strong = false,
+}: {
+  label: string
+  value: string
+  tone?: string
+  strong?: boolean
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className={strong ? 'font-medium' : 'text-(--color-muted)'}>{label}</span>
+      <span
+        className={`tabular-nums ${strong ? 'font-display text-base font-semibold' : ''} ${tone}`}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+/** Asked first when the dialog is opened without a product already in hand. */
+function ProductPickerDialog({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void
+  onPick: (product: Product) => void
+}) {
+  const [search, setSearch] = useState('')
+  const products = useQuery({
+    queryKey: ['products', 'picker', search],
+    queryFn: () => api.products({ q: search || undefined, stock: 'in' }),
+  })
+
+  return (
+    <Dialog
+      title="Record sale"
+      onClose={onClose}
+      onSubmit={(event) => event.preventDefault()}
+      submitLabel="Pick a product"
+      busy
+    >
+      <Field label="Which product?">
+        <input
+          autoFocus
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products in stock…"
+          className={FIELD_CLASS}
+        />
+      </Field>
+
+      <ul className="max-h-72 space-y-1.5 overflow-y-auto">
+        {products.data?.items.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              onClick={() => onPick(item)}
+              className="flex w-full items-center gap-3 rounded-lg border border-(--color-edge) p-2.5 text-left transition-colors hover:border-(--color-edge-strong) hover:bg-(--color-raised)"
+            >
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-8 shrink-0 items-center justify-center rounded-md"
+                style={{ background: `${gameColour(item.game.slug)}22` }}
+              >
+                <GameDot slug={item.game.slug} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{item.name}</span>
+                <span className="block text-xs text-(--color-faint)">
+                  {item.game.name} · {item.product_type.name}
+                </span>
+              </span>
+              <span className="shrink-0 text-right text-xs">
+                <span className="block tabular-nums">{item.stats.quantity_on_hand} in stock</span>
+                <span className="block tabular-nums text-(--color-faint)">
+                  {money(item.stats.average_unit_cost, '—')}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+        {products.data?.items.length === 0 && (
+          <li className="py-6 text-center text-sm text-(--color-muted)">
+            Nothing in stock matches that.
+          </li>
+        )}
+      </ul>
     </Dialog>
   )
 }

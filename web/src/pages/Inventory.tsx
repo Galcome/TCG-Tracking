@@ -27,7 +27,7 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-export function Inventory() {
+export function Inventory({ onRecordSale }: { onRecordSale: () => void }) {
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
   const [stock, setStock] = useState('')
@@ -51,10 +51,24 @@ export function Inventory() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-2xl font-bold lg:text-3xl">Inventory</h1>
-        <Button type="button" onClick={() => setAdding(true)} className="hidden lg:inline-flex">
-          <Plus size={16} strokeWidth={2.5} />
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => setAdding(true)}
+          className="lg:hidden"
+        >
+          <Plus size={15} strokeWidth={2.5} />
           Add product
         </Button>
+        <div className="hidden gap-2 lg:flex">
+          <Button type="button" variant="ghost" onClick={() => setAdding(true)}>
+            <Plus size={16} strokeWidth={2.5} />
+            Add product
+          </Button>
+          <Button type="button" onClick={onRecordSale}>
+            Record sale
+          </Button>
+        </div>
       </div>
 
       {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
@@ -226,11 +240,10 @@ export function Inventory() {
       {/* Mobile primary action, thumb-reachable above the tab bar. */}
       <button
         type="button"
-        onClick={() => setAdding(true)}
+        onClick={onRecordSale}
         className="fixed inset-x-4 bottom-20 z-10 flex items-center justify-center gap-2 rounded-xl bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3.5 font-semibold text-(--color-ink) shadow-lg lg:hidden"
       >
-        <Plus size={17} strokeWidth={2.5} />
-        Add product
+        Record sale
       </button>
 
       {adding && <AddProductDialog onClose={() => setAdding(false)} />}
