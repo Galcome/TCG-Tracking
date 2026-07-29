@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { api } from './api'
+import { api, type Product } from './api'
 import { AppShell } from './components/AppShell'
 import { AddProductDialog, RecordSaleDialog } from './components/forms'
 import { Dashboard } from './pages/Dashboard'
@@ -18,7 +18,8 @@ export function App() {
 
   // Recording a sale is reachable from every screen, so the dialog lives here rather
   // than being duplicated per page.
-  const [recordingSale, setRecordingSale] = useState(false)
+  // `undefined` product means the dialog asks which one; a product skips that step.
+  const [saleFor, setSaleFor] = useState<{ product?: Product } | null>(null)
   const [addingProduct, setAddingProduct] = useState(false)
 
   // The first authenticated call provisions the member row server-side.
@@ -44,7 +45,7 @@ export function App() {
     )
   }
 
-  const openSale = () => setRecordingSale(true)
+  const openSale = (product?: Product) => setSaleFor({ product })
   const openProduct = () => setAddingProduct(true)
   const actions = { onRecordSale: openSale, onAddProduct: openProduct }
 
@@ -59,7 +60,9 @@ export function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {recordingSale && <RecordSaleDialog onClose={() => setRecordingSale(false)} />}
+      {saleFor && (
+        <RecordSaleDialog product={saleFor.product} onClose={() => setSaleFor(null)} />
+      )}
       {addingProduct && <AddProductDialog onClose={() => setAddingProduct(false)} />}
     </AppShell>
   )

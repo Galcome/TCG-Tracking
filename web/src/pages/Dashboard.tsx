@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api, MARKETPLACES, type Attention, type Period } from '../api'
-import { PageHeader } from '../components/AppShell'
+import { PageHeader, type PageActions } from '../components/AppShell'
 import { Card, Empty, Skeleton, gameColour } from '../components/ui'
 import { money, moneyCompact, percent, shortDate, signedMoney, toneFor } from '../format'
 
@@ -26,7 +26,7 @@ function marketplaceColour(name: string): string {
   return MARKETPLACES.find((m) => m.name === name)?.colour ?? 'var(--color-game-other)'
 }
 
-export function Dashboard({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
+export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
   const [period, setPeriod] = useState<Period>('all')
 
   const summary = useQuery({
@@ -194,7 +194,7 @@ export function Dashboard({ onRecordSale, onAddProduct }: { onRecordSale: () => 
         ) : (
           <Empty>
             Nothing sold yet.{' '}
-            <button type="button" onClick={onRecordSale} className="text-(--color-accent)">
+            <button type="button" onClick={() => onRecordSale()} className="text-(--color-accent)">
               Record a sale
             </button>
             .

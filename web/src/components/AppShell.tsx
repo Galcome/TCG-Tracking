@@ -13,9 +13,15 @@ import { BarChart3, LayoutDashboard, LogOut, Package, Plus, ScrollText } from 'l
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 
-import { api, type Member } from '../api'
+import { api, type Member, type Product } from '../api'
 import { signedMoney, toneFor } from '../format'
 import { Button, gameColour } from './ui'
+
+/** Actions every page header offers. Passing a product skips the picker step. */
+export interface PageActions {
+  onRecordSale: (product?: Product) => void
+  onAddProduct: () => void
+}
 
 const NAV = [
   { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
@@ -258,7 +264,7 @@ export function PageHeader({
   children,
 }: {
   title: string
-  onRecordSale?: () => void
+  onRecordSale?: (product?: Product) => void
   onAddProduct?: () => void
   children?: ReactNode
 }) {
@@ -284,7 +290,7 @@ export function PageHeader({
             </Button>
           )}
           {onRecordSale && (
-            <Button type="button" onClick={onRecordSale}>
+            <Button type="button" onClick={() => onRecordSale()}>
               Record sale
             </Button>
           )}
