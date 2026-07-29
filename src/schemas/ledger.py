@@ -349,6 +349,13 @@ class TransactionRead(BaseModel):
     occurred_on: date | None
     quantity: int  #: signed - positive adds stock, negative removes it
     amount: MoneyOutOptional = None
+    #: Purchases only. `amount` is the landed total, which is what history should show but
+    #: is not a column - editing it back as `amount` would add shipping and tax a second
+    #: time. These are the fields a correction actually writes to.
+    base_amount: MoneyOutOptional = None
+    shipping: MoneyOutOptional = None
+    tax: MoneyOutOptional = None
+    fees: MoneyOutOptional = None
     cost: MoneyOutOptional = None
     profit: MoneyOutOptional = None
     has_unknown_cost: bool = False
