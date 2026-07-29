@@ -152,6 +152,13 @@ export interface Dashboard {
   products_with_negative_stock: number
 }
 
+export interface UnitsByAge {
+  d0_30: number
+  d31_90: number
+  d91_180: number
+  d180_plus: number
+}
+
 export interface GroupRow {
   key: string
   label: string
@@ -163,7 +170,77 @@ export interface GroupRow {
   units_in_stock: number
   sale_count: number
   sales_missing_cost: number
+  units_sold: number
+  units_purchased: number
+  avg_days_held: number | null
+  sell_through: number | null
+  profit_per_day: string | null
+  units_by_age: UnitsByAge
 }
+
+export type GroupBy = 'game' | 'product' | 'product-type' | 'marketplace' | 'seller'
+
+export interface ProductSummary {
+  id: string
+  name: string
+  game: Taxonomy
+  product_type: Taxonomy
+}
+
+/** A sale in the cross-product ledger. Money is a decimal string; null means unknown. */
+export interface SaleRow {
+  id: string
+  product_id: string
+  product: ProductSummary
+  quantity: number
+  amount: string
+  platform_fees: string
+  payment_fees: string
+  shipping_paid: string
+  net_proceeds: string
+  cost_basis: string | null
+  realized_profit: string | null
+  has_unknown_cost: boolean
+  days_held_weighted: number | null
+  sale_date: string | null
+  sold_by_member_id: string | null
+  marketplace: string | null
+  notes: string | null
+  status: string
+}
+
+export interface SalePage {
+  items: SaleRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** What a sale would do, computed server-side so the client never does money maths. */
+export interface SalePreview {
+  quantity: number
+  gross: string
+  fees: string
+  net_proceeds: string
+  cost_basis: string | null
+  realized_profit: string | null
+  roi: number | null
+  has_unknown_cost: boolean
+  quantity_available: number
+  quantity_remaining: number
+  remaining_cost: string
+  exceeds_stock: boolean
+}
+
+/** The marketplaces the store actually uses, for the chip picker and fee hints. */
+export const MARKETPLACES = [
+  { name: 'eBay', feePercent: 13.25, colour: '#4cc4ff' },
+  { name: 'TCGplayer', feePercent: 10.25, colour: '#a55eea' },
+  { name: 'Whatnot', feePercent: 8, colour: '#ffb454' },
+  { name: 'Facebook', feePercent: 5, colour: '#3ddc97' },
+  { name: 'In person', feePercent: 0, colour: '#ffcb05' },
+  { name: 'Other', feePercent: 0, colour: '#8b9bc0' },
+] as const
 
 export interface Attention {
   sales_missing_cost: number
@@ -301,7 +378,34 @@ export const api = {
     })
   },
 
+  sales: (params: {
+    q?: string
+    marketplace?: string
+    sold_by_member_id?: string
+    game?: string
+    period?: Period
+    limit?: number
+    offset?: number
+  }) => request<SalePage>(`/api/v1/sales${query(params)}`),
+
+  previewSale: (input: {
+    product_id: string
+    quantity: number
+    amount?: string
+    platform_fees?: string
+    payment_fees?: string
+    shipping_paid?: string
+    sale_date?: string
+  }) =>
+    request<SalePreview>('/api/v1/sales/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   dashboard: (period: Period) => request<Dashboard>(`/api/v1/dashboard${query({ period })}`),
+
+  group: (by: GroupBy, period: Period) =>
+    request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period })}`),
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),

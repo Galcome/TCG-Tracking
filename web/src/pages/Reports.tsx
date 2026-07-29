@@ -1,132 +1,451 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
-import { api, type GroupRow, type Period } from '../api'
-import { Card, Chip, Empty, FifoNote } from '../components/ui'
-import { money, percent, signedMoney, toneFor } from '../format'
+import { api, type GroupBy, type GroupRow, type Period } from '../api'
+import { PageHeader } from '../components/AppShell'
+import { Card, Empty, FifoNote, Skeleton, gameColour } from '../components/ui'
+import { money, moneyCompact, percent, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
   { value: 'all', label: 'All time' },
-  { value: 'ytd', label: 'This year' },
-  { value: 'mtd', label: 'This month' },
-  { value: '30d', label: 'Last 30 days' },
+  { value: 'ytd', label: 'Year' },
+  { value: 'mtd', label: 'Month' },
+  { value: '30d', label: '30 days' },
 ]
+
+const GROUPS: { value: GroupBy; label: string; noun: string }[] = [
+  { value: 'game', label: 'Game', noun: 'game' },
+  { value: 'product', label: 'Product', noun: 'product' },
+  { value: 'product-type', label: 'Type', noun: 'product type' },
+  { value: 'marketplace', label: 'Channel', noun: 'channel' },
+  { value: 'seller', label: 'Seller', noun: 'seller' },
+]
+
+type SortKey = 'profit' | 'roi' | 'perDay' | 'days'
+
+const SORTS: { value: SortKey; label: string }[] = [
+  { value: 'profit', label: 'Profit' },
+  { value: 'roi', label: 'ROI' },
+  { value: 'perDay', label: '$/day' },
+  { value: 'days', label: 'Days held' },
+]
+
+function slugOf(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
 
 export function Reports() {
   const [period, setPeriod] = useState<Period>('all')
+  const [groupBy, setGroupBy] = useState<GroupBy>('game')
+  const [sort, setSort] = useState<SortKey>('profit')
 
-  const byGame = useQuery({ queryKey: ['byGame', period], queryFn: () => api.byGame(period) })
-  const bySeller = useQuery({
-    queryKey: ['bySeller', period],
-    queryFn: () => api.bySeller(period),
+  const rows = useQuery({
+    queryKey: ['group', groupBy, period],
+    queryFn: () => api.group(groupBy, period),
   })
 
+  const sorted = useMemo(() => {
+    const list = [...(rows.data ?? [])]
+    const value = (row: GroupRow) =>
+      ({
+        profit: Number(row.realized_profit),
+        roi: row.roi ?? -Infinity,
+        perDay: row.profit_per_day === null ? -Infinity : Number(row.profit_per_day),
+        days: row.avg_days_held ?? Infinity,
+      })[sort]
+    // Days held sorts ascending - fastest first is the useful end of that axis.
+    list.sort((a, b) => (sort === 'days' ? value(a) - value(b) : value(b) - value(a)))
+    return list
+  }, [rows.data, sort])
+
+  const noun = GROUPS.find((g) => g.value === groupBy)?.noun ?? 'group'
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">Reports</h1>
-        <div className="flex flex-wrap gap-2">
+    <div className="space-y-5">
+      <PageHeader title="Reports">
+        <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
           {PERIODS.map((option) => (
-            <Chip
+            <button
               key={option.value}
-              active={period === option.value}
+              type="button"
               onClick={() => setPeriod(option.value)}
+              className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
+                period === option.value
+                  ? 'bg-(--color-accent) font-medium text-(--color-ink)'
+                  : 'text-(--color-muted) hover:text-(--color-text)'
+              }`}
             >
               {option.label}
-            </Chip>
+            </button>
           ))}
+        </div>
+      </PageHeader>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-(--color-faint)">Group by</span>
+          <div className="flex flex-wrap gap-1 rounded-lg border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
+            {GROUPS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setGroupBy(option.value)}
+                className={`rounded-md px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                  groupBy === option.value
+                    ? 'bg-(--color-raised) font-medium text-(--color-text)'
+                    : 'text-(--color-muted) hover:text-(--color-text)'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-(--color-faint)">Sort</span>
+          <div className="flex flex-wrap gap-1 rounded-lg border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
+            {SORTS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSort(option.value)}
+                className={`rounded-md px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                  sort === option.value
+                    ? 'bg-(--color-raised) font-medium text-(--color-text)'
+                    : 'text-(--color-muted) hover:text-(--color-text)'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <GroupTable
-        title="By game"
-        rows={byGame.data ?? []}
-        firstColumn="Game"
-        showInventory
-        empty="Nothing sold or in stock yet."
-      />
+      {rows.isLoading && <Skeleton className="h-80 w-full" />}
+      {rows.isError && (
+        <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+          {(rows.error as Error).message}
+        </p>
+      )}
 
-      <GroupTable
-        title="By seller"
-        rows={bySeller.data ?? []}
-        firstColumn="Member"
-        empty="No sales recorded yet."
-        note="Performance only. All inventory belongs to the store, not to the person who sold it."
-      />
+      {rows.data && sorted.length === 0 && (
+        <Card>
+          <Empty>Nothing sold or in stock for this period.</Empty>
+        </Card>
+      )}
 
-      <FifoNote />
+      {sorted.length > 0 && (
+        <>
+          <ReturnVsTime rows={sorted} noun={noun} />
+          <VelocityTable rows={sorted} label={GROUPS.find((g) => g.value === groupBy)!.label} />
+          <MoneyAsleep rows={sorted} />
+          <FifoNote />
+        </>
+      )}
     </div>
   )
 }
 
-function GroupTable({
-  title,
-  rows,
-  firstColumn,
-  showInventory = false,
-  empty,
-  note,
-}: {
-  title: string
-  rows: GroupRow[]
-  firstColumn: string
-  showInventory?: boolean
-  empty: string
-  note?: string
-}) {
+/**
+ * Return against time held.
+ *
+ * Axis ticks are static SVG text. Dot labels are absolutely-positioned HTML over the
+ * plot: SVG <text> inside a map does not lay out reliably across browsers, and HTML
+ * gives ellipsis truncation for free.
+ */
+function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
+  const plotted = rows.filter((row) => row.avg_days_held !== null && row.roi !== null)
+  if (plotted.length === 0) {
+    return (
+      <Card>
+        <Empty>
+          No {noun} has both a sale and a known hold time yet — that needs a purchase with a date
+          and a sale drawn from it.
+        </Empty>
+      </Card>
+    )
+  }
+
+  const maxDays = Math.max(...plotted.map((row) => row.avg_days_held ?? 0), 30)
+  const rois = plotted.map((row) => row.roi ?? 0)
+  const maxRoi = Math.max(...rois, 0.1)
+  const minRoi = Math.min(...rois, 0)
+  const maxUnits = Math.max(...plotted.map((row) => row.units_sold), 1)
+
+  const x = (days: number) => (days / maxDays) * 100
+  const y = (roi: number) => ((maxRoi - roi) / (maxRoi - minRoi || 1)) * 100
+  // Area scales with units, so a dot twice the size means twice the volume, not twice
+  // the radius.
+  const radius = (units: number) => 6 + Math.sqrt(units / maxUnits) * 16
+
   return (
     <section>
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
-        {title}
-      </h2>
-      {note && <p className="mb-3 text-xs text-(--color-muted)">{note}</p>}
+      <div className="mb-2.5">
+        <h2 className="font-display text-sm font-semibold">Return vs. time held</h2>
+        <p className="text-xs text-(--color-faint)">
+          Each dot is a {noun}. Up is more profitable, left is faster to sell. Dot size is units
+          sold.
+        </p>
+      </div>
 
-      <Card className="overflow-x-auto p-0">
-        {rows.length === 0 ? (
-          <Empty>{empty}</Empty>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b border-(--color-edge) text-left text-xs uppercase tracking-wide text-(--color-muted)">
-              <tr>
-                <th className="px-4 py-3 font-medium">{firstColumn}</th>
-                <th className="px-4 py-3 text-right font-medium">Profit</th>
-                <th className="px-4 py-3 text-right font-medium">ROI</th>
-                <th className="px-4 py-3 text-right font-medium">Revenue</th>
-                <th className="px-4 py-3 text-right font-medium">Sales</th>
-                {showInventory && (
-                  <th className="px-4 py-3 text-right font-medium">Inventory at cost</th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-(--color-edge)">
-              {rows.map((row) => (
-                <tr key={row.key}>
-                  <td className="px-4 py-3">
-                    {row.label}
-                    {row.sales_missing_cost > 0 && (
-                      <span className="ml-2 text-xs text-(--color-muted)">
-                        {row.sales_missing_cost} excluded
-                      </span>
-                    )}
-                  </td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${toneFor(row.realized_profit)}`}>
-                    {signedMoney(row.realized_profit)}
-                  </td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${toneFor(row.roi)}`}>
-                    {percent(row.roi)}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{money(row.revenue)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{row.sale_count}</td>
-                  {showInventory && (
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {money(row.inventory_at_cost)}
-                    </td>
+      <Card className="p-4">
+        <div className="relative h-72 w-full">
+          {/* Quadrant tint: fast and high-return is where you want to live. */}
+          <div className="absolute left-0 top-0 h-1/2 w-1/2 rounded-tl bg-(--color-gain)/[0.06]" />
+          <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-(--color-edge)" />
+          <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-(--color-edge)" />
+
+          <span className="absolute left-2 top-2 text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-gain)">
+            FAST + HIGH RETURN
+          </span>
+          <span className="absolute bottom-2 right-2 text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-loss)">
+            SLOW + LOW RETURN
+          </span>
+
+          {plotted.map((row) => {
+            const size = radius(row.units_sold)
+            const colour = gameColour(slugOf(row.label))
+            return (
+              <span
+                key={row.key}
+                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
+                title={`${row.label}: ${percent(row.roi)} over ${row.avg_days_held}d, ${row.units_sold} sold`}
+                style={{
+                  left: `${x(row.avg_days_held ?? 0)}%`,
+                  top: `${y(row.roi ?? 0)}%`,
+                  height: size,
+                  width: size,
+                  borderColor: colour,
+                  backgroundColor: `${colour}33`,
+                }}
+              />
+            )
+          })}
+
+          {plotted.slice(0, 6).map((row) => (
+            <span
+              key={`${row.key}-label`}
+              className="pointer-events-none absolute max-w-24 -translate-x-1/2 translate-y-2 truncate text-center text-[0.625rem] text-(--color-muted)"
+              style={{
+                left: `${x(row.avg_days_held ?? 0)}%`,
+                top: `${y(row.roi ?? 0)}%`,
+              }}
+            >
+              {row.label}
+            </span>
+          ))}
+        </div>
+
+        <div className="mt-2 flex justify-between text-[0.625rem] text-(--color-faint)">
+          <span>0 days</span>
+          <span>AVERAGE DAYS HELD BEFORE SALE</span>
+          <span>{maxDays}d</span>
+        </div>
+      </Card>
+    </section>
+  )
+}
+
+function VelocityTable({ rows, label }: { rows: GroupRow[]; label: string }) {
+  return (
+    <section>
+      <h2 className="font-display mb-2.5 text-sm font-semibold">Performance by {label.toLowerCase()}</h2>
+
+      <Card className="hidden overflow-x-auto p-0 lg:block">
+        <table className="w-full text-sm">
+          <thead className="border-b border-(--color-edge) text-left text-[0.6875rem] uppercase tracking-wide text-(--color-faint)">
+            <tr>
+              <th className="px-4 py-3 font-medium">{label}</th>
+              <th className="px-4 py-3 text-right font-medium">Profit</th>
+              <th className="px-4 py-3 text-right font-medium">ROI</th>
+              <th className="px-4 py-3 text-right font-medium">Revenue</th>
+              <th className="px-4 py-3 text-right font-medium">Sold</th>
+              <th className="px-4 py-3 text-right font-medium">Avg days</th>
+              <th className="px-4 py-3 text-right font-medium">Sell-through</th>
+              <th className="px-4 py-3 text-right font-medium">$/day</th>
+              <th className="px-4 py-3 font-medium">Stock age</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-(--color-edge)">
+            {rows.map((row) => (
+              <tr key={row.key} className="transition-colors hover:bg-(--color-raised)">
+                <td className="px-4 py-3">
+                  <span className="flex items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: gameColour(slugOf(row.label)) }}
+                    />
+                    <span className="truncate">{row.label}</span>
+                  </span>
+                  {row.sales_missing_cost > 0 && (
+                    <span className="ml-4 text-xs text-(--color-warn)">
+                      {row.sales_missing_cost} excluded
+                    </span>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                </td>
+                <td className={`px-4 py-3 text-right tabular-nums ${toneFor(row.realized_profit)}`}>
+                  {signedMoney(row.realized_profit)}
+                </td>
+                <td className={`px-4 py-3 text-right tabular-nums ${toneFor(row.roi)}`}>
+                  {percent(row.roi)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">{money(row.revenue)}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{row.units_sold}</td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {row.avg_days_held === null ? '—' : `${row.avg_days_held}d`}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {row.sell_through === null ? '—' : `${Math.round(row.sell_through * 100)}%`}
+                </td>
+                <td
+                  className={`px-4 py-3 text-right tabular-nums ${toneFor(row.profit_per_day)}`}
+                >
+                  {row.profit_per_day === null ? '—' : money(row.profit_per_day)}
+                </td>
+                <td className="px-4 py-3">
+                  <AgeBar units={row.units_by_age} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <ul className="space-y-2 lg:hidden">
+        {rows.map((row) => (
+          <li key={row.key}>
+            <Card>
+              <div className="flex items-start justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: gameColour(slugOf(row.label)) }}
+                  />
+                  <span className="truncate font-medium">{row.label}</span>
+                </span>
+                <span className={`shrink-0 tabular-nums ${toneFor(row.realized_profit)}`}>
+                  {signedMoney(row.realized_profit)}
+                </span>
+              </div>
+              <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-(--color-faint)">
+                <div>
+                  <dt>ROI</dt>
+                  <dd className={`tabular-nums ${toneFor(row.roi)}`}>{percent(row.roi)}</dd>
+                </div>
+                <div>
+                  <dt>Avg days</dt>
+                  <dd className="tabular-nums">
+                    {row.avg_days_held === null ? '—' : `${row.avg_days_held}d`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>$/day</dt>
+                  <dd className="tabular-nums">
+                    {row.profit_per_day === null ? '—' : money(row.profit_per_day)}
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-2">
+                <AgeBar units={row.units_by_age} />
+              </div>
+            </Card>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** 0-30 / 31-90 / 90+ share of the units on hand. */
+function AgeBar({ units }: { units: GroupRow['units_by_age'] }) {
+  const fresh = units.d0_30
+  const middle = units.d31_90
+  const old = units.d91_180 + units.d180_plus
+  const total = fresh + middle + old
+
+  if (total === 0) {
+    return <span className="text-xs text-(--color-faint)">No stock</span>
+  }
+
+  const bands = [
+    { value: fresh, colour: 'var(--color-gain)', label: '0-30d' },
+    { value: middle, colour: 'var(--color-warn)', label: '31-90d' },
+    { value: old, colour: 'var(--color-loss)', label: '90d+' },
+  ]
+
+  return (
+    <span
+      className="flex h-2 w-28 overflow-hidden rounded-full bg-(--color-raised)"
+      title={bands.map((band) => `${band.label}: ${band.value}`).join(' · ')}
+    >
+      {bands.map((band) => (
+        <span
+          key={band.label}
+          style={{ width: `${(band.value / total) * 100}%`, backgroundColor: band.colour }}
+        />
+      ))}
+    </span>
+  )
+}
+
+/** Cost sitting in stock, by how long it has been sitting there. */
+function MoneyAsleep({ rows }: { rows: GroupRow[] }) {
+  const totals = rows.reduce(
+    (acc, row) => ({
+      d0_30: acc.d0_30 + row.units_by_age.d0_30,
+      d31_90: acc.d31_90 + row.units_by_age.d31_90,
+      d91_180: acc.d91_180 + row.units_by_age.d91_180,
+      d180_plus: acc.d180_plus + row.units_by_age.d180_plus,
+    }),
+    { d0_30: 0, d31_90: 0, d91_180: 0, d180_plus: 0 },
+  )
+  const units = totals.d0_30 + totals.d31_90 + totals.d91_180 + totals.d180_plus
+  if (units === 0) return null
+
+  const inventory = rows.reduce((sum, row) => sum + Number(row.inventory_at_cost), 0)
+  const bands = [
+    { label: '0-30 days', value: totals.d0_30, colour: 'var(--color-gain)' },
+    { label: '31-90 days', value: totals.d31_90, colour: 'var(--color-warn)' },
+    { label: '91-180 days', value: totals.d91_180, colour: 'var(--color-game-magic)' },
+    { label: '180+ days', value: totals.d180_plus, colour: 'var(--color-loss)' },
+  ]
+
+  return (
+    <section>
+      <div className="mb-2.5">
+        <h2 className="font-display text-sm font-semibold">Money asleep</h2>
+        <p className="text-xs text-(--color-faint)">
+          {moneyCompact(inventory.toFixed(2))} of stock on hand, by how long it has been sitting.
+          Units are exact; the cost split is proportional.
+        </p>
+      </div>
+      <Card>
+        <ul className="space-y-3">
+          {bands.map((band) => (
+            <li key={band.label}>
+              <div className="flex items-baseline justify-between text-sm">
+                <span>{band.label}</span>
+                <span className="tabular-nums text-(--color-muted)">
+                  {band.value} unit{band.value === 1 ? '' : 's'} ·{' '}
+                  {moneyCompact(((inventory * band.value) / units).toFixed(2))}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-(--color-raised)">
+                <span
+                  className="block h-full rounded-full"
+                  style={{
+                    width: `${(band.value / units) * 100}%`,
+                    backgroundColor: band.colour,
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       </Card>
     </section>
   )
