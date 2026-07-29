@@ -99,10 +99,84 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: test
+      APP_ROLE: test
+      DEBUG: "false"
+      # The suite runs against test_db_e2e, which tests/e2e/prepare.py creates from this.
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+      DIRECT_DATABASE_URL: ""
+      FIREBASE_PROJECT_ID: test-firebase-project
+      ALLOWED_MEMBER_EMAILS: ""
+      ALLOWED_ORIGINS: http://127.0.0.1:5273
+      ALLOWED_ORIGIN_REGEX: ""
+      SENTRY_DSN: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install Python dependencies
+        run: uv sync --all-groups
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+        working-directory: web
+
+      # The trace is the only way to see why a browser test failed on a machine you
+      # cannot open.
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
   tests-required:
     name: All Tests Required
     runs-on: ubuntu-latest
-    needs: [backend-tests, web-build]
+    needs: [backend-tests, web-build, e2e]
     if: always()
 
     steps:
@@ -114,6 +188,10 @@ jobs:
           fi
           if [ "${{ needs.web-build.result }}" != "success" ]; then
             echo "Web build failed"
+            exit 1
+          fi
+          if [ "${{ needs.e2e.result }}" != "success" ]; then
+            echo "End-to-end tests failed"
             exit 1
           fi
           echo "All checks passed"
