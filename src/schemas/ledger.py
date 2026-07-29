@@ -356,6 +356,11 @@ class TransactionRead(BaseModel):
     shipping: MoneyOutOptional = None
     tax: MoneyOutOptional = None
     fees: MoneyOutOptional = None
+    #: Sales only, for the same reason: `amount` is gross, and a correction has to be able
+    #: to reach the deductions rather than fold them into the price.
+    platform_fees: MoneyOutOptional = None
+    payment_fees: MoneyOutOptional = None
+    shipping_paid: MoneyOutOptional = None
     cost: MoneyOutOptional = None
     profit: MoneyOutOptional = None
     has_unknown_cost: bool = False

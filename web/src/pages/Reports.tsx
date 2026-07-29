@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { api, type GroupBy, type GroupRow, type Period } from '../api'
 import { PageHeader, type PageActions } from '../components/AppShell'
@@ -139,7 +140,11 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
       {sorted.length > 0 && (
         <>
           <ReturnVsTime rows={sorted} noun={noun} />
-          <VelocityTable rows={sorted} label={GROUPS.find((g) => g.value === groupBy)!.label} />
+          <VelocityTable
+            rows={sorted}
+            label={GROUPS.find((g) => g.value === groupBy)!.label}
+            href={groupBy === 'product' ? (row) => `/products/${row.key}` : undefined}
+          />
           <MoneyAsleep rows={sorted} />
           <FifoNote />
         </>
@@ -248,7 +253,29 @@ function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
   )
 }
 
-function VelocityTable({ rows, label }: { rows: GroupRow[]; label: string }) {
+/**
+ * `href` is set only when grouping by product, where `key` is the product id. Every other
+ * grouping is an aggregate with nowhere to drill to, so the row stays plain text rather
+ * than pretending to be a link.
+ */
+function VelocityTable({
+  rows,
+  label,
+  href,
+}: {
+  rows: GroupRow[]
+  label: string
+  href?: (row: GroupRow) => string
+}) {
+  const Label = ({ row }: { row: GroupRow }) =>
+    href ? (
+      <Link to={href(row)} className="truncate transition-colors hover:text-(--color-accent)">
+        {row.label}
+      </Link>
+    ) : (
+      <span className="truncate">{row.label}</span>
+    )
+
   return (
     <section>
       <h2 className="font-display mb-2.5 text-sm font-semibold">Performance by {label.toLowerCase()}</h2>
@@ -278,7 +305,7 @@ function VelocityTable({ rows, label }: { rows: GroupRow[]; label: string }) {
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: gameColour(slugOf(row.label)) }}
                     />
-                    <span className="truncate">{row.label}</span>
+                    <Label row={row} />
                   </span>
                   {row.sales_missing_cost > 0 && (
                     <span className="ml-4 text-xs text-(--color-warn)">
@@ -325,7 +352,9 @@ function VelocityTable({ rows, label }: { rows: GroupRow[]; label: string }) {
                     className="h-2 w-2 shrink-0 rounded-full"
                     style={{ backgroundColor: gameColour(slugOf(row.label)) }}
                   />
-                  <span className="truncate font-medium">{row.label}</span>
+                  <span className="truncate font-medium">
+                    <Label row={row} />
+                  </span>
                 </span>
                 <span className={`shrink-0 tabular-nums ${toneFor(row.realized_profit)}`}>
                   {signedMoney(row.realized_profit)}

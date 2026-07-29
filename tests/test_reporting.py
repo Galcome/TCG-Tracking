@@ -531,6 +531,38 @@ def test_history_leaves_the_purchase_only_fields_empty_on_other_kinds(client, ma
     assert sale["shipping"] is None
 
 
+def test_history_exposes_a_sale_deductions_so_they_can_be_corrected(client, make_product):
+    """`amount` on a sale is gross. A fee typo has to be fixable without moving the price."""
+    product = make_product()
+    buy(client, product["id"], 1, "100.00")
+    sell(
+        client,
+        product["id"],
+        1,
+        "150.00",
+        platform_fees="19.88",
+        payment_fees="4.50",
+        shipping_paid="12.00",
+    )
+
+    sale = next(
+        row
+        for row in client.get(f"/api/v1/products/{product['id']}").json()["history"]
+        if row["kind"] == "sale"
+    )
+    assert sale["amount"] == "150.00", "the price itself, undiminished"
+    assert sale["platform_fees"] == "19.88"
+    assert sale["payment_fees"] == "4.50"
+    assert sale["shipping_paid"] == "12.00"
+
+    purchase = next(
+        row
+        for row in client.get(f"/api/v1/products/{product['id']}").json()["history"]
+        if row["kind"] == "purchase"
+    )
+    assert purchase["platform_fees"] is None
+
+
 def test_history_shows_adjustment_reasons(client, make_product):
     product = make_product()
     buy(client, product["id"], 2, "200.00")

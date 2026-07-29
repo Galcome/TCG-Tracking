@@ -1,11 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { Download, Pencil } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 
-import { api, MARKETPLACES, type Period, type SaleRow } from '../api'
+import { api, MARKETPLACES, saleAsTransaction, type Period, type SaleRow } from '../api'
 import { PageHeader, initials, type PageActions } from '../components/AppShell'
-import { Card, Empty, FIELD_CLASS, GameDot, Skeleton, Stat } from '../components/ui'
+import { EditTransactionDialog, VoidDialog } from '../components/forms'
+import {
+  Card,
+  Empty,
+  FIELD_CLASS,
+  GameDot,
+  RowAction,
+  RowLink,
+  Skeleton,
+  Stat,
+} from '../components/ui'
 import { money, shortDate, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -30,6 +39,11 @@ function saleRoi(sale: SaleRow): number | null {
 }
 
 export function Sales({ onRecordSale, onAddProduct }: PageActions) {
+  // A sale is the entry most likely to be wrong - a price typo, the wrong channel, a
+  // duplicate. This is the screen it gets looked at on, so it has to be the screen it
+  // gets fixed on.
+  const [editing, setEditing] = useState<SaleRow | null>(null)
+  const [voiding, setVoiding] = useState<SaleRow | null>(null)
   const [period, setPeriod] = useState<Period>('all')
   const [search, setSearch] = useState('')
   const [marketplace, setMarketplace] = useState('')
@@ -233,6 +247,7 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
                   <th className="px-4 py-3 text-right font-medium">Net</th>
                   <th className="px-4 py-3 text-right font-medium">Profit</th>
                   <th className="px-4 py-3 text-right font-medium">ROI</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--color-edge)">
@@ -242,18 +257,14 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
                   return (
                     <tr
                       key={row.id}
+                      onClick={() => !voided && setEditing(row)}
                       className={`transition-colors hover:bg-(--color-raised) ${
-                        voided ? 'text-(--color-faint) line-through' : ''
+                        voided ? 'text-(--color-faint) line-through' : 'cursor-pointer'
                       }`}
                     >
                       <td className="whitespace-nowrap px-4 py-3">{shortDate(row.sale_date)}</td>
                       <td className="px-4 py-3">
-                        <Link
-                          to={`/products/${row.product_id}`}
-                          className="font-medium transition-colors hover:text-(--color-accent)"
-                        >
-                          {row.product.name}
-                        </Link>
+                        <span className="font-medium">{row.product.name}</span>
                         <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-(--color-faint)">
                           <GameDot slug={row.product.game.slug} />
                           {row.product.game.name}
@@ -302,6 +313,26 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
                       <td className={`px-4 py-3 text-right tabular-nums ${toneFor(roi)}`}>
                         {roi === null ? '—' : `${roi > 0 ? '+' : ''}${(roi * 100).toFixed(1)}%`}
                       </td>
+                      {/* The row itself edits, so these must not also trigger it. */}
+                      <td
+                        className="whitespace-nowrap px-4 py-3 text-right"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <span className="flex justify-end gap-2">
+                          {!voided && (
+                            <>
+                              <RowAction onClick={() => setEditing(row)}>
+                                <Pencil size={13} />
+                                Edit
+                              </RowAction>
+                              <RowAction tone="danger" onClick={() => setVoiding(row)}>
+                                Void
+                              </RowAction>
+                            </>
+                          )}
+                          <RowLink to={`/products/${row.product_id}`}>Item</RowLink>
+                        </span>
+                      </td>
                     </tr>
                   )
                 })}
@@ -313,24 +344,42 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
             {rows.map((row) => (
               <li key={row.id}>
                 <Card interactive className={row.status === 'voided' ? 'opacity-60' : ''}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <Link to={`/products/${row.product_id}`} className="block truncate font-medium">
-                        {row.product.name}
-                      </Link>
-                      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--color-faint)">
+                  <button
+                    type="button"
+                    onClick={() => row.status !== 'voided' && setEditing(row)}
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{row.product.name}</span>
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--color-faint)">
                         {shortDate(row.sale_date)} · {row.quantity}x
                         <span style={{ color: marketplaceColour(row.marketplace) }}>
                           {row.marketplace ?? 'Unspecified'}
                         </span>
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm tabular-nums">{money(row.net_proceeds)}</p>
-                      <p className={`text-xs tabular-nums ${toneFor(row.realized_profit)}`}>
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block text-sm tabular-nums">{money(row.net_proceeds)}</span>
+                      <span
+                        className={`block text-xs tabular-nums ${toneFor(row.realized_profit)}`}
+                      >
                         {row.has_unknown_cost ? 'Unknown' : signedMoney(row.realized_profit)}
-                      </p>
-                    </div>
+                      </span>
+                    </span>
+                  </button>
+                  <div className="mt-3 flex gap-2 border-t border-(--color-edge) pt-3">
+                    {row.status !== 'voided' && (
+                      <>
+                        <RowAction onClick={() => setEditing(row)}>
+                          <Pencil size={13} />
+                          Edit
+                        </RowAction>
+                        <RowAction tone="danger" onClick={() => setVoiding(row)}>
+                          Void
+                        </RowAction>
+                      </>
+                    )}
+                    <RowLink to={`/products/${row.product_id}`}>Item</RowLink>
                   </div>
                 </Card>
               </li>
@@ -338,11 +387,19 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
           </ul>
 
           <p className="text-xs text-(--color-faint)">
-            {totals.count} sale{totals.count === 1 ? '' : 's'} shown
+            Click a sale to fix it · {totals.count} sale{totals.count === 1 ? '' : 's'} shown
             {sales.data && sales.data.total > rows.length && ` of ${sales.data.total}`}
           </p>
         </>
       )}
+
+      {editing && (
+        <EditTransactionDialog
+          transaction={saleAsTransaction(editing)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {voiding && <VoidDialog kind="sale" id={voiding.id} onClose={() => setVoiding(null)} />}
     </div>
   )
 }
