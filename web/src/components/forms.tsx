@@ -345,10 +345,9 @@ export function RecordSaleDialog({
       }),
   })
 
-  function chooseMarketplace(name: string, feePercent: number) {
-    setMarketplace(name)
-    // Suggest the channel's usual cut so the common case needs no arithmetic. It stays
-    // editable, because a promo or a store-credit deal changes it.
+  // Suggest the channel's usual cut so the common case needs no arithmetic. It stays
+  // editable, because a promo or a store-credit deal changes it.
+  function suggestFees(_name: string, feePercent: number) {
     if (amount && feePercent > 0) {
       setPlatformFees(((Number(amount) * feePercent) / 100).toFixed(2))
     }
@@ -434,26 +433,11 @@ export function RecordSaleDialog({
         </Field>
       </div>
 
-      <div>
-        <span className="text-sm font-medium text-(--color-muted)">Sold on</span>
-        <div className="mt-1.5 flex flex-wrap gap-2">
-          {MARKETPLACES.map((option) => (
-            <button
-              key={option.name}
-              type="button"
-              onClick={() => chooseMarketplace(option.name, option.feePercent)}
-              className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
-                marketplace === option.name
-                  ? 'border-transparent font-medium text-(--color-ink)'
-                  : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
-              }`}
-              style={marketplace === option.name ? { backgroundColor: option.colour } : undefined}
-            >
-              {option.name}
-            </button>
-          ))}
-        </div>
-      </div>
+      <MarketplaceField
+        value={marketplace}
+        onChange={setMarketplace}
+        onPickKnown={suggestFees}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Sold by">
@@ -557,6 +541,87 @@ export function RecordSaleDialog({
         </Field>
       </Advanced>
     </Dialog>
+  )
+}
+
+/**
+ * Where a sale happened.
+ *
+ * The six known channels are chips because they carry a usual fee cut worth suggesting; a
+ * plain dropdown would lose that. **Other** covers everything else - the store sells at
+ * local shops and shows, and until now a sale could only be recorded against one of the
+ * six, so "TCG store" was unenterable.
+ *
+ * `onPickKnown` is deliberately optional. Recording a sale should suggest the channel's
+ * usual fee; editing one should not, because overwriting fees that were actually charged
+ * is how a corrected sale ends up wrong in a different way.
+ */
+function MarketplaceField({
+  value,
+  onChange,
+  onPickKnown,
+}: {
+  value: string
+  onChange: (name: string) => void
+  onPickKnown?: (name: string, feePercent: number) => void
+}) {
+  const isKnown = (name: string) => MARKETPLACES.some((option) => option.name === name)
+  // An existing custom channel opens in the free-text state, so editing one is possible.
+  const [custom, setCustom] = useState(value !== '' && !isKnown(value))
+
+  return (
+    <div>
+      <span className="text-sm font-medium text-(--color-muted)">Sold on</span>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {MARKETPLACES.map((option) => (
+          <button
+            key={option.name}
+            type="button"
+            onClick={() => {
+              setCustom(false)
+              onChange(option.name)
+              onPickKnown?.(option.name, option.feePercent)
+            }}
+            className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+              !custom && value === option.name
+                ? 'border-transparent font-medium text-(--color-ink)'
+                : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+            }`}
+            style={
+              !custom && value === option.name ? { backgroundColor: option.colour } : undefined
+            }
+          >
+            {option.name}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => {
+            setCustom(true)
+            // Keep an existing custom value; clear a known one so the box starts empty.
+            if (isKnown(value)) onChange('')
+          }}
+          className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+            custom
+              ? 'border-(--color-accent) bg-(--color-accent)/12 font-medium text-(--color-accent)'
+              : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+          }`}
+        >
+          Other
+        </button>
+      </div>
+
+      {custom && (
+        <input
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Card shop, show, trade…"
+          maxLength={120}
+          className={FIELD_CLASS}
+        />
+      )}
+    </div>
   )
 }
 
@@ -1185,11 +1250,20 @@ export function EditTransactionDialog({
         </Field>
       </div>
 
-      {!isAdjustment && (
-        <Field label={isPurchase ? 'Bought from' : 'Sold on'}>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} className={FIELD_CLASS} />
+      {isPurchase && (
+        <Field label="Bought from">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            maxLength={160}
+            className={FIELD_CLASS}
+          />
         </Field>
       )}
+
+      {/* No fee suggestion here: this sale's fees were already charged, and recalculating
+          them from a rate would overwrite what actually happened. */}
+      {transaction.kind === 'sale' && <MarketplaceField value={label} onChange={setLabel} />}
 
       {!isAdjustment && (
         <Advanced>

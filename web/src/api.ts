@@ -273,14 +273,19 @@ export interface SalePreview {
   exceeds_stock: boolean
 }
 
-/** The marketplaces the store actually uses, for the chip picker and fee hints. */
+/**
+ * The channels worth a one-tap chip, each with the cut it usually takes.
+ *
+ * There is no "Other" entry: the picker offers free text, and a sale filed under a literal
+ * "Other" is a sale whose channel nobody can report on later. Anything not here is typed
+ * in by name.
+ */
 export const MARKETPLACES = [
   { name: 'eBay', feePercent: 13.25, colour: '#4cc4ff' },
   { name: 'TCGplayer', feePercent: 10.25, colour: '#a55eea' },
   { name: 'Whatnot', feePercent: 8, colour: '#ffb454' },
   { name: 'Facebook', feePercent: 5, colour: '#3ddc97' },
   { name: 'In person', feePercent: 0, colour: '#ffcb05' },
-  { name: 'Other', feePercent: 0, colour: '#8b9bc0' },
 ] as const
 
 /** Only the two states where a displayed number is untrustworthy. Empty means sound. */

@@ -24,6 +24,9 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: '30d', label: '30 days' },
 ]
 
+/** Server-side label for sales with no channel recorded. Not a stored value. */
+const UNSPECIFIED = 'Unspecified'
+
 function marketplaceColour(name: string | null): string {
   return MARKETPLACES.find((m) => m.name === name)?.colour ?? 'var(--color-game-other)'
 }
@@ -50,6 +53,13 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   const [seller, setSeller] = useState('')
 
   const members = useQuery({ queryKey: ['members'], queryFn: api.members })
+  // Channels come from the by-marketplace report rather than from `rows`, which are
+  // already filtered - deriving from those would strip every other option the moment one
+  // was picked, with no way back.
+  const channelReport = useQuery({
+    queryKey: ['byMarketplace', 'all'],
+    queryFn: () => api.group('marketplace', 'all'),
+  })
   const sales = useQuery({
     queryKey: ['sales', period, search, marketplace, seller],
     queryFn: () =>
@@ -63,6 +73,15 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   })
 
   const rows = useMemo(() => sales.data?.items ?? [], [sales.data])
+
+  /** The known channels plus every one actually used, so anything enterable is filterable. */
+  const channels = useMemo(() => {
+    const names = new Set<string>(MARKETPLACES.map((option) => option.name))
+    for (const row of channelReport.data ?? []) {
+      if (row.label !== UNSPECIFIED) names.add(row.label)
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [channelReport.data])
   const memberName = useMemo(
     () => Object.fromEntries((members.data ?? []).map((m) => [m.id, m.display_name])),
     [members.data],
@@ -177,12 +196,12 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
           className={`${FIELD_CLASS} mt-0 sm:w-44`}
         >
           <option value="">All channels</option>
-          {MARKETPLACES.map((option) => (
-            <option key={option.name} value={option.name}>
-              {option.name}
+          {channels.map((name) => (
+            <option key={name} value={name}>
+              {name}
             </option>
           ))}
-          <option value="Unspecified">Unspecified</option>
+          <option value={UNSPECIFIED}>{UNSPECIFIED}</option>
         </select>
         <select
           value={seller}
