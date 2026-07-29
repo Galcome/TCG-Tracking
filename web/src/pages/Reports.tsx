@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import { api, type GroupBy, type GroupRow, type Period } from '../api'
-import { PageHeader } from '../components/AppShell'
+import { PageHeader, type PageActions } from '../components/AppShell'
 import { Card, Empty, FifoNote, Skeleton, gameColour } from '../components/ui'
 import { money, moneyCompact, percent, signedMoney, toneFor } from '../format'
 
@@ -34,7 +34,7 @@ function slugOf(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 }
 
-export function Reports({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
+export function Reports({ onRecordSale, onAddProduct }: PageActions) {
   const [period, setPeriod] = useState<Period>('all')
   const [groupBy, setGroupBy] = useState<GroupBy>('game')
   const [sort, setSort] = useState<SortKey>('profit')

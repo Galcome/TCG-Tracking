@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { PackageSearch } from 'lucide-react'
 
-import { PageHeader } from '../components/AppShell'
+import { PageHeader, type PageActions } from '../components/AppShell'
 import {
   Card,
   Empty,
@@ -26,7 +26,7 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-export function Inventory({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
+export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
   const [stock, setStock] = useState('in')
@@ -119,6 +119,7 @@ export function Inventory({ onRecordSale, onAddProduct }: { onRecordSale: () => 
                   <th className="px-4 py-3 text-right font-medium">Unit cost</th>
                   <th className="px-4 py-3 text-right font-medium">Inventory value</th>
                   <th className="px-4 py-3 text-right font-medium">Realized profit</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--color-edge)">
@@ -166,6 +167,23 @@ export function Inventory({ onRecordSale, onAddProduct }: { onRecordSale: () => 
                       className={`px-4 py-3 text-right tabular-nums ${toneFor(product.stats.realized_profit)}`}
                     >
                       {money(product.stats.realized_profit)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      <span className="flex justify-end gap-3">
+                        <button
+                          type="button"
+                          onClick={() => onRecordSale(product)}
+                          className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
+                        >
+                          Sell
+                        </button>
+                        <Link
+                          to={`/products/${product.id}`}
+                          className="text-xs text-(--color-muted) transition-colors hover:text-(--color-accent)"
+                        >
+                          Edit
+                        </Link>
+                      </span>
                     </td>
                   </tr>
                 ))}

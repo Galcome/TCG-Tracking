@@ -874,7 +874,12 @@ export function EditTransactionDialog({
 }) {
   const members = useQuery({ queryKey: ['members'], queryFn: api.members })
 
-  const [quantity, setQuantity] = useState(String(Math.abs(transaction.quantity)))
+  // History shows movement, so a sale of 3 arrives as -3 while an adjustment of -1 is
+  // genuinely -1. Purchases and sales edit as a positive count; an adjustment keeps its
+  // sign, or saving an untouched write-off would flip it into added stock.
+  const [quantity, setQuantity] = useState(
+    String(transaction.kind === 'adjustment' ? transaction.quantity : Math.abs(transaction.quantity)),
+  )
   const [amount, setAmount] = useState(transaction.amount ?? '')
   const [occurredOn, setOccurredOn] = useState(transaction.occurred_on ?? todayIso())
   const [label, setLabel] = useState(transaction.label ?? '')

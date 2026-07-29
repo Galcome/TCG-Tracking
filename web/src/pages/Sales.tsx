@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api, MARKETPLACES, type Period, type SaleRow } from '../api'
-import { PageHeader, initials } from '../components/AppShell'
+import { PageHeader, initials, type PageActions } from '../components/AppShell'
 import { Card, Empty, FIELD_CLASS, GameDot, Skeleton, Stat } from '../components/ui'
 import { money, shortDate, signedMoney, toneFor } from '../format'
 
@@ -29,7 +29,7 @@ function saleRoi(sale: SaleRow): number | null {
   return Number(sale.realized_profit) / Number(sale.cost_basis)
 }
 
-export function Sales({ onRecordSale, onAddProduct }: { onRecordSale: () => void; onAddProduct: () => void }) {
+export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   const [period, setPeriod] = useState<Period>('all')
   const [search, setSearch] = useState('')
   const [marketplace, setMarketplace] = useState('')
