@@ -402,6 +402,89 @@ def test_optional_text_survives_when_it_has_content(client, make_product):
     assert purchase["notes"] == "sealed"
 
 
+# --------------------------------------------------------------------- running total
+
+
+def test_the_balance_is_what_came_back_minus_what_went_out(client, make_product):
+    product = make_product()
+    buy(client, product["id"], 4, "400.00")
+    sell(client, product["id"], 1, "150.00")
+
+    body = client.get("/api/v1/dashboard").json()
+
+    assert body["total_invested"] == "400.00"
+    assert body["net_proceeds"] == "150.00"
+    assert body["cash_balance"] == "-250.00", "negative because the rest is still stock"
+    assert body["inventory_at_cost"] == "300.00"
+
+
+def test_money_in_is_net_of_fees_not_gross(client, make_product):
+    product = make_product()
+    buy(client, product["id"], 1, "100.00")
+    sell(
+        client,
+        product["id"],
+        1,
+        "200.00",
+        platform_fees="26.50",
+        payment_fees="3.50",
+        shipping_paid="10.00",
+    )
+
+    body = client.get("/api/v1/dashboard").json()
+
+    assert body["total_sales"] == "200.00", "gross is still reported separately"
+    assert body["net_proceeds"] == "160.00", "what actually landed"
+    assert body["fees_paid"] == "40.00"
+    assert body["cash_balance"] == "60.00"
+
+
+def test_a_sale_with_no_known_cost_still_counts_as_money_received(client, make_product):
+    """The distinction the whole block turns on.
+
+    Profit excludes it, correctly - there is no margin to compute without a cost. Cash does
+    not care: the money arrived. Reusing the profit expression here would quietly drop real
+    takings out of a cash figure.
+    """
+    product = make_product()
+    sell(client, product["id"], 1, "250.00", allow_oversell=True)
+
+    body = client.get("/api/v1/dashboard").json()
+
+    assert body["sales_missing_cost"] == 1
+    assert body["realized_profit"] == "0.00", "no cost basis, so no profit is claimed"
+    assert body["net_proceeds"] == "250.00"
+    assert body["cash_balance"] == "250.00"
+
+
+def test_voided_transactions_are_in_neither_column(client, make_product):
+    product = make_product()
+    purchase = buy(client, product["id"], 2, "200.00")
+    sale = sell(client, product["id"], 1, "150.00")
+
+    client.post(f"/api/v1/purchases/{purchase['id']}/void", json={"reason": "duplicate"})
+    client.post(f"/api/v1/sales/{sale['id']}/void", json={"reason": "duplicate"})
+
+    body = client.get("/api/v1/dashboard").json()
+    assert body["total_invested"] == "0.00"
+    assert body["net_proceeds"] == "0.00"
+    assert body["cash_balance"] == "0.00"
+
+
+def test_the_balance_does_not_move_when_the_period_changes(client, make_product):
+    """Money out was already all-time. Money in has to match, or the pair is meaningless."""
+    product = make_product()
+    buy(client, product["id"], 2, "200.00", on=TODAY - timedelta(days=400))
+    sell(client, product["id"], 1, "150.00", on=TODAY - timedelta(days=400))
+
+    lifetime = ("total_invested", "net_proceeds", "cash_balance", "fees_paid")
+    everything = client.get("/api/v1/dashboard").json()
+    this_month = client.get("/api/v1/dashboard?period=mtd").json()
+
+    assert {key: everything[key] for key in lifetime} == {key: this_month[key] for key in lifetime}
+    assert this_month["total_sales"] == "0.00", "the period figures still move, as they should"
+
+
 # ----------------------------------------------------------------------------- aging
 
 

@@ -96,6 +96,8 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
             <InventoryPanel data={data} />
           </div>
 
+          <RunningTotal data={data} />
+
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
             <Metric label="Total invested" value={moneyCompact(data.total_invested)} />
             <Metric label="Total sales" value={moneyCompact(data.total_sales)} />
@@ -349,6 +351,80 @@ function InventoryPanel({
         </div>
       )}
     </section>
+  )
+}
+
+/**
+ * Where the money is, over the whole life of the store.
+ *
+ * Realized profit answers "were the sales any good". It never answers "we bought x and
+ * sold y, so what is the balance", which is the question you ask before deciding whether
+ * you can afford the next case.
+ *
+ * Deliberately outside the period selector. `total_invested` is all-time, so pairing it
+ * with a period-scoped sales figure would take everything ever spent off one month's
+ * takings — hence the label saying so out loud.
+ */
+function RunningTotal({ data }: { data: NonNullable<Awaited<ReturnType<typeof api.dashboard>>> }) {
+  const balance = Number(data.cash_balance)
+
+  return (
+    <section className="rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="font-display text-sm font-semibold">Since day one</h2>
+        <p className="text-xs text-(--color-faint)">
+          All time — the period buttons above do not change these
+        </p>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <Figure
+          label="Money out"
+          value={money(data.total_invested)}
+          hint="Paid for stock, shipping and tax included"
+        />
+        <Figure
+          label="Money in"
+          value={money(data.net_proceeds)}
+          hint={`Received from sales, after ${money(data.fees_paid)} of fees`}
+        />
+        {/* Not red when negative. While the store is growing, money out exceeds money in
+            permanently, because the difference is stock — and a warning colour that is
+            always on is a warning colour nobody reads. */}
+        <Figure
+          label="Balance"
+          value={signedMoney(data.cash_balance)}
+          tone={balance > 0 ? 'text-(--color-gain)' : ''}
+          hint={
+            balance < 0
+              ? `${money(data.inventory_at_cost)} of what you spent is still stock, at cost`
+              : 'More has come back than has gone out'
+          }
+        />
+      </div>
+    </section>
+  )
+}
+
+function Figure({
+  label,
+  value,
+  hint,
+  tone = '',
+}: {
+  label: string
+  value: string
+  hint: string
+  tone?: string
+}) {
+  return (
+    <div>
+      <p className="text-[0.6875rem] font-medium uppercase tracking-[0.08em] text-(--color-faint)">
+        {label}
+      </p>
+      <p className={`font-display mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+      <p className="mt-1 text-xs leading-snug text-(--color-faint)">{hint}</p>
+    </div>
   )
 }
 

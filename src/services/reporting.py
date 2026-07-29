@@ -66,6 +66,21 @@ class Dashboard:
     products_with_negative_stock: int = 0
     cost_written_off_cents: int = 0
 
+    #: Lifetime cash, deliberately not period-scoped. `total_invested_cents` is already
+    #: all-time, so pairing it with a period-scoped sales figure would subtract everything
+    #: ever spent from one month's takings and call the result a balance.
+    net_proceeds_cents: int = 0
+    fees_paid_cents: int = 0
+
+    @property
+    def cash_balance_cents(self) -> int:
+        """Money in minus money out, over the whole life of the store.
+
+        Negative while the store is growing, because the difference is sitting on the
+        shelf. That is stock, not a loss - see `inventory_at_cost_cents`.
+        """
+        return self.net_proceeds_cents - self.total_invested_cents
+
     @property
     def roi(self) -> float | None:
         if self.cost_of_sales_cents <= 0:
@@ -192,6 +207,20 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
         )
         or 0
     )
+
+    # Cash, over the whole life of the store and never period-scoped.
+    #
+    # _NET rather than _NET_KNOWN: profit rightly excludes sales whose cost is unknown,
+    # because there is no margin to compute without a cost. Cash has no such problem - the
+    # money arrived either way, and leaving it out would understate the takings.
+    lifetime_net, lifetime_gross = db.execute(
+        select(
+            func.coalesce(func.sum(_NET), 0),
+            func.coalesce(func.sum(Sale.gross_amount_cents), 0),
+        ).where(Sale.status == STATUS_ACTIVE)
+    ).one()
+    result.net_proceeds_cents = int(lifetime_net)
+    result.fees_paid_cents = int(lifetime_gross) - int(lifetime_net)
 
     # Purchases made during the period - deliberately distinct from cost of sales.
     purchases = select(func.coalesce(func.sum(_LANDED), 0)).where(Purchase.status == STATUS_ACTIVE)

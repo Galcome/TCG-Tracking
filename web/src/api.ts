@@ -160,6 +160,15 @@ export interface Dashboard {
   sales_missing_cost: number
   undated_sales: number
   products_with_negative_stock: number
+  /**
+   * Lifetime cash. These three ignore the period, because `total_invested` is already
+   * all-time — pairing it with a period-scoped sales figure would subtract everything ever
+   * spent from one month's takings. Negative `cash_balance` means the money is on the
+   * shelf, not that it was lost.
+   */
+  net_proceeds: string
+  fees_paid: string
+  cash_balance: string
 }
 
 export interface UnitsByAge {
