@@ -50,6 +50,22 @@ ADJUSTMENT_REASONS = (
 
 _STATUS_CHECK = "status IN ('active', 'voided')"
 
+# Where stock sits. These are *intent*, not a place: all three can be the same basement.
+# Whose house it is in stays `products.storage_location`, which answers a different question.
+#
+#   inventory - bought and held
+#   store     - moved there to sell
+#   vault     - a deliberate long-term hold
+#
+# Deliberately orthogonal to cost. A unit's cost basis comes from its purchase lot wherever
+# it sits, so FIFO stays product-wide and the costing engine never has to know buckets exist.
+BUCKET_INVENTORY = "inventory"
+BUCKET_STORE = "store"
+BUCKET_VAULT = "vault"
+BUCKETS = (BUCKET_INVENTORY, BUCKET_STORE, BUCKET_VAULT)
+
+_BUCKET_CHECK = "bucket IN ('inventory', 'store', 'vault')"
+
 
 class _LedgerEntry(TimestampMixin):
     """Columns every ledger row carries."""
@@ -59,6 +75,9 @@ class _LedgerEntry(TimestampMixin):
     void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default=DEFAULT_CURRENCY)
+    #: Which bucket this row lands stock in, sells it from, or adjusts. Existing rows
+    #: backfill to `inventory`, which is what they always implicitly were.
+    bucket: Mapped[str] = mapped_column(String(16), nullable=False, default=BUCKET_INVENTORY)
 
 
 class Purchase(Base, _LedgerEntry):
@@ -72,6 +91,7 @@ class Purchase(Base, _LedgerEntry):
         CheckConstraint("tax_cents >= 0", name="ck_purchases_tax_non_negative"),
         CheckConstraint("fees_cents >= 0", name="ck_purchases_fees_non_negative"),
         CheckConstraint(_STATUS_CHECK, name="ck_purchases_status"),
+        CheckConstraint(_BUCKET_CHECK, name="ck_purchases_bucket"),
         Index("ix_purchases_product_status", "product_id", "status"),
     )
 
@@ -114,6 +134,7 @@ class Sale(Base, _LedgerEntry):
         CheckConstraint("payment_fees_cents >= 0", name="ck_sales_payment_fees_non_negative"),
         CheckConstraint("shipping_paid_cents >= 0", name="ck_sales_shipping_non_negative"),
         CheckConstraint(_STATUS_CHECK, name="ck_sales_status"),
+        CheckConstraint(_BUCKET_CHECK, name="ck_sales_bucket"),
         Index("ix_sales_product_status", "product_id", "status"),
     )
 
@@ -187,6 +208,7 @@ class InventoryAdjustment(Base, _LedgerEntry):
             name="ck_adjustments_reason",
         ),
         CheckConstraint(_STATUS_CHECK, name="ck_adjustments_status"),
+        CheckConstraint(_BUCKET_CHECK, name="ck_adjustments_bucket"),
         Index("ix_adjustments_product_status", "product_id", "status"),
     )
 
@@ -204,6 +226,42 @@ class InventoryAdjustment(Base, _LedgerEntry):
     #: Cost removed from inventory by a negative adjustment. Engine-maintained.
     cost_removed_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     has_unknown_cost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class StockMove(Base, _LedgerEntry):
+    """Stock changing bucket. Never changes how much there is, only where it sits.
+
+    A move is a transaction like any other so the history stays reconstructable - which is
+    what makes "moved to Vault after 180 days in Store" answerable, and stops the Vault
+    quietly becoming where slow stock goes to be forgotten.
+
+    It carries no money at all. Cost basis follows the purchase lot, not the bucket, so the
+    costing engine never sees these rows.
+
+    `bucket` on the base class is the destination; `from_bucket` is the source.
+    """
+
+    __tablename__ = "stock_moves"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_moves_quantity_positive"),
+        CheckConstraint("from_bucket <> bucket", name="ck_moves_buckets_differ"),
+        CheckConstraint(
+            "from_bucket IN ('inventory', 'store', 'vault')", name="ck_moves_from_bucket"
+        ),
+        CheckConstraint(_STATUS_CHECK, name="ck_moves_status"),
+        CheckConstraint(_BUCKET_CHECK, name="ck_moves_bucket"),
+        Index("ix_moves_product_status", "product_id", "status"),
+    )
+
+    product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_bucket: Mapped[str] = mapped_column(String(16), nullable=False)
+    moved_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    member_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("members.id"), nullable=True)
+    created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("members.id"), nullable=True
+    )
 
 
 class CostAllocation(Base):

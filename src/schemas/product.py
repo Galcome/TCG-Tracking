@@ -5,6 +5,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.models.ledger import BUCKETS
 from src.schemas.ledger import TransactionRead
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
 from src.schemas.taxonomy import TaxonomyRead
@@ -145,6 +146,9 @@ class ProductStatsRead(BaseModel):
     sale_count: int
     #: How many sales were left out of realized profit because their cost is unknown.
     sales_missing_cost: int
+    #: Stock split by bucket. Sums to `quantity_on_hand` - a move takes from one bucket and
+    #: gives to another, so it nets to zero.
+    by_bucket: dict[str, int]
 
 
 EMPTY_STATS = {
@@ -163,6 +167,7 @@ EMPTY_STATS = {
     "roi": None,
     "sale_count": 0,
     "sales_missing_cost": 0,
+    "by_bucket": dict.fromkeys(BUCKETS, 0),
 }
 
 

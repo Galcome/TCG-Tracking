@@ -14,11 +14,15 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.models.ledger import ADJUSTMENT_REASONS
+from src.models.ledger import ADJUSTMENT_REASONS, BUCKET_INVENTORY, BUCKETS
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
 from src.schemas.taxonomy import TaxonomyRead
 
 MAX_QUANTITY = 1_000_000
+
+#: Where stock lands, is sold from, or is adjusted. Defaults to inventory - the bucket
+#: something is in when you have simply bought it and have not decided anything else yet.
+BucketField = Field(default=BUCKET_INVENTORY, pattern=f"^({'|'.join(BUCKETS)})$")
 
 _READ_CONFIG = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -56,6 +60,7 @@ class PurchaseCreate(BaseModel):
     purchase_date: date = Field(default_factory=date.today)
     purchased_by_member_id: uuid.UUID | None = None
     source: str | None = Field(default=None, max_length=160)
+    bucket: str = BucketField
     notes: str | None = None
 
     @field_validator("source", "notes", mode="after")
@@ -98,6 +103,7 @@ class PurchaseRead(BaseModel):
     purchase_date: date | None
     purchased_by_member_id: uuid.UUID | None
     source: str | None
+    bucket: str
     notes: str | None
     status: str
 
@@ -115,6 +121,8 @@ class SaleCreate(BaseModel):
     sale_date: date = Field(default_factory=date.today)
     sold_by_member_id: uuid.UUID | None = None
     marketplace: str | None = Field(default=None, max_length=120)
+    #: Which bucket the stock left from.
+    bucket: str = BucketField
     notes: str | None = None
     #: Deliberate override for correcting history. Without it, overselling is a 409.
     allow_oversell: bool = False
@@ -181,6 +189,7 @@ class SaleRead(BaseModel):
     sale_date: date | None
     sold_by_member_id: uuid.UUID | None
     marketplace: str | None
+    bucket: str
     notes: str | None
     status: str
 
@@ -195,6 +204,7 @@ class AdjustmentCreate(BaseModel):
     cost: MoneyIn | None = None
     adjustment_date: date = Field(default_factory=date.today)
     member_id: uuid.UUID | None = None
+    bucket: str = BucketField
     notes: str | None = None
 
     @field_validator("notes", mode="after")
@@ -278,6 +288,47 @@ class AdjustmentRead(BaseModel):
     has_unknown_cost: bool
     adjustment_date: date | None
     member_id: uuid.UUID | None
+    bucket: str
+    notes: str | None
+    status: str
+
+
+# --------------------------------------------------------------------------- moves
+
+
+class MoveCreate(BaseModel):
+    """Stock changing bucket. Carries no money and never changes how much there is."""
+
+    product_id: uuid.UUID
+    quantity: int = Field(gt=0, le=MAX_QUANTITY)
+    from_bucket: str = Field(pattern=f"^({'|'.join(BUCKETS)})$")
+    to_bucket: str = Field(pattern=f"^({'|'.join(BUCKETS)})$")
+    moved_on: date = Field(default_factory=date.today)
+    member_id: uuid.UUID | None = None
+    notes: str | None = None
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def buckets_differ(self) -> "MoveCreate":
+        if self.from_bucket == self.to_bucket:
+            raise ValueError("a move needs two different buckets")
+        return self
+
+
+class MoveRead(BaseModel):
+    model_config = _READ_CONFIG
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    quantity: int
+    from_bucket: str
+    to_bucket: str = Field(validation_alias="bucket")
+    moved_on: date | None
+    member_id: uuid.UUID | None
     notes: str | None
     status: str
 
@@ -344,10 +395,15 @@ class SaleList(BaseModel):
 class TransactionRead(BaseModel):
     """One row of a product's history, flattened so the UI renders a single list."""
 
-    kind: str  #: purchase | sale | adjustment
+    kind: str  #: purchase | sale | adjustment | move
     id: uuid.UUID
     occurred_on: date | None
-    quantity: int  #: signed - positive adds stock, negative removes it
+    #: Signed - positive adds stock, negative removes it. Always 0 for a move, which
+    #: relocates stock rather than changing how much there is.
+    quantity: int
+    #: Where the row acted. A move also carries `from_bucket`; everything else does not.
+    bucket: str | None = None
+    from_bucket: str | None = None
     amount: MoneyOutOptional = None
     #: Purchases only. `amount` is the landed total, which is what history should show but
     #: is not a column - editing it back as `amount` would add shipping and tax a second

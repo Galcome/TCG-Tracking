@@ -24,11 +24,12 @@ from src.models.ledger import (
     InventoryAdjustment,
     Purchase,
     Sale,
+    StockMove,
 )
 from src.models.product import Product
 from src.services.costing import Event, allocate
 
-EntityKind = Literal["purchase", "sale", "adjustment"]
+EntityKind = Literal["purchase", "sale", "adjustment", "move"]
 
 #: Which table an event id came from, so allocations land in the right FK column.
 _SourceKind = Literal["purchase", "sale", "adjustment_supply", "adjustment_consumer"]
@@ -163,7 +164,9 @@ def record_audit(
     )
 
 
-def snapshot(entity: Purchase | Sale | InventoryAdjustment, fields: list[str]) -> dict[str, Any]:
+def snapshot(
+    entity: Purchase | Sale | InventoryAdjustment | StockMove, fields: list[str]
+) -> dict[str, Any]:
     """JSON-safe view of the fields an audit entry cares about."""
     values: dict[str, Any] = {}
     for name in fields:
@@ -174,7 +177,7 @@ def snapshot(entity: Purchase | Sale | InventoryAdjustment, fields: list[str]) -
 
 def void(
     db: Session,
-    entity: Purchase | Sale | InventoryAdjustment,
+    entity: Purchase | Sale | InventoryAdjustment | StockMove,
     *,
     entity_type: EntityKind,
     member_id: uuid.UUID | None,
@@ -184,7 +187,11 @@ def void(
     entity.status = STATUS_VOIDED
     entity.void_reason = reason
     db.flush()
-    recompute_product(db, entity.product_id)
+    # A move carries no money and consumes no lots, so there is nothing for the costing
+    # engine to rebuild. Recomputing would return the identical answer and imply, wrongly,
+    # that where stock sits affects what it cost.
+    if not isinstance(entity, StockMove):
+        recompute_product(db, entity.product_id)
     record_audit(
         db,
         entity_type=entity_type,

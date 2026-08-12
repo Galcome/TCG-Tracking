@@ -12,7 +12,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.ledger import InventoryAdjustment, Purchase, Sale
+from src.models.ledger import InventoryAdjustment, Purchase, Sale, StockMove
 from src.schemas.ledger import TransactionRead
 
 
@@ -35,6 +35,7 @@ def product_history(db: Session, product_id: uuid.UUID) -> list[TransactionRead]
                     tax=purchase.tax_cents,
                     fees=purchase.fees_cents,
                     member_id=purchase.purchased_by_member_id,
+                    bucket=purchase.bucket,
                     label=purchase.source,
                     notes=purchase.notes,
                     status=purchase.status,
@@ -60,6 +61,7 @@ def product_history(db: Session, product_id: uuid.UUID) -> list[TransactionRead]
                     profit=sale.realized_profit_cents,
                     has_unknown_cost=sale.has_unknown_cost,
                     member_id=sale.sold_by_member_id,
+                    bucket=sale.bucket,
                     label=sale.marketplace,
                     notes=sale.notes,
                     status=sale.status,
@@ -82,9 +84,32 @@ def product_history(db: Session, product_id: uuid.UUID) -> list[TransactionRead]
                     cost=adjustment.cost_removed_cents or adjustment.landed_cost_cents,
                     has_unknown_cost=adjustment.has_unknown_cost,
                     member_id=adjustment.member_id,
+                    bucket=adjustment.bucket,
                     label=adjustment.reason,
                     notes=adjustment.notes,
                     status=adjustment.status,
+                ),
+            )
+        )
+
+    for move in db.scalars(select(StockMove).where(StockMove.product_id == product_id)):
+        rows.append(
+            (
+                move.moved_on,
+                move.created_at,
+                TransactionRead(
+                    kind="move",
+                    id=move.id,
+                    occurred_on=move.moved_on,
+                    # Zero on purpose: a move relocates stock, it does not create or consume
+                    # any. Anything summing this column stays correct.
+                    quantity=0,
+                    bucket=move.bucket,
+                    from_bucket=move.from_bucket,
+                    member_id=move.member_id,
+                    label=f"{move.quantity} to {move.bucket}",
+                    notes=move.notes,
+                    status=move.status,
                 ),
             )
         )

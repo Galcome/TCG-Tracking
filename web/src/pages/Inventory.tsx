@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
-import { api } from '../api'
-import { History, PackageSearch, Pencil, Plus, Receipt } from 'lucide-react'
+import { api, BUCKET_LABELS, BUCKETS, type Bucket, type Product } from '../api'
+import { ArrowLeftRight, History, PackageSearch, Pencil, Plus, Receipt } from 'lucide-react'
 
 import { PageHeader, type PageActions } from '../components/AppShell'
-import { EditItemDialog } from '../components/forms'
+import { EditItemDialog, MoveStockDialog } from '../components/forms'
 import {
   Card,
   Empty,
@@ -43,20 +43,40 @@ function emptyMessage(search: string, stock: string): string {
   return 'No products yet. Add your first one and record what you paid for it.'
 }
 
+/**
+ * Where a product's stock actually sits.
+ *
+ * Silent when everything is in one bucket, which is the common case - a line reading
+ * "3 inventory" under a total of 3 is noise. It earns its space only once stock is split.
+ */
+function BucketSplit({ by }: { by: Record<Bucket, number> }) {
+  const held = BUCKETS.filter((bucket) => by[bucket] > 0)
+  if (held.length < 2) return null
+
+  return (
+    <span className="mt-0.5 block text-xs font-normal text-(--color-faint)">
+      {held.map((bucket) => `${by[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`).join(' · ')}
+    </span>
+  )
+}
+
 export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
   const [editing, setEditing] = useState<string | null>(null)
+  const [moving, setMoving] = useState<Product | null>(null)
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
+  const [bucket, setBucket] = useState('')
   const [stock, setStock] = useState('in')
   const debouncedSearch = useDebounced(search, 250)
 
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const products = useQuery({
-    queryKey: ['products', debouncedSearch, game, stock],
+    queryKey: ['products', debouncedSearch, game, bucket, stock],
     queryFn: () =>
       api.products({
         q: debouncedSearch || undefined,
         game: game || undefined,
+        bucket: bucket || undefined,
         stock: stock || undefined,
       }),
   })
@@ -69,7 +89,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
 
       {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
           horizontal scrollbar on desktop. */}
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
         <input
           type="search"
           value={search}
@@ -86,6 +106,18 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
           {games.data?.map((option) => (
             <option key={option.id} value={option.slug}>
               {option.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={bucket}
+          onChange={(e) => setBucket(e.target.value)}
+          className={`${FIELD_CLASS} mt-0 sm:w-40`}
+        >
+          <option value="">Everywhere</option>
+          {BUCKETS.map((option) => (
+            <option key={option} value={option}>
+              {BUCKET_LABELS[option]}
             </option>
           ))}
         </select>
@@ -179,6 +211,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       }`}
                     >
                       {product.stats.quantity_on_hand}
+                      <BucketSplit by={product.stats.by_bucket} />
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-(--color-muted)">
                       {money(product.stats.average_unit_cost, '—')}
@@ -200,6 +233,10 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                         <RowAction onClick={() => onRecordSale(product)}>
                           <Receipt size={13} />
                           Sell
+                        </RowAction>
+                        <RowAction onClick={() => setMoving(product)}>
+                          <ArrowLeftRight size={13} />
+                          Move
                         </RowAction>
                         <RowAction onClick={() => setEditing(product.id)}>
                           <Pencil size={13} />
@@ -242,6 +279,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       >
                         {product.stats.quantity_on_hand} in stock
                       </p>
+                      <BucketSplit by={product.stats.by_bucket} />
                       <p className="text-xs tabular-nums text-(--color-muted)">
                         {money(product.stats.remaining_cost)}
                       </p>
@@ -251,6 +289,10 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     <RowAction onClick={() => onRecordSale(product)}>
                       <Receipt size={13} />
                       Sell
+                    </RowAction>
+                    <RowAction onClick={() => setMoving(product)}>
+                      <ArrowLeftRight size={13} />
+                      Move
                     </RowAction>
                     <RowAction onClick={() => setEditing(product.id)}>
                       <Pencil size={13} />
@@ -278,6 +320,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
       )}
 
       {editing && <EditItemDialog productId={editing} onClose={() => setEditing(null)} />}
+      {moving && <MoveStockDialog product={moving} onClose={() => setMoving(null)} />}
     </div>
   )
 }

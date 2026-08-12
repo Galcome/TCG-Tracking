@@ -76,6 +76,16 @@ export interface Member {
   is_active: boolean
 }
 
+/** Where stock sits. Intent, not a place — all three can be the same basement. */
+export const BUCKETS = ['inventory', 'store', 'vault'] as const
+export type Bucket = (typeof BUCKETS)[number]
+
+export const BUCKET_LABELS: Record<Bucket, string> = {
+  inventory: 'Inventory',
+  store: 'Store',
+  vault: 'Vault',
+}
+
 /** All money fields are decimal strings. `null` means genuinely unknown. */
 export interface ProductStats {
   quantity_purchased: number
@@ -93,13 +103,18 @@ export interface ProductStats {
   roi: number | null
   sale_count: number
   sales_missing_cost: number
+  /** Sums to quantity_on_hand — a move takes from one bucket and gives to another. */
+  by_bucket: Record<Bucket, number>
 }
 
 export interface Transaction {
-  kind: 'purchase' | 'sale' | 'adjustment'
+  kind: 'purchase' | 'sale' | 'adjustment' | 'move'
   id: string
   occurred_on: string | null
   quantity: number
+  /** Where the row acted. A move also carries from_bucket; nothing else does. */
+  bucket: Bucket | null
+  from_bucket: Bucket | null
   /** For a purchase this is the landed total — display it, but never PATCH it back. */
   amount: string | null
   /** Purchases only: the editable components behind `amount`. */
@@ -253,6 +268,8 @@ export function saleAsTransaction(sale: SaleRow): Transaction {
     id: sale.id,
     occurred_on: sale.sale_date,
     quantity: -sale.quantity,
+    bucket: null,
+    from_bucket: null,
     amount: sale.amount,
     base_amount: null,
     shipping: null,
@@ -404,6 +421,7 @@ export const api = {
     game?: string
     product_type?: string
     stock?: string
+    bucket?: string
     include_archived?: boolean
   }) => request<ProductPage>(`/api/v1/products${query(params)}`),
 
@@ -450,6 +468,16 @@ export const api = {
       body: JSON.stringify(changes),
     }),
 
+  /** Shifts stock between buckets. Never changes how much there is. */
+  createMove: (move: {
+    product_id: string
+    quantity: number
+    from_bucket: Bucket
+    to_bucket: Bucket
+    moved_on?: string
+    notes?: string | null
+  }) => request<unknown>('/api/v1/moves', { method: 'POST', body: JSON.stringify(move) }),
+
   createAdjustment: (adjustment: NewAdjustment) =>
     request<unknown>('/api/v1/adjustments', {
       method: 'POST',
@@ -457,7 +485,12 @@ export const api = {
     }),
 
   voidTransaction: (kind: Transaction['kind'], id: string, reason: string) => {
-    const path = { purchase: 'purchases', sale: 'sales', adjustment: 'adjustments' }[kind]
+    const path = {
+      purchase: 'purchases',
+      sale: 'sales',
+      adjustment: 'adjustments',
+      move: 'moves',
+    }[kind]
     return request<unknown>(`/api/v1/${path}/${id}/void`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
