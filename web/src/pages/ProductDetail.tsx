@@ -8,10 +8,11 @@ import {
   AdjustStockDialog,
   EditItemDialog,
   EditTransactionDialog,
+  MoveStockDialog,
   RecordSaleDialog,
   VoidDialog,
 } from '../components/forms'
-import { ArrowLeft, Minus, Pencil, Plus, Receipt } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Minus, Pencil, Plus, Receipt } from 'lucide-react'
 
 import {
   Button,
@@ -25,7 +26,7 @@ import {
 } from '../components/ui'
 import { humanise, money, percent, shortDate, signedMoney, toneFor } from '../format'
 
-type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | null
+type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | null
 
 export function ProductDetail() {
   const { productId = '' } = useParams()
@@ -112,6 +113,10 @@ export function ProductDetail() {
               <Receipt size={15} />
               Record sale
             </Button>
+            <Button type="button" onClick={() => setDialog('move')} variant="ghost">
+              <ArrowLeftRight size={15} />
+              Move
+            </Button>
             <Button type="button" onClick={() => setDialog('adjust')} variant="ghost">
               <Minus size={15} />
               Adjust stock
@@ -185,11 +190,15 @@ export function ProductDetail() {
                 {item.history.map((row) => (
                   <tr
                     key={row.id}
-                    onClick={() => row.status !== 'voided' && setEditing(row)}
+                    onClick={() =>
+                      row.status !== 'voided' && row.kind !== 'move' && setEditing(row)
+                    }
                     className={
                       row.status === 'voided'
                         ? 'text-(--color-muted) line-through'
-                        : 'cursor-pointer transition-colors hover:bg-(--color-raised)'
+                        : row.kind === 'move'
+                          ? 'transition-colors hover:bg-(--color-raised)'
+                          : 'cursor-pointer transition-colors hover:bg-(--color-raised)'
                     }
                   >
                     <td className="whitespace-nowrap px-4 py-3">{shortDate(row.occurred_on)}</td>
@@ -224,6 +233,9 @@ export function ProductDetail() {
                     >
                       {row.status !== 'voided' && (
                         <span className="flex justify-end gap-2">
+                          {/* A move has nothing to edit: it records where stock went, and
+                              the correction for a wrong one is to void it. */}
+                          {row.kind !== 'move' && (
                           <button
                             type="button"
                             onClick={() => setEditing(row)}
@@ -232,6 +244,7 @@ export function ProductDetail() {
                             <Pencil size={13} />
                             Edit
                           </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => setVoiding(row)}
@@ -280,6 +293,7 @@ export function ProductDetail() {
         <AdjustStockDialog product={item} onClose={() => setDialog(null)} />
       )}
       {dialog === 'edit' && <EditItemDialog productId={item.id} onClose={() => setDialog(null)} />}
+      {dialog === 'move' && <MoveStockDialog product={item} onClose={() => setDialog(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />
       )}

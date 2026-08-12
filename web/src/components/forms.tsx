@@ -10,8 +10,11 @@ import { useState, type FormEvent } from 'react'
 
 import {
   ADJUSTMENT_REASONS,
+  BUCKET_LABELS,
+  BUCKETS,
   MARKETPLACES,
   api,
+  type Bucket,
   type Product,
   type ProductDetail,
   type Transaction,
@@ -1025,7 +1028,7 @@ export function VoidDialog({
   id,
   onClose,
 }: {
-  kind: 'purchase' | 'sale' | 'adjustment'
+  kind: Transaction['kind']
   id: string
   onClose: () => void
 }) {
@@ -1336,6 +1339,132 @@ export function EditTransactionDialog({
           value={auditReason}
           onChange={(e) => setAuditReason(e.target.value)}
           placeholder="Receipt said 500, not 300"
+          className={FIELD_CLASS}
+        />
+      </Field>
+    </Dialog>
+  )
+}
+
+/**
+ * Shifting stock between buckets.
+ *
+ * Deliberately says nothing about money: a move changes where stock sits, never how much
+ * there is or what it cost. The server refuses a move a bucket cannot cover, so the error
+ * surfaces here rather than the form guessing.
+ */
+export function MoveStockDialog({
+  product,
+  onClose,
+}: {
+  product: Product
+  onClose: () => void
+}) {
+  const held = product.stats.by_bucket
+  const firstStocked = BUCKETS.find((option) => held[option] > 0) ?? 'inventory'
+
+  const [from, setFrom] = useState<Bucket>(firstStocked)
+  const [to, setTo] = useState<Bucket>(BUCKETS.find((option) => option !== firstStocked)!)
+  const [quantity, setQuantity] = useState('1')
+  const [movedOn, setMovedOn] = useState(todayIso())
+  const [notes, setNotes] = useState('')
+
+  const move = useLedgerMutation(api.createMove, onClose)
+  const available = held[from] ?? 0
+
+  return (
+    <Dialog
+      title={`Move stock — ${product.name}`}
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault()
+        move.mutate({
+          product_id: product.id,
+          quantity: Number(quantity),
+          from_bucket: from,
+          to_bucket: to,
+          moved_on: movedOn,
+          notes: notes.trim() || null,
+        })
+      }}
+      submitLabel="Move"
+      busy={move.isPending}
+      error={move.error ? (move.error as Error).message : null}
+    >
+      <p className="text-sm text-(--color-muted)">
+        Where something sits, not what it cost. Moving never changes your stock level or
+        cost basis.
+      </p>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="From" hint={`${available} here`}>
+          {/* Nesting a select inside its label makes the option text part of the accessible
+              name - a screen reader announces "FromInventory (2)Store (0)". An explicit
+              aria-label overrides that. */}
+          <select
+            aria-label="Move from"
+            value={from}
+            onChange={(e) => {
+              const next = e.target.value as Bucket
+              setFrom(next)
+              // Never leave the two equal; the server rejects it and so does the form.
+              if (next === to) setTo(BUCKETS.find((option) => option !== next)!)
+            }}
+            className={FIELD_CLASS}
+          >
+            {BUCKETS.map((option) => (
+              <option key={option} value={option}>
+                {BUCKET_LABELS[option]} ({held[option] ?? 0})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="To">
+          <select
+            aria-label="Move to"
+            value={to}
+            onChange={(e) => setTo(e.target.value as Bucket)}
+            className={FIELD_CLASS}
+          >
+            {BUCKETS.filter((option) => option !== from).map((option) => (
+              <option key={option} value={option}>
+                {BUCKET_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="How many">
+          <input
+            required
+            autoFocus
+            type="number"
+            min={1}
+            max={available || undefined}
+            inputMode="numeric"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+        <Field label="Date" hint="When it actually moved">
+          <input
+            required
+            type="date"
+            value={movedOn}
+            onChange={(e) => setMovedOn(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+      </div>
+
+      <Field label="Notes">
+        <input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Long term play"
           className={FIELD_CLASS}
         />
       </Field>

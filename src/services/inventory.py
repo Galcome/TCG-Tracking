@@ -12,17 +12,19 @@ aggregate. Cost basis does need FIFO, but the engine has already written its ans
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.orm import Session
 
 from src.models.ledger import (
+    BUCKETS,
     STATUS_ACTIVE,
     CostAllocation,
     InventoryAdjustment,
     Purchase,
     Sale,
+    StockMove,
 )
 
 
@@ -47,6 +49,10 @@ class ProductStats:
 
     sale_count: int = 0
     sales_missing_cost: int = 0
+
+    #: Stock split by bucket. Sums to `quantity_on_hand`, because a move takes from one
+    #: bucket and gives to another and so nets to zero.
+    by_bucket: dict[str, int] = field(default_factory=lambda: dict.fromkeys(BUCKETS, 0))
 
     @property
     def realized_profit_cents(self) -> int:
@@ -177,6 +183,39 @@ def product_stats(
         # Stock counted in via an adjustment is invested capital too, when its cost is known.
         entry.total_invested_cents += int(added_cost or 0)
 
+    # Stock per bucket. Buckets are a location dimension over the same rows, so this is the
+    # same supply-minus-consumption arithmetic grouped one level finer, plus moves.
+    for model, column, sign in (
+        (Purchase, Purchase.quantity, 1),
+        (Sale, Sale.quantity, -1),
+        (InventoryAdjustment, InventoryAdjustment.quantity_delta, 1),
+    ):
+        stmt = _by_product(
+            select(model.product_id, model.bucket, func.sum(column)).group_by(
+                model.product_id, model.bucket
+            ),
+            product_ids,
+            model,
+        )
+        for product_id, bucket, quantity in db.execute(stmt):
+            row(product_id).by_bucket[bucket] += sign * int(quantity or 0)
+
+    # A move is the one row that touches two buckets: out of `from_bucket`, into `bucket`.
+    moves = _by_product(
+        select(
+            StockMove.product_id,
+            StockMove.from_bucket,
+            StockMove.bucket,
+            func.sum(StockMove.quantity),
+        ).group_by(StockMove.product_id, StockMove.from_bucket, StockMove.bucket),
+        product_ids,
+        StockMove,
+    )
+    for product_id, source, destination, quantity in db.execute(moves):
+        entry = row(product_id)
+        entry.by_bucket[source] -= int(quantity or 0)
+        entry.by_bucket[destination] += int(quantity or 0)
+
     for product_id, entry in stats.items():
         entry.quantity_on_hand = (
             entry.quantity_purchased + entry.quantity_adjusted - entry.quantity_sold
@@ -206,7 +245,7 @@ def has_any_transactions(db: Session, product_id: uuid.UUID) -> bool:
     Used to decide whether a product may be deleted outright or must be archived - a
     voided transaction is still history worth keeping.
     """
-    for model in (Purchase, Sale, InventoryAdjustment):
+    for model in (Purchase, Sale, InventoryAdjustment, StockMove):
         if db.scalar(select(model.id).where(model.product_id == product_id).limit(1)):
             return True
     return bool(

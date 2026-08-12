@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.database import Base
 from src.dependencies import db_session, get_current_member
-from src.models.ledger import Purchase
+from src.models.ledger import BUCKETS, Purchase
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
@@ -36,6 +36,18 @@ SIMILARITY_THRESHOLD = 0.35
 
 STOCK_IN = "in"
 STOCK_OUT = "out"
+
+
+def _matches_bucket(bucket: str | None, by_bucket: dict[str, int]) -> bool:
+    """Whether a product has any stock in the requested bucket.
+
+    Zero means it is not there, so a product with 3 in the Vault and none in the Store is
+    absent from the Store view. Unlike the stock filter this does *not* keep negatives: a
+    bucket cannot go negative, because moving out more than it holds is refused.
+    """
+    if bucket is None:
+        return True
+    return by_bucket.get(bucket, 0) > 0
 
 
 def _matches_stock(stock: str | None, quantity_on_hand: int) -> bool:
@@ -100,6 +112,9 @@ def list_products(
     game: str | None = Query(default=None, max_length=60, description="Game slug"),
     product_type: str | None = Query(default=None, max_length=60, description="Product type slug"),
     stock: str | None = Query(default=None, description="in | out"),
+    bucket: str | None = Query(
+        default=None, pattern=f"^({'|'.join(BUCKETS)})$", description="inventory | store | vault"
+    ),
     include_archived: bool = Query(default=False),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
@@ -135,6 +150,8 @@ def list_products(
     for item in matched:
         stats = _stats_for(stats_by_product, item.id)
         if not _matches_stock(stock, stats.quantity_on_hand):
+            continue
+        if not _matches_bucket(bucket, stats.by_bucket):
             continue
         item.stats = stats
         kept.append(item)

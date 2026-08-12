@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
-from src.models.ledger import STATUS_ACTIVE, InventoryAdjustment, Purchase, Sale
+from src.models.ledger import STATUS_ACTIVE, InventoryAdjustment, Purchase, Sale, StockMove
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game
@@ -25,6 +25,8 @@ from src.schemas.ledger import (
     AdjustmentCreate,
     AdjustmentRead,
     AdjustmentUpdate,
+    MoveCreate,
+    MoveRead,
     PurchaseCreate,
     PurchaseRead,
     PurchaseUpdate,
@@ -202,6 +204,7 @@ def create_purchase(
         purchase_date=payload.purchase_date,
         purchased_by_member_id=payload.purchased_by_member_id or member.id,
         source=payload.source,
+        bucket=payload.bucket,
         notes=payload.notes,
         created_by_member_id=member.id,
     )
@@ -391,6 +394,7 @@ def create_sale(
         sale_date=payload.sale_date,
         sold_by_member_id=payload.sold_by_member_id or member.id,
         marketplace=payload.marketplace,
+        bucket=payload.bucket,
         notes=payload.notes,
         created_by_member_id=member.id,
     )
@@ -473,6 +477,7 @@ def create_adjustment(
         landed_cost_cents=payload.cost,
         adjustment_date=payload.adjustment_date,
         member_id=payload.member_id or member.id,
+        bucket=payload.bucket,
         notes=payload.notes,
         created_by_member_id=member.id,
     )
@@ -553,3 +558,71 @@ def void_adjustment(
     )
     db.refresh(adjustment)
     return adjustment
+
+
+# --------------------------------------------------------------------------- moves
+
+
+@router.post("/moves", response_model=MoveRead, status_code=status.HTTP_201_CREATED)
+def create_move(
+    payload: MoveCreate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> StockMove:
+    """Shift stock between buckets. Changes where it sits, never how much there is.
+
+    Unlike a sale, this is refused when the source bucket does not hold enough. Overselling
+    is allowed because it records something that really happened and the ledger is behind;
+    moving stock you do not have describes nothing real, so the honest fix is the data.
+
+    No recompute: cost basis follows the purchase lot, not the bucket, so the costing engine
+    is unaffected by anything here.
+    """
+    _require_product(db, payload.product_id)
+
+    stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
+    available = stats.by_bucket.get(payload.from_bucket, 0) if stats else 0
+    if payload.quantity > available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{payload.from_bucket} holds {available}, so {payload.quantity} cannot move "
+                "out of it"
+            ),
+        )
+
+    move = StockMove(
+        product_id=payload.product_id,
+        quantity=payload.quantity,
+        from_bucket=payload.from_bucket,
+        bucket=payload.to_bucket,
+        moved_on=payload.moved_on,
+        member_id=payload.member_id or member.id,
+        notes=payload.notes,
+        created_by_member_id=member.id,
+    )
+    db.add(move)
+    db.flush()
+    ledger.record_audit(
+        db,
+        entity_type="move",
+        entity_id=move.id,
+        action="create",
+        member_id=member.id,
+        after=ledger.snapshot(move, ["quantity", "from_bucket", "bucket", "moved_on"]),
+    )
+    db.refresh(move)
+    return move
+
+
+@router.post("/moves/{move_id}/void", response_model=MoveRead)
+def void_move(
+    move_id: uuid.UUID,
+    payload: VoidRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> StockMove:
+    move = _require_active(db, StockMove, move_id, "Move")
+    ledger.void(db, move, entity_type="move", member_id=member.id, reason=payload.reason)
+    db.refresh(move)
+    return move

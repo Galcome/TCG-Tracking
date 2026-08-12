@@ -4,7 +4,7 @@ All models must be imported in this file for `alembic revision --autogenerate` t
 """
 
 from src.models.audit import AuditLog
-from src.models.ledger import CostAllocation, InventoryAdjustment, Purchase, Sale
+from src.models.ledger import CostAllocation, InventoryAdjustment, Purchase, Sale, StockMove
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
@@ -19,4 +19,5 @@ __all__ = [
     "ProductType",
     "Purchase",
     "Sale",
+    "StockMove",
 ]
