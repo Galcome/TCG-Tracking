@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { api, type Transaction } from '../api'
+import { api, BUCKET_LABELS, BUCKETS, type Transaction } from '../api'
 import {
   AddPurchaseDialog,
   AdjustStockDialog,
@@ -135,7 +135,11 @@ export function ProductDetail() {
           value={String(stats.quantity_on_hand)}
           tone={stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''}
           emphasis
-          hint={`${stats.quantity_purchased} bought · ${stats.quantity_sold} sold`}
+          hint={
+            BUCKETS.filter((bucket) => stats.by_bucket[bucket] !== 0)
+              .map((bucket) => `${stats.by_bucket[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`)
+              .join(' · ') || `${stats.quantity_purchased} bought · ${stats.quantity_sold} sold`
+          }
         />
         <Stat
           label="Realized profit"
@@ -204,10 +208,19 @@ export function ProductDetail() {
                     <td className="whitespace-nowrap px-4 py-3">{shortDate(row.occurred_on)}</td>
                     <td className="px-4 py-3">
                       {humanise(row.kind)}
-                      {row.label && (
+                      {/* Quantity reads 0 in its own column on purpose, so the count has
+                          to live here or the row never says how much moved. */}
+                      {row.kind === 'move' && row.from_bucket && row.bucket ? (
                         <span className="ml-2 text-xs text-(--color-muted)">
-                          {humanise(row.label)}
+                          {row.label} · {BUCKET_LABELS[row.from_bucket]} →{' '}
+                          {BUCKET_LABELS[row.bucket]}
                         </span>
+                      ) : (
+                        row.label && (
+                          <span className="ml-2 text-xs text-(--color-muted)">
+                            {humanise(row.label)}
+                          </span>
+                        )
                       )}
                       {row.status === 'voided' && (
                         <span className="ml-2 text-xs">(voided)</span>

@@ -58,6 +58,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const [setLabel, setSetLabel] = useState('')
   const [storage, setStorage] = useState('')
   const [source, setSource] = useState('')
+  const [bucket, setBucket] = useState<Bucket>('inventory')
 
   const gameId = pickedGame || games.data?.[0]?.id || ''
   const typeId = pickedType || types.data?.[0]?.id || ''
@@ -80,6 +81,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
         fees: fees || undefined,
         purchase_date: purchaseDate,
         source: source.trim() || null,
+        bucket,
       },
     })
   }
@@ -158,6 +160,13 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
         />
       </Field>
 
+      <BucketField
+        label="Goes to"
+        value={bucket}
+        onChange={setBucket}
+        hint="A case bought to sell never has to pass through Inventory first."
+      />
+
       <Advanced>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Shipping">
@@ -223,6 +232,7 @@ export function AddPurchaseDialog({
   const [purchaseDate, setDate] = useState(todayIso())
   const [shipping, setShipping] = useState('')
   const [source, setSource] = useState('')
+  const [bucket, setBucket] = useState<Bucket>('inventory')
 
   const create = useLedgerMutation(api.createPurchase, onClose)
 
@@ -239,6 +249,7 @@ export function AddPurchaseDialog({
           shipping: shipping || undefined,
           purchase_date: purchaseDate,
           source: source.trim() || null,
+          bucket,
         })
       }}
       submitLabel="Save"
@@ -277,6 +288,7 @@ export function AddPurchaseDialog({
           className={FIELD_CLASS}
         />
       </Field>
+      <BucketField label="Goes to" value={bucket} onChange={setBucket} />
       <Advanced>
         <Field label="Shipping">
           <input
@@ -317,6 +329,7 @@ export function RecordSaleDialog({
   const [paymentFees, setPaymentFees] = useState('')
   const [shippingPaid, setShippingPaid] = useState('')
   const [notes, setNotes] = useState('')
+  const [bucket, setBucket] = useState<Bucket | null>(null)
   const [allowOversell, setAllowOversell] = useState(false)
 
   const create = useLedgerMutation(api.createSale, onClose)
@@ -361,6 +374,11 @@ export function RecordSaleDialog({
   }
 
   const math = preview.data
+  // Defaults to wherever the stock actually is. Booking a Store sale against Inventory
+  // drove that bucket negative while the Store stayed full - and nothing looked wrong,
+  // because the total was still right.
+  const soldFrom = bucket ?? fullestBucket(picked.stats.by_bucket)
+  const availableHere = picked.stats.by_bucket[soldFrom] ?? 0
 
   return (
     <Dialog
@@ -378,6 +396,7 @@ export function RecordSaleDialog({
           sale_date: saleDate,
           sold_by_member_id: soldBy || null,
           marketplace: marketplace || null,
+          bucket: soldFrom,
           notes: notes.trim() || null,
           allow_oversell: allowOversell,
         })
@@ -435,6 +454,18 @@ export function RecordSaleDialog({
           />
         </Field>
       </div>
+
+      <BucketField
+        label="Sold from"
+        value={soldFrom}
+        onChange={setBucket}
+        counts={picked.stats.by_bucket}
+        hint={
+          Number(quantity) > availableHere
+            ? `${BUCKET_LABELS[soldFrom]} only holds ${availableHere}. Selling more will take it negative.`
+            : undefined
+        }
+      />
 
       <MarketplaceField
         value={marketplace}
@@ -628,6 +659,56 @@ function MarketplaceField({
   )
 }
 
+/**
+ * Which of the three places stock is going to, or coming from.
+ *
+ * Chips rather than a dropdown: there are exactly three, they are the vocabulary of the
+ * whole app, and a select hides two of them behind a tap.
+ */
+function BucketField({
+  label,
+  value,
+  onChange,
+  counts,
+  hint,
+}: {
+  label: string
+  value: Bucket
+  onChange: (bucket: Bucket) => void
+  /** Stock held per bucket, when the choice is about where something already is. */
+  counts?: Record<Bucket, number>
+  hint?: string
+}) {
+  return (
+    <div>
+      <span className="text-sm font-medium text-(--color-muted)">{label}</span>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {BUCKETS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+              value === option
+                ? 'border-(--color-accent) bg-(--color-accent)/12 font-medium text-(--color-accent)'
+                : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+            }`}
+          >
+            {BUCKET_LABELS[option]}
+            {counts ? ` (${counts[option] ?? 0})` : ''}
+          </button>
+        ))}
+      </div>
+      {hint && <span className="mt-1 block text-xs text-(--color-faint)">{hint}</span>}
+    </div>
+  )
+}
+
+/** The bucket holding the most stock - the one a sale most likely came out of. */
+function fullestBucket(counts: Record<Bucket, number>): Bucket {
+  return BUCKETS.reduce((best, option) => (counts[option] > counts[best] ? option : best), BUCKETS[0])
+}
+
 function MathRow({
   label,
   value,
@@ -729,6 +810,7 @@ export function AdjustStockDialog({ product, onClose }: { product: Product; onCl
   const [reason, setReason] = useState('damaged')
   const [cost, setCost] = useState('')
   const [notes, setNotes] = useState('')
+  const [bucket, setBucket] = useState<Bucket>(fullestBucket(product.stats.by_bucket))
 
   const create = useLedgerMutation(api.createAdjustment, onClose)
   const adding = Number(delta) > 0
@@ -746,6 +828,7 @@ export function AdjustStockDialog({ product, onClose }: { product: Product; onCl
           cost: adding && cost ? cost : null,
           adjustment_date: todayIso(),
           notes: notes.trim() || null,
+          bucket,
         })
       }}
       submitLabel="Save"
@@ -793,6 +876,13 @@ export function AdjustStockDialog({ product, onClose }: { product: Product; onCl
           />
         </Field>
       )}
+
+      <BucketField
+        label={adding ? 'Counted into' : 'Taken from'}
+        value={bucket}
+        onChange={setBucket}
+        counts={product.stats.by_bucket}
+      />
 
       <Field label="Notes">
         <input value={notes} onChange={(e) => setNotes(e.target.value)} className={FIELD_CLASS} />

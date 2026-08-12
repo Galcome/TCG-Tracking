@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.models.ledger import BUCKETS
-from src.schemas.ledger import TransactionRead
+from src.schemas.ledger import BucketField, TransactionRead
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
 from src.schemas.taxonomy import TaxonomyRead
 
@@ -70,6 +70,9 @@ class InitialPurchase(BaseModel):
     purchase_date: date = Field(default_factory=date.today)
     purchased_by_member_id: uuid.UUID | None = None
     source: str | None = Field(default=None, max_length=160)
+    #: Where the stock lands. A case bought for the Store never has to pass through
+    #: Inventory first.
+    bucket: str = BucketField
 
 
 class ProductCreate(ProductBase):
@@ -198,3 +201,7 @@ class ProductList(BaseModel):
     total: int
     limit: int
     offset: int
+    #: Units per bucket across everything the search and stock filters matched, *before*
+    #: the bucket filter narrows it. That is what makes the counts on the bucket tabs
+    #: describe what you would see if you pressed them, rather than what you are seeing now.
+    bucket_totals: dict[str, int]

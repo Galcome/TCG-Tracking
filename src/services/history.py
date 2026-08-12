@@ -107,7 +107,7 @@ def product_history(db: Session, product_id: uuid.UUID) -> list[TransactionRead]
                     bucket=move.bucket,
                     from_bucket=move.from_bucket,
                     member_id=move.member_id,
-                    label=f"{move.quantity} to {move.bucket}",
+                    label=f"{move.quantity} moved",
                     notes=move.notes,
                     status=move.status,
                 ),
