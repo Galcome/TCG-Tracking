@@ -44,19 +44,60 @@ function emptyMessage(search: string, stock: string): string {
 }
 
 /**
- * Where a product's stock actually sits.
+ * Where a product's stock actually sits. Always shown when there is any.
  *
- * Silent when everything is in one bucket, which is the common case - a line reading
- * "3 inventory" under a total of 3 is noise. It earns its space only once stock is split.
+ * An earlier version stayed silent unless stock was split across buckets, on the grounds
+ * that "3 inventory" under a total of 3 was noise. That was wrong: it meant moving
+ * everything from Inventory to Store changed nothing on screen, so a move that worked
+ * perfectly looked like it had failed.
  */
 function BucketSplit({ by }: { by: Record<Bucket, number> }) {
-  const held = BUCKETS.filter((bucket) => by[bucket] > 0)
-  if (held.length < 2) return null
+  const held = BUCKETS.filter((bucket) => by[bucket] !== 0)
+  if (held.length === 0) return null
 
   return (
     <span className="mt-0.5 block text-xs font-normal text-(--color-faint)">
       {held.map((bucket) => `${by[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`).join(' · ')}
     </span>
+  )
+}
+
+/** The three places, as places. A dropdown buried among filters is not a place. */
+function BucketTabs({
+  value,
+  onChange,
+  totals,
+}: {
+  value: string
+  onChange: (bucket: string) => void
+  totals: Record<Bucket, number> | undefined
+}) {
+  const everywhere = BUCKETS.reduce((sum, bucket) => sum + (totals?.[bucket] ?? 0), 0)
+
+  return (
+    <div className="flex flex-wrap gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
+      {[{ key: '', label: 'Everywhere', count: everywhere }].concat(
+        BUCKETS.map((bucket) => ({
+          key: bucket,
+          label: BUCKET_LABELS[bucket],
+          count: totals?.[bucket] ?? 0,
+        })),
+      ).map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          onClick={() => onChange(tab.key)}
+          className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
+            value === tab.key
+              ? 'bg-(--color-accent) font-medium text-(--color-ink)'
+              : 'text-(--color-muted) hover:text-(--color-text)'
+          }`}
+        >
+          {tab.label}
+          <span className="ml-1.5 tabular-nums opacity-70">{tab.count}</span>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -87,9 +128,11 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
     <div className="space-y-5">
       <PageHeader title="Inventory" onRecordSale={onRecordSale} onAddProduct={onAddProduct} />
 
+      <BucketTabs value={bucket} onChange={setBucket} totals={products.data?.bucket_totals} />
+
       {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
           horizontal scrollbar on desktop. */}
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
         <input
           type="search"
           value={search}
@@ -106,18 +149,6 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
           {games.data?.map((option) => (
             <option key={option.id} value={option.slug}>
               {option.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={bucket}
-          onChange={(e) => setBucket(e.target.value)}
-          className={`${FIELD_CLASS} mt-0 sm:w-40`}
-        >
-          <option value="">Everywhere</option>
-          {BUCKETS.map((option) => (
-            <option key={option} value={option}>
-              {BUCKET_LABELS[option]}
             </option>
           ))}
         </select>

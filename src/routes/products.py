@@ -147,10 +147,15 @@ def list_products(
     stats_by_product = inventory.product_stats(db, [item.id for item in matched])
 
     kept = []
+    bucket_totals = dict.fromkeys(BUCKETS, 0)
     for item in matched:
         stats = _stats_for(stats_by_product, item.id)
         if not _matches_stock(stock, stats.quantity_on_hand):
             continue
+        # Counted before the bucket filter, so a tab's count says what pressing it would
+        # show rather than what is already on screen.
+        for name, quantity in stats.by_bucket.items():
+            bucket_totals[name] += quantity
         if not _matches_bucket(bucket, stats.by_bucket):
             continue
         item.stats = stats
@@ -162,6 +167,7 @@ def list_products(
         total=len(kept),
         limit=limit,
         offset=offset,
+        bucket_totals=bucket_totals,
     )
 
 
@@ -196,6 +202,7 @@ def create_product(
             purchase_date=opening.purchase_date,
             purchased_by_member_id=opening.purchased_by_member_id or member.id,
             source=opening.source,
+            bucket=opening.bucket,
             created_by_member_id=member.id,
         )
         db.add(purchase)

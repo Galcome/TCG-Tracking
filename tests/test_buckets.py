@@ -176,7 +176,7 @@ def test_a_move_appears_in_history_without_moving_the_quantity_column(client, ma
     assert row["quantity"] == 0
     assert row["from_bucket"] == BUCKET_INVENTORY
     assert row["bucket"] == BUCKET_VAULT
-    assert row["label"] == "2 to vault"
+    assert row["label"] == "2 moved"
     assert row["notes"] == "long term play"
     assert sum(entry["quantity"] for entry in history) == 3
 
@@ -274,3 +274,65 @@ def test_a_product_with_only_a_move_cannot_be_deleted(client, make_product, db):
     move(client, product["id"], 1, BUCKET_STORE, BUCKET_VAULT)
 
     assert client.delete(f"/api/v1/products/{product['id']}").status_code == 409
+
+
+def test_a_sale_names_the_bucket_it_came_out_of(client, make_product):
+    """The gap that shipped: the sale form never asked, so it always said Inventory.
+
+    Everything was in the Store, the sale defaulted to Inventory, Inventory went to -1 and
+    the Store stayed full. Total stock stayed right, so nothing looked wrong anywhere.
+    """
+    product = make_product()
+    buy(client, product["id"], 1, "200.00", bucket=BUCKET_STORE)
+
+    client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product["id"],
+            "quantity": 1,
+            "amount": "300.00",
+            "bucket": BUCKET_STORE,
+        },
+    )
+
+    assert buckets(client, product["id"]) == {
+        BUCKET_INVENTORY: 0,
+        BUCKET_STORE: 0,
+        BUCKET_VAULT: 0,
+    }
+
+
+def test_a_purchase_can_land_straight_in_the_store(client, make_product, game_id, product_type_id):
+    """A case bought to sell never has to pass through Inventory first."""
+    created = client.post(
+        "/api/v1/products",
+        json={
+            "name": "Straight to the Store",
+            "game_id": str(game_id),
+            "product_type_id": str(product_type_id),
+            "initial_purchase": {"quantity": 6, "amount": "900.00", "bucket": BUCKET_STORE},
+        },
+    ).json()
+
+    assert created["stats"]["by_bucket"] == {
+        BUCKET_INVENTORY: 0,
+        BUCKET_STORE: 6,
+        BUCKET_VAULT: 0,
+    }
+
+
+def test_bucket_totals_describe_what_a_tab_would_show(client, make_product):
+    """Counted before the bucket filter, so a tab count is not a description of itself."""
+    first = make_product("Vaulted Thing")
+    second = make_product("Stored Thing")
+    buy(client, first["id"], 2, "200.00", bucket=BUCKET_VAULT)
+    buy(client, second["id"], 5, "500.00", bucket=BUCKET_STORE)
+
+    everywhere = client.get("/api/v1/products").json()
+    assert everywhere["bucket_totals"][BUCKET_VAULT] == 2
+    assert everywhere["bucket_totals"][BUCKET_STORE] == 5
+
+    # Narrowing to one bucket must not change what the other tabs claim.
+    narrowed = client.get(f"/api/v1/products?bucket={BUCKET_VAULT}").json()
+    assert narrowed["bucket_totals"] == everywhere["bucket_totals"]
+    assert [item["name"] for item in narrowed["items"]] == ["Vaulted Thing"]

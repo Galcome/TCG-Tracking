@@ -158,6 +158,8 @@ export interface ProductPage {
   total: number
   limit: number
   offset: number
+  /** Units per bucket across the whole match, before the bucket filter narrows it. */
+  bucket_totals: Record<Bucket, number>
 }
 
 export interface Dashboard {
@@ -345,6 +347,7 @@ export interface NewProduct {
   initial_purchase?: {
     quantity: number
     amount: string
+    bucket?: Bucket
     shipping?: string
     tax?: string
     fees?: string
@@ -357,6 +360,8 @@ export interface NewPurchase {
   product_id: string
   quantity: number
   amount: string
+  /** Where the stock lands. Omitting it means Inventory. */
+  bucket?: Bucket
   shipping?: string
   tax?: string
   fees?: string
@@ -369,6 +374,8 @@ export interface NewSale {
   product_id: string
   quantity: number
   amount: string
+  /** Which bucket the stock left. Omitting it books the sale against Inventory. */
+  bucket?: Bucket
   platform_fees?: string
   payment_fees?: string
   shipping_paid?: string
@@ -383,6 +390,7 @@ export interface NewAdjustment {
   product_id: string
   quantity_delta: number
   reason: string
+  bucket?: Bucket
   cost?: string | null
   adjustment_date?: string
   notes?: string | null

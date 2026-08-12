@@ -57,11 +57,11 @@ test('the inventory list can be filtered to one bucket', async ({ page }) => {
   await gotoInventory(page)
   await page.getByPlaceholder('Search products…').fill(name)
 
-  // Everything moved out of Inventory, so it is absent from that view and present in Vault.
-  await page.getByRole('combobox').nth(1).selectOption('vault')
+  // Everything moved out of Inventory, so it is absent from that tab and present in Vault.
+  await page.getByRole('button', { name: /^Vault/ }).click()
   await expect(page.getByRole('row', { name: rx(name) })).toBeVisible({ timeout: 10_000 })
 
-  await page.getByRole('combobox').nth(1).selectOption('inventory')
+  await page.getByRole('button', { name: /^Inventory/ }).click()
   await expect(page.getByRole('row', { name: rx(name) })).toBeHidden({ timeout: 10_000 })
 })
 
@@ -72,7 +72,9 @@ test('a move is recorded in history with the date it happened', async ({ page })
 
   const row = page.getByRole('row', { name: /Move/ })
   await expect(row).toBeVisible({ timeout: 10_000 })
-  await expect(row).toContainText('2 to store')
+  // Where it came from as well as where it went - "2 to store" never said the first half.
+  await expect(row).toContainText('Inventory → Store')
+  await expect(row).toContainText('2 moved')
 
   // A move relocates stock rather than creating it, so it contributes nothing to quantity.
   await expect(row).toContainText('0')
@@ -91,6 +93,6 @@ test('voiding a move puts the stock back where it was', async ({ page }) => {
 
   await gotoInventory(page)
   await page.getByPlaceholder('Search products…').fill(name)
-  await page.getByRole('combobox').nth(1).selectOption('inventory')
+  await page.getByRole('button', { name: /^Inventory/ }).click()
   await expect(page.getByRole('row', { name: rx(name) })).toBeVisible({ timeout: 10_000 })
 })
