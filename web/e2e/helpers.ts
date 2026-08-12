@@ -23,9 +23,10 @@ export function amount(text: string | null): number {
   return Number(cleaned)
 }
 
+/** The stock list with no bucket filter. The heading names the place, so it is "All stock". */
 export async function gotoInventory(page: Page) {
   await page.goto('/inventory')
-  await expect(page.getByRole('heading', { name: 'Inventory' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'All stock' })).toBeVisible()
 }
 
 /**

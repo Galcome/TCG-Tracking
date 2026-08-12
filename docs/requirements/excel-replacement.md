@@ -12,7 +12,7 @@ top section is the running state so a fresh session can pick up without re-deriv
 | Step | State |
 | --- | --- |
 | 1. Buckets on stock, and a move action | **Shipped** - PRs #17, #18 |
-| 1b. Store and Vault in the navigation | **In progress** - branch `fix/store-vault-nav` |
+| 1b. Store and Vault in the navigation | **Shipped** - branch `fix/store-vault-nav` |
 | 2. The money ledger | Next |
 | 3. Store credit | |
 | 4. Sets, suggestions, seeded calendars | |
@@ -24,27 +24,37 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-415 backend tests, 25 e2e, 100% coverage.
+415 backend tests, 34 e2e, 100% coverage.
 
-### Step 1b - the task in flight
+### Step 1b - what shipped
 
 Joseph, looking at the left nav: *"I DON'T SEE STORE!"* The bucket tabs were built **inside**
 the Inventory page; he means **navigation items**, siblings of Inventory. That is what "tab"
 means in this app's vocabulary.
 
-Design settled before the session ran out:
+- **The sidebar carries the places.** `All stock`, with `Inventory`, `Store` and `Vault`
+  nested under it. Six items on the mobile tab bar - `All stock` is the one that gives way
+  there, since the page it leads to carries the same choice as a tab strip.
+- **The URL is the state.** `/inventory` is all of it, `/inventory?bucket=store` is a place.
+  Shareable, survives reload, Back works. `Inventory` reads `useSearchParams`; the tab strip
+  writes the same param, so the nav and the tabs cannot disagree.
+- `NavLink`'s `isActive` compares pathnames and ignores the query string, so all four stock
+  destinations would light up at once. Active state is computed by hand from `useLocation`.
+- **The heading names the place** - "Store", not "Inventory" - with a line under the tabs
+  saying what that place means, and an empty-state message per bucket. "No products yet" on
+  an empty Store, for a group holding 271 units, reads as a bug.
+- **The count leads with the bucket in view.** Standing in the Store and reading `4` for a
+  product with 3 boxes there and 1 in Inventory is the filter contradicting itself.
+- **An unknown `?bucket=` falls back to everything** rather than passing it to an API that
+  answers 422.
 
-- Nav gains **Store** and **Vault** beside Inventory. `Store` and `Vault` both exist in
-  lucide-react - confirmed.
-- The URL is the source of truth, so back and sharing work: `/inventory` is Everywhere,
-  `/inventory?bucket=store` and `?bucket=vault` are the places. `Inventory` reads
-  `useSearchParams` rather than holding local state.
-- `NavLink`'s `isActive` ignores the query string, so highlighting needs `useLocation` and a
-  manual check.
-- The existing tab strip stays and navigates via the same param, so nav items and tabs
-  cannot disagree.
-- **Six bottom-tab items on mobile at 375px.** Check it does not overflow; shorten a label
-  before letting it wrap.
+Found while checking the journey at real widths, and fixed here: the desktop table needs
+~1060px of columns, so between 1024 and 1280 the row actions sat off the right edge behind a
+horizontal scrollbar - invisible in exactly the way Joseph complained about the first time.
+Cards now take over below `xl`, two abreast, and `Unit cost` is dropped below `2xl` so the
+table fits a 1280 laptop exactly.
+
+Verified at 375, 1040, 1280 and 1536 in a real browser, not only by a green suite.
 
 ---
 

@@ -9,9 +9,19 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, LayoutDashboard, LogOut, Package, Plus, ScrollText } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import {
+  BarChart3,
+  Boxes,
+  LayoutDashboard,
+  LogOut,
+  Package,
+  Plus,
+  ScrollText,
+  Store,
+  Vault,
+} from 'lucide-react'
+import type { ComponentType, ReactNode } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 
 import { api, type Member, type Product } from '../api'
 import { signedMoney, toneFor } from '../format'
@@ -23,12 +33,52 @@ export interface PageActions {
   onAddProduct: () => void
 }
 
-const NAV = [
-  { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
-  { to: '/inventory', label: 'Inventory', Icon: Package, end: false },
-  { to: '/sales', label: 'Sales', Icon: ScrollText, end: false },
-  { to: '/reports', label: 'Reports', Icon: BarChart3, end: false },
+interface NavItem {
+  to: string
+  label: string
+  Icon: ComponentType<{ size?: number; strokeWidth?: number }>
+  /** Which bucket this destination shows. `undefined` means it is not a stock view. */
+  bucket?: string
+  /** Nested under All stock in the sidebar. */
+  child?: boolean
+  /** Six is already the ceiling for a bottom tab bar at 375px. */
+  mobile?: boolean
+}
+
+/**
+ * The three buckets are destinations, not a control buried inside one page.
+ *
+ * They were tabs on Inventory and nothing else, so from the Dashboard there was no Store
+ * anywhere on screen - Joseph's "I DON'T SEE STORE!". A place you cannot navigate to is
+ * not a place.
+ */
+const NAV: NavItem[] = [
+  { to: '/', label: 'Dashboard', Icon: LayoutDashboard, mobile: true },
+  { to: '/inventory', label: 'All stock', Icon: Boxes, bucket: '' },
+  { to: '/inventory?bucket=inventory', label: 'Inventory', Icon: Package, bucket: 'inventory', child: true, mobile: true },
+  { to: '/inventory?bucket=store', label: 'Store', Icon: Store, bucket: 'store', child: true, mobile: true },
+  { to: '/inventory?bucket=vault', label: 'Vault', Icon: Vault, bucket: 'vault', child: true, mobile: true },
+  { to: '/sales', label: 'Sales', Icon: ScrollText, mobile: true },
+  { to: '/reports', label: 'Reports', Icon: BarChart3, mobile: true },
 ]
+
+/**
+ * Which nav item the current URL is on.
+ *
+ * `NavLink`'s own `isActive` compares pathnames and ignores the query string, so all four
+ * stock destinations would light up together. The bucket lives in the query string
+ * because it has to be shareable and survive Back, so the check is done by hand.
+ */
+function useActiveNav(): (item: NavItem) => boolean {
+  const { pathname, search } = useLocation()
+  const bucket = new URLSearchParams(search).get('bucket') ?? ''
+
+  return (item: NavItem) => {
+    if (item.bucket !== undefined) return pathname === '/inventory' && bucket === item.bucket
+    if (item.to === '/') return pathname === '/'
+    return pathname.startsWith(item.to)
+  }
+}
 
 /** "Joseph Napoleone" -> "JN". Falls back to the first two characters. */
 export function initials(name: string): string {
@@ -160,6 +210,8 @@ export function AppShell({
   onAddProduct: () => void
   children: ReactNode
 }) {
+  const isActive = useActiveNav()
+
   return (
     <div className="min-h-full lg:flex">
       <aside className="hidden w-[248px] shrink-0 flex-col gap-7 border-r border-(--color-edge) bg-(--color-ink)/55 px-4 pb-4 pt-5 lg:flex">
@@ -174,21 +226,20 @@ export function AppShell({
         </div>
 
         <nav className="flex flex-col gap-1">
-          {NAV.map(({ to, label, Icon, end }) => (
+          {NAV.map((item) => (
             <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm transition-colors duration-150 ${
-                  isActive
-                    ? 'bg-(--color-accent)/12 font-medium text-(--color-accent)'
-                    : 'text-(--color-muted) hover:bg-(--color-raised) hover:text-(--color-text)'
-                }`
-              }
+              key={item.to}
+              to={item.to}
+              className={`flex items-center gap-3 rounded-[10px] py-2.5 text-sm transition-colors duration-150 ${
+                item.child ? 'pl-7 pr-3' : 'px-3'
+              } ${
+                isActive(item)
+                  ? 'bg-(--color-accent)/12 font-medium text-(--color-accent)'
+                  : 'text-(--color-muted) hover:bg-(--color-raised) hover:text-(--color-text)'
+              }`}
             >
-              <Icon size={17} strokeWidth={2} />
-              {label}
+              <item.Icon size={item.child ? 15 : 17} strokeWidth={2} />
+              {item.label}
             </NavLink>
           ))}
         </nav>
@@ -252,20 +303,19 @@ export function AppShell({
         </button>
       </div>
 
+      {/* Six items is the ceiling at 375px, so All stock is the one that gives way - the
+          page it leads to carries the same choice as a tab strip at the top. */}
       <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-(--color-edge) bg-(--color-ink)/95 backdrop-blur lg:hidden">
-        {NAV.map(({ to, label, Icon, end }) => (
+        {NAV.filter((item) => item.mobile).map((item) => (
           <NavLink
-            key={to}
-            to={to}
-            end={end}
-            className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-1 py-2.5 text-[0.625rem] transition-colors ${
-                isActive ? 'text-(--color-accent)' : 'text-(--color-faint)'
-              }`
-            }
+            key={item.to}
+            to={item.to}
+            className={`flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 py-2.5 text-[0.625rem] whitespace-nowrap transition-colors ${
+              isActive(item) ? 'text-(--color-accent)' : 'text-(--color-faint)'
+            }`}
           >
-            <Icon size={19} strokeWidth={2} />
-            {label}
+            <item.Icon size={19} strokeWidth={2} />
+            {item.label}
           </NavLink>
         ))}
       </nav>
