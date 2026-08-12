@@ -24,6 +24,13 @@ That single flip is why every event the group described falls out of one rule:
 | Sale, proceeds to Joint | Joint +X | Joint cash up, nobody's balance moves |
 | Jason draws $3,000 from Joint | Joint -X, Jason +X | Both fall: cash out, debt settled |
 | Patrick puts cash into Joint | Joint +X, Patrick -X | Cash in, and he is owed for it |
+| Sale paid in store credit | That shop +X | Credit to spend there, and no cash anywhere |
+| Purchase paid with store credit | That shop -X | Credit spent down |
+
+**Store credit is value, not money.** A store-credit account sums like the joint one - it is
+something the group owns and can spend - but it is never added into a cash figure. Selling a
+$200 box for $500 of credit is $300 of realized profit and zero dollars, and both of those
+are true at the same time.
 
 Rows are never deleted, exactly as in the stock ledger: `status` moves to 'voided' and the
 balance query stops seeing them.
@@ -54,7 +61,13 @@ from src.models.mixins import TimestampMixin
 ACCOUNT_JOINT = "joint"
 #: One per member. Its balance is what the business owes that person.
 ACCOUNT_MEMBER = "member"
-ACCOUNT_KINDS = (ACCOUNT_JOINT, ACCOUNT_MEMBER)
+#: One per shop that pays in credit. Its balance is what is left to spend there.
+#:
+#: Deliberately its own kind rather than another joint account: credit at a card shop is
+#: real value the group owns, and it is not money. Selling a $200 box for $500 of credit is
+#: $300 of realized profit and zero dollars - both true, and different numbers.
+ACCOUNT_STORE_CREDIT = "store_credit"
+ACCOUNT_KINDS = (ACCOUNT_JOINT, ACCOUNT_MEMBER, ACCOUNT_STORE_CREDIT)
 
 #: Name the joint account carries. Editable later; this is only what it is created as.
 JOINT_ACCOUNT_NAME = "Joint account"
@@ -75,7 +88,7 @@ MOVEMENT_KINDS = (
     MOVEMENT_ADJUSTMENT,
 )
 
-_ACCOUNT_KIND_CHECK = "kind IN ('joint', 'member')"
+_ACCOUNT_KIND_CHECK = "kind IN ('joint', 'member', 'store_credit')"
 _MOVEMENT_KIND_CHECK = "kind IN ('funding', 'proceeds', 'transfer', 'adjustment')"
 _STATUS_CHECK = "status IN ('active', 'voided')"
 
@@ -103,6 +116,14 @@ class MoneyAccount(Base, TimestampMixin):
             unique=True,
             postgresql_where=text("kind = 'joint'"),
         ),
+        # One pot per shop, case-insensitively. "Card Shop" and "card shop" splitting the
+        # balance across two rows is the Fable/Fabled problem with money attached.
+        Index(
+            "uq_money_accounts_store_name",
+            text("lower(name)"),
+            unique=True,
+            postgresql_where=text("kind = 'store_credit'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -116,8 +137,22 @@ class MoneyAccount(Base, TimestampMixin):
 
     @property
     def is_liability(self) -> bool:
-        """True when the balance means "owed to", so its postings read negated."""
+        """True when the balance means "owed to", so its postings read negated.
+
+        Store credit is not one: it is value the group holds and can spend, so it sums the
+        same way the joint account does. What makes it different is that it is not cash,
+        which is a reporting distinction rather than a sign one.
+        """
         return self.kind == ACCOUNT_MEMBER
+
+    @property
+    def balance_means(self) -> str:
+        """What this account's balance is, in one word, so no client has to infer it."""
+        if self.kind == ACCOUNT_MEMBER:
+            return "owed"
+        if self.kind == ACCOUNT_STORE_CREDIT:
+            return "credit"
+        return "cash"
 
 
 class MoneyMovement(Base, TimestampMixin):

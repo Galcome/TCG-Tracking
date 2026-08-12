@@ -57,6 +57,11 @@ class AccountList(BaseModel):
     #: Sum of what the business owes its members. Deliberately not added to `joint_balance`
     #: - one is money you have, the other is money you owe.
     total_owed: MoneyOut
+    #: Store credit left to spend, across every shop. A third figure rather than part of
+    #: either of the others: it is value the group owns, and it is not money.
+    total_credit: MoneyOut
+    #: How many shops that credit is spread across, for "$2,400 across 2 stores".
+    credit_stores: int
 
 
 # ------------------------------------------------------------------------- movements
@@ -162,3 +167,28 @@ class FundingLeg(BaseModel):
 
     account_id: uuid.UUID
     amount: MoneyIn | None = None
+
+
+class ProceedsLeg(BaseModel):
+    """Where a sale's money went, and how much of it.
+
+    Either an account that already exists, or `store` - the name of a shop that paid in
+    credit, which creates its pot the first time it is used. Naming the shop is enough:
+    selling for credit means selling *to* that shop, so the name is the channel and the
+    account at once and is only typed once.
+    """
+
+    account_id: uuid.UUID | None = None
+    store: str | None = Field(default=None, max_length=120)
+    amount: MoneyIn | None = None
+
+    @field_validator("store", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def one_destination(self) -> "ProceedsLeg":
+        if (self.account_id is None) == (self.store is None):
+            raise ValueError("give either an account or a store name, not both")
+        return self

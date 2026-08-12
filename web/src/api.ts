@@ -185,6 +185,9 @@ export interface Dashboard {
    */
   net_proceeds: string
   fees_paid: string
+  /** The part of `net_proceeds` that arrived as store credit rather than money. */
+  store_credit: string
+  cash_received: string
   cash_balance: string
 }
 
@@ -346,19 +349,23 @@ export type Period = 'all' | 'ytd' | 'mtd' | '30d'
  */
 export interface Account {
   id: string
-  kind: 'joint' | 'member'
+  kind: 'joint' | 'member' | 'store_credit'
   name: string
   member_id: string | null
   is_active: boolean
   balance: string
-  balance_means: 'cash' | 'owed'
+  balance_means: 'cash' | 'owed' | 'credit'
 }
 
 export interface AccountsPage {
   items: Account[]
-  /** Cash in the joint account. Never added to `total_owed` — see the Money page. */
+  /** Three figures, never summed. Cash you have, money you owe, credit you can only
+   *  spend at one shop — a single netted number hides whichever is the problem. */
   joint_balance: string
   total_owed: string
+  total_credit: string
+  /** Shops with credit left, for "$2,400 across 2 stores". */
+  credit_stores: number
 }
 
 export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment'
@@ -366,7 +373,7 @@ export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment'
 export interface MovementLeg {
   account_id: string
   account_name: string
-  account_kind: 'joint' | 'member'
+  account_kind: 'joint' | 'member' | 'store_credit'
   /** Signed cash flow through that account. Positive is money arriving. */
   amount: string
 }
@@ -395,6 +402,16 @@ export interface MovementPage {
 /** Who paid for a purchase. `amount` may be omitted when one account paid all of it. */
 export interface FundingLeg {
   account_id: string
+  amount?: string
+}
+
+/**
+ * Where a sale's money went. Either an existing account, or `store` — the name of a shop
+ * that paid in credit, whose pot is created the first time it is used.
+ */
+export interface ProceedsLeg {
+  account_id?: string
+  store?: string
   amount?: string
 }
 
@@ -455,8 +472,8 @@ export interface NewSale {
   sold_by_member_id?: string | null
   marketplace?: string | null
   notes?: string | null
-  /** Where the money landed. Omitted, it follows the seller. */
-  proceeds_account_id?: string | null
+  /** Where the money landed. Omitted, it follows the seller. `[]` records none. */
+  proceeds?: ProceedsLeg[]
   allow_oversell?: boolean
 }
 

@@ -68,14 +68,15 @@ test('the Money page is reachable from the Dashboard', async ({ page }) => {
   await expect(page.getByText('IN THE JOINT ACCOUNT')).toBeVisible()
 })
 
-test('cash held and money owed are shown as two figures, never one', async ({ page }) => {
+test('cash, money owed and credit are three figures, never one', async ({ page }) => {
   await gotoMoney(page)
 
-  // A single netted number would hide whichever of the two is the problem, and it is the
+  // A single netted number would hide whichever of them is the problem, and it is the
   // same trap as folding the Dashboard's money in/out into this.
   await expect(page.getByText('IN THE JOINT ACCOUNT')).toBeVisible()
   await expect(page.getByText('OWED TO PARTNERS')).toBeVisible()
-  await expect(page.getByText(/says where the cash sits/)).toBeVisible()
+  await expect(page.getByText('IN STORE CREDIT')).toBeVisible()
+  await expect(page.getByText(/are not added together/)).toBeVisible()
 })
 
 test('paying for stock yourself means the group owes you for it', async ({ page }) => {

@@ -14,8 +14,8 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 1. Buckets on stock, and a move action | **Shipped** - PRs #17, #18 |
 | 1b. Store and Vault in the navigation | **Shipped** - branch `fix/store-vault-nav` |
 | 2. The money ledger | **Shipped** - branch `feature/money-ledger` |
-| 3. Store credit | Next |
-| 4. Sets, suggestions, seeded calendars | |
+| 3. Store credit | **Shipped** - branch `feature/store-credit` |
+| 4. Sets, suggestions, seeded calendars | Next |
 | 5. Transformations: cases and cracking | |
 | 6. The rip screen | |
 | 7. Grading | |
@@ -24,7 +24,7 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-474 backend tests, 45 e2e, 100% coverage.
+488 backend tests, 51 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -88,6 +88,31 @@ back lowers the joint balance *and* what they are owed, both at once.
 
 Verified at 375, 1280 and 1536 in a real browser. The mobile tab bar now carries seven
 items; `Dashboard` shortens to `Home` there, and the overflow check is an e2e assertion.
+
+### Step 3 - what shipped
+
+**Store credit is a third account kind, and a third figure.** It sums like the joint
+account, because it is value the group holds and can spend. It is never added into a cash
+figure, because it can only be spent at the shop that issued it. Sell a $200 box for $500 of
+credit: **$300 of realized profit and zero dollars**, both true at once.
+
+- **The shop's name is enough.** Typing it creates that shop's pot on first use, matched
+  case-insensitively so "Card Shop" and "card shop" cannot become two half-balances. Shops
+  behave like marketplaces, offered as chips afterwards, with no list to maintain.
+- **The name doubles as the channel**, per the original decision - selling for credit means
+  selling *to* that shop, so it is typed once and fills both.
+- **Spending it needs no new mechanism.** A store account is a funding source like any
+  other, so buying with credit is the existing "Paid from" picker. Spent-out shops drop out
+  of both pickers and out of the "across N stores" count.
+- **The Dashboard's "Money in" is cash only** now, with credit named on the line beneath it.
+  `cash_balance` excludes it too. `net_proceeds` still means everything a sale brought in.
+- **Proceeds became legs, mirroring funding exactly** - so half cash and half credit is one
+  sale, and a later fee correction rescales both in proportion.
+
+Two things the real-browser pass caught that a green suite did not: account cards were
+ordered store-credit first, so a dozen shops buried the joint balance; and the "which shop?"
+field was shown when the typed name did *not* match an existing shop, so it vanished on the
+last keystroke of a name that did. Both fixed, the second with a regression test.
 
 ---
 

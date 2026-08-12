@@ -7,7 +7,14 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeftRight, Landmark, PiggyBank, SlidersHorizontal, Wallet } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Landmark,
+  PiggyBank,
+  SlidersHorizontal,
+  Store,
+  Wallet,
+} from 'lucide-react'
 import { useState } from 'react'
 
 import { api, MOVEMENT_LABELS, type Account, type Movement } from '../api'
@@ -38,6 +45,7 @@ function AccountCard({
 }) {
   const value = Number(account.balance)
   const owed = account.balance_means === 'owed'
+  const credit = account.balance_means === 'credit'
 
   const meaning = owed
     ? value > 0
@@ -45,16 +53,20 @@ function AccountCard({
       : value < 0
         ? `${account.name} is holding the group's money`
         : 'All square'
-    : value < 0
-      ? 'Overdrawn — more has been spent from it than put in'
-      : 'Cash available to spend'
+    : credit
+      ? value > 0
+        ? `Credit to spend at ${account.name}. Not cash.`
+        : 'Nothing left here'
+      : value < 0
+        ? 'Overdrawn — more has been spent from it than put in'
+        : 'Cash available to spend'
 
   return (
     <Card>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm font-medium">
-            {owed ? <Wallet size={15} /> : <Landmark size={15} />}
+            {owed ? <Wallet size={15} /> : credit ? <Store size={15} /> : <Landmark size={15} />}
             {account.name}
           </p>
           <p className="mt-1 text-xs text-(--color-faint)">{meaning}</p>
@@ -109,6 +121,14 @@ export function Money() {
   const items = accounts.data?.items ?? []
   const rows = movements.data?.items ?? []
 
+  // Shops with nothing left get a count rather than a card each. They are still in the
+  // totals and still one tap away on the sale form; what they are not is worth a third of
+  // the screen when the joint balance is the thing somebody opened this page for.
+  const spent = items.filter(
+    (account) => account.balance_means === 'credit' && Number(account.balance) === 0,
+  )
+  const shown = items.filter((account) => !spent.includes(account))
+
   return (
     <div className="space-y-5">
       <PageHeader title="Money">
@@ -138,7 +158,7 @@ export function Money() {
           {/* Two figures, never one. Cash you have and money you owe your own partners are
               different facts, and a single netted number hides whichever is the problem. */}
           <Card>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <p className="text-[0.6875rem] font-semibold tracking-[0.12em] text-(--color-faint)">
                   IN THE JOINT ACCOUNT
@@ -167,16 +187,31 @@ export function Money() {
                   Money put in out of their own pockets and not yet taken back
                 </p>
               </div>
+              <div>
+                <p className="text-[0.6875rem] font-semibold tracking-[0.12em] text-(--color-faint)">
+                  IN STORE CREDIT
+                </p>
+                <p className="font-display mt-1 text-2xl font-bold tabular-nums">
+                  {money(accounts.data.total_credit)}
+                </p>
+                <p className="mt-1 text-xs text-(--color-muted)">
+                  {accounts.data.credit_stores === 0
+                    ? 'Nothing on account anywhere'
+                    : `Across ${accounts.data.credit_stores} ${
+                        accounts.data.credit_stores === 1 ? 'store' : 'stores'
+                      } — value, but not money`}
+                </p>
+              </div>
             </div>
             <p className="mt-4 border-t border-(--color-edge) pt-3 text-xs text-(--color-faint)">
-              These two are not added together, and neither is the Dashboard&rsquo;s
-              money&nbsp;in/money&nbsp;out. That one says what was spent on stock; this one says
-              where the cash sits.
+              These three are not added together, and neither is the Dashboard&rsquo;s
+              money&nbsp;in/money&nbsp;out. Cash you have, money you owe your own partners, and
+              credit you can only spend at one shop are different facts.
             </p>
           </Card>
 
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {items.map((account) => (
+            {shown.map((account) => (
               <li key={account.id}>
                 <AccountCard
                   account={account}
@@ -186,6 +221,13 @@ export function Money() {
               </li>
             ))}
           </ul>
+
+          {spent.length > 0 && (
+            <p className="text-xs text-(--color-faint)">
+              {spent.length} {spent.length === 1 ? 'shop has' : 'shops have'} no credit left:{' '}
+              {spent.map((account) => account.name).join(', ')}
+            </p>
+          )}
         </>
       )}
 

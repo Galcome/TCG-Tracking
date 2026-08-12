@@ -376,7 +376,7 @@ def test_the_seller_holds_the_money_until_they_move_it(client, make_product):
 def test_proceeds_can_go_straight_to_the_joint_account(client, make_product):
     product = make_product()
     buy(client, product["id"], "200.00", funding=[{"account_id": joint(client)["id"]}])
-    sell(client, product["id"], "300.00", proceeds_account_id=joint(client)["id"])
+    sell(client, product["id"], "300.00", proceeds=[{"account_id": joint(client)["id"]}])
 
     assert joint(client)["balance"] == "100.00"
     assert me(client)["balance"] == "0.00"
@@ -427,7 +427,8 @@ def test_where_the_money_landed_can_be_corrected(client, make_product):
     sale = sell(client, product["id"], "300.00")
 
     client.patch(
-        f"/api/v1/sales/{sale['id']}", json={"proceeds_account_id": joint(client)["id"]}
+        f"/api/v1/sales/{sale['id']}",
+        json={"proceeds": [{"account_id": joint(client)["id"]}]},
     )
 
     assert me(client)["balance"] == "0.00"
@@ -444,7 +445,7 @@ def test_proceeds_cannot_be_sent_to_an_account_that_does_not_exist(client, make_
             "product_id": product["id"],
             "quantity": 1,
             "amount": "300.00",
-            "proceeds_account_id": str(uuid.uuid4()),
+            "proceeds": [{"account_id": str(uuid.uuid4())}],
         },
     )
     assert response.status_code == 404
@@ -783,7 +784,7 @@ def test_moving_proceeds_to_a_sale_that_now_nets_nothing_drops_them(client, make
 
     client.patch(
         f"/api/v1/sales/{sale['id']}",
-        json={"proceeds_account_id": joint(client)["id"], "platform_fees": "300.00"},
+        json={"proceeds": [{"account_id": joint(client)["id"]}], "platform_fees": "300.00"},
     )
 
     assert joint(client)["balance"] == "0.00"
@@ -811,3 +812,233 @@ def test_a_member_who_leaves_keeps_the_balance_they_are_owed(client, db):
     db.flush()
 
     assert account_named(client, "Departing Partner")["balance"] == "1000.00"
+
+
+# --------------------------------------------------------------------- store credit
+
+
+def credit_accounts(client) -> list[dict]:
+    return [item for item in accounts(client)["items"] if item["kind"] == "store_credit"]
+
+
+def test_selling_for_credit_creates_that_shops_pot(client, make_product):
+    """No admin screen and no managed list - the shop's name is enough to sell to it."""
+    product = make_product()
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "500.00", proceeds=[{"store": "Vintage Cards"}])
+
+    pots = credit_accounts(client)
+    assert [pot["name"] for pot in pots] == ["Vintage Cards"]
+    assert pots[0]["balance"] == "500.00"
+    assert pots[0]["balance_means"] == "credit"
+
+
+def test_a_shop_named_two_ways_is_still_one_pot(client, make_product):
+    """Card Shop and card shop splitting the balance is Fable/Fabled with money on it."""
+    product = make_product()
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "300.00", proceeds=[{"store": "Card Shop"}])
+
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "200.00", proceeds=[{"store": "  card shop  "}])
+
+    pots = credit_accounts(client)
+    assert len(pots) == 1
+    assert pots[0]["balance"] == "500.00"
+
+
+def test_credit_is_profit_but_it_is_not_cash(client, make_product):
+    """Sell a $200 box for $500 of credit: $300 of realized profit and zero dollars.
+
+    Both are true and they are different numbers. Folding restricted credit into a cash
+    figure is the same class of lie as valuing unpriced stock at zero.
+    """
+    product = make_product()
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "500.00", proceeds=[{"store": "Vintage Cards"}])
+
+    stats = client.get(f"/api/v1/products/{product['id']}").json()["stats"]
+    assert stats["realized_profit"] == "300.00"
+
+    page = accounts(client)
+    assert page["total_credit"] == "500.00"
+    assert page["credit_stores"] == 1
+    # Not folded into either of the other two figures.
+    assert page["joint_balance"] == "0.00"
+    assert page["total_owed"] == "0.00"
+
+
+def test_the_dashboard_keeps_credit_out_of_cash(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "500.00", proceeds=[{"store": "Vintage Cards"}])
+
+    board = client.get("/api/v1/dashboard").json()
+    assert board["net_proceeds"] == "500.00"
+    assert board["store_credit"] == "500.00"
+    assert board["cash_received"] == "0.00"
+    # Spent $200 of real money and received none back. Credit does not fill that hole.
+    assert board["cash_balance"] == "-200.00"
+
+
+def test_credit_can_be_spent_on_stock(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "200.00", funding=[])
+    sell(client, product["id"], "500.00", proceeds=[{"store": "Vintage Cards"}])
+    pot = credit_accounts(client)[0]
+
+    another = make_product("Bought With Credit")
+    buy(client, another["id"], "180.00", funding=[{"account_id": pot["id"]}])
+
+    assert credit_accounts(client)[0]["balance"] == "320.00"
+
+
+def test_a_shop_with_nothing_left_stops_being_counted(client, make_product):
+    """Across 2 stores should mean two places you can still spend."""
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+    sell(client, product["id"], "300.00", proceeds=[{"store": "Spent Out"}])
+    pot = credit_accounts(client)[0]
+
+    another = make_product("Spends It All")
+    buy(client, another["id"], "300.00", funding=[{"account_id": pot["id"]}])
+
+    page = accounts(client)
+    assert page["total_credit"] == "0.00"
+    assert page["credit_stores"] == 0
+
+
+def test_a_sale_can_be_split_between_cash_and_credit(client, make_product):
+    """One shop is the normal case, but half cash and half credit has to be expressible."""
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+    sell(
+        client,
+        product["id"],
+        "400.00",
+        proceeds=[
+            {"account_id": joint(client)["id"], "amount": "150.00"},
+            {"store": "Half And Half", "amount": "250.00"},
+        ],
+    )
+
+    assert joint(client)["balance"] == "150.00"
+    assert credit_accounts(client)[0]["balance"] == "250.00"
+
+
+def test_a_split_that_does_not_match_the_sale_is_refused(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+
+    response = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product["id"],
+            "quantity": 1,
+            "amount": "400.00",
+            "proceeds": [
+                {"account_id": joint(client)["id"], "amount": "100.00"},
+                {"store": "Short", "amount": "100.00"},
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert "200.00" in response.json()["detail"]
+    assert "400.00" in response.json()["detail"]
+
+
+def test_a_split_needs_an_amount_on_every_destination(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+
+    response = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product["id"],
+            "quantity": 1,
+            "amount": "400.00",
+            "proceeds": [
+                {"account_id": joint(client)["id"]},
+                {"store": "No Amount", "amount": "100.00"},
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert "amount" in response.json()["detail"]
+
+
+def test_one_destination_cannot_appear_twice(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+
+    response = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product["id"],
+            "quantity": 1,
+            "amount": "400.00",
+            "proceeds": [
+                {"store": "Twice", "amount": "200.00"},
+                {"store": "twice", "amount": "200.00"},
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert "once" in response.json()["detail"]
+
+
+def test_a_leg_needs_exactly_one_destination(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+
+    for leg in ({}, {"account_id": str(uuid.uuid4()), "store": "Both"}):
+        response = client.post(
+            "/api/v1/sales",
+            json={
+                "product_id": product["id"],
+                "quantity": 1,
+                "amount": "400.00",
+                "proceeds": [leg],
+            },
+        )
+        assert response.status_code == 422
+
+
+def test_correcting_a_fee_keeps_a_split_in_proportion(client, make_product):
+    """The same rescale funding gets, so a fee fix does not strand half the money."""
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+    sale = sell(
+        client,
+        product["id"],
+        "400.00",
+        proceeds=[
+            {"account_id": joint(client)["id"], "amount": "300.00"},
+            {"store": "Proportional", "amount": "100.00"},
+        ],
+    )
+
+    client.patch(f"/api/v1/sales/{sale['id']}", json={"platform_fees": "40.00"})
+
+    assert joint(client)["balance"] == "270.00"
+    assert credit_accounts(client)[0]["balance"] == "90.00"
+
+
+def test_a_sale_can_record_no_destination_at_all(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+    sell(client, product["id"], "300.00", proceeds=[])
+
+    assert me(client)["balance"] == "0.00"
+    assert movements(client) == []
+
+
+def test_taking_the_destination_off_a_sale_removes_its_money(client, make_product):
+    product = make_product()
+    buy(client, product["id"], "100.00", funding=[])
+    sale = sell(client, product["id"], "300.00")
+    assert me(client)["balance"] == "-300.00"
+
+    client.patch(f"/api/v1/sales/{sale['id']}", json={"proceeds": []})
+
+    assert me(client)["balance"] == "0.00"

@@ -385,8 +385,14 @@ function RunningTotal({ data }: { data: NonNullable<Awaited<ReturnType<typeof ap
         />
         <Figure
           label="Money in"
-          value={money(data.net_proceeds)}
-          hint={`Received from sales, after ${money(data.fees_paid)} of fees`}
+          value={money(data.cash_received)}
+          hint={
+            Number(data.store_credit) > 0
+              ? `Cash, after ${money(data.fees_paid)} of fees. ${money(
+                  data.store_credit,
+                )} more came in as store credit`
+              : `Received from sales, after ${money(data.fees_paid)} of fees`
+          }
         />
         {/* Not red when negative. While the store is growing, money out exceeds money in
             permanently, because the difference is stock — and a warning colour that is
