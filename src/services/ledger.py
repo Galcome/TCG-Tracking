@@ -29,7 +29,7 @@ from src.models.ledger import (
 from src.models.product import Product
 from src.services.costing import Event, allocate
 
-EntityKind = Literal["purchase", "sale", "adjustment", "move"]
+EntityKind = Literal["purchase", "sale", "adjustment", "move", "money_movement"]
 
 #: Which table an event id came from, so allocations land in the right FK column.
 _SourceKind = Literal["purchase", "sale", "adjustment_supply", "adjustment_consumer"]

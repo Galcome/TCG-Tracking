@@ -21,6 +21,7 @@ from src.models.ledger import STATUS_ACTIVE, InventoryAdjustment, Purchase, Sale
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game
+from src.routes.money import resolve_funding, resolve_proceeds
 from src.schemas.ledger import (
     AdjustmentCreate,
     AdjustmentRead,
@@ -40,6 +41,7 @@ from src.schemas.ledger import (
     VoidRequest,
 )
 from src.services import inventory, ledger, reporting
+from src.services import money as money_service
 from src.services.costing import Event, allocate
 from src.services.search import escape_like
 
@@ -211,6 +213,17 @@ def create_purchase(
     db.add(purchase)
     db.flush()
     ledger.recompute_product(db, purchase.product_id)
+    money_service.sync_funding(
+        db,
+        purchase,
+        funding=resolve_funding(
+            db,
+            legs=payload.funding,
+            landed_cost=purchase.landed_cost_cents,
+            default_member_id=purchase.purchased_by_member_id or member.id,
+        ),
+        member_id=member.id,
+    )
     ledger.record_audit(
         db,
         entity_type="purchase",
@@ -232,10 +245,28 @@ def update_purchase(
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
+    changes.pop("funding", None)
 
     before = _apply(purchase, changes, PURCHASE_FIELDS)
     db.flush()
     ledger.recompute_product(db, purchase.product_id)
+    # Funding sent replaces who paid; funding left out is rescaled to whatever the purchase
+    # now costs, so correcting a price never leaves a funding record claiming the old one.
+    money_service.sync_funding(
+        db,
+        purchase,
+        funding=(
+            resolve_funding(
+                db,
+                legs=payload.funding,
+                landed_cost=purchase.landed_cost_cents,
+                default_member_id=purchase.purchased_by_member_id or member.id,
+            )
+            if "funding" in payload.model_fields_set
+            else None
+        ),
+        member_id=member.id,
+    )
     ledger.record_audit(
         db,
         entity_type="purchase",
@@ -260,6 +291,7 @@ def void_purchase(
     ledger.void(
         db, purchase, entity_type="purchase", member_id=member.id, reason=payload.reason
     )
+    money_service.void_derived(db, purchase_id=purchase.id, member_id=member.id)
     return purchase
 
 
@@ -401,6 +433,16 @@ def create_sale(
     db.add(sale)
     db.flush()
     ledger.recompute_product(db, sale.product_id)
+    money_service.sync_proceeds(
+        db,
+        sale,
+        account_id=resolve_proceeds(
+            db,
+            account_id=payload.proceeds_account_id,
+            default_member_id=sale.sold_by_member_id or member.id,
+        ),
+        member_id=member.id,
+    )
     ledger.record_audit(
         db,
         entity_type="sale",
@@ -423,6 +465,7 @@ def update_sale(
     sale = _require_active(db, Sale, sale_id, "Sale")
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
+    changes.pop("proceeds_account_id", None)
 
     if "quantity" in changes:
         _guard_oversell(
@@ -432,6 +475,22 @@ def update_sale(
     before = _apply(sale, changes, SALE_FIELDS)
     db.flush()
     ledger.recompute_product(db, sale.product_id)
+    # A destination sent moves the money; none sent leaves it where it is and follows the
+    # sale's new net amount, so fixing a fee does not strand the proceeds record.
+    money_service.sync_proceeds(
+        db,
+        sale,
+        account_id=(
+            resolve_proceeds(
+                db,
+                account_id=payload.proceeds_account_id,
+                default_member_id=sale.sold_by_member_id or member.id,
+            )
+            if "proceeds_account_id" in payload.model_fields_set
+            else None
+        ),
+        member_id=member.id,
+    )
     ledger.record_audit(
         db,
         entity_type="sale",
@@ -455,6 +514,7 @@ def void_sale(
 ) -> Sale:
     sale = _require_active(db, Sale, sale_id, "Sale")
     ledger.void(db, sale, entity_type="sale", member_id=member.id, reason=payload.reason)
+    money_service.void_derived(db, sale_id=sale.id, member_id=member.id)
     db.refresh(sale)
     return sale
 

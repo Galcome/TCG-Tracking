@@ -8,6 +8,7 @@ import { AddProductDialog, RecordSaleDialog } from './components/forms'
 import { Dashboard } from './pages/Dashboard'
 import { Inventory } from './pages/Inventory'
 import { Login } from './pages/Login'
+import { Money } from './pages/Money'
 import { ProductDetail } from './pages/ProductDetail'
 import { Reports } from './pages/Reports'
 import { Sales } from './pages/Sales'
@@ -60,6 +61,7 @@ export function App() {
         <Route path="/" element={<Dashboard {...actions} />} />
         <Route path="/inventory" element={<Inventory {...actions} />} />
         <Route path="/sales" element={<Sales {...actions} />} />
+        <Route path="/money" element={<Money />} />
         <Route path="/products/:productId" element={<ProductDetail />} />
         <Route path="/reports" element={<Reports {...actions} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

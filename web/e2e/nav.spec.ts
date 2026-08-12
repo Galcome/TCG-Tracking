@@ -113,11 +113,11 @@ test('an empty place says it is empty, not that you own nothing', async ({ page 
 test.describe('on the narrowest phone', () => {
   test.use({ viewport: { width: 375, height: 812 } })
 
-  test('six tab items fit without wrapping or overflowing', async ({ page }) => {
+  test('every tab item fits without wrapping or overflowing', async ({ page }) => {
     await page.goto('/')
 
     const bar = page.locator('nav').last()
-    await expect(bar.getByRole('link')).toHaveCount(6)
+    await expect(bar.getByRole('link')).toHaveCount(7)
 
     // The bar itself must not scroll sideways...
     const barOverflows = await bar.evaluate((el) => el.scrollWidth > el.clientWidth + 1)

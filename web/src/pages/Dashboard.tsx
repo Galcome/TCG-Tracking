@@ -402,6 +402,17 @@ function RunningTotal({ data }: { data: NonNullable<Awaited<ReturnType<typeof ap
           }
         />
       </div>
+
+      {/* These three describe stock: what was spent on it and what came back. They are not
+          the same question as how much cash is in the joint account and who is owed what,
+          and presenting one as the other is the fastest way to lose trust in both. */}
+      <p className="mt-4 border-t border-(--color-edge) pt-3 text-xs text-(--color-faint)">
+        This is what stock cost and returned.{' '}
+        <Link to="/money" className="text-(--color-accent) hover:underline">
+          Money
+        </Link>{' '}
+        is a different question: where the cash actually sits, and who is owed what.
+      </p>
     </section>
   )
 }

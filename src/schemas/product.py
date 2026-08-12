@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.models.ledger import BUCKETS
 from src.schemas.ledger import BucketField, TransactionRead
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.schemas.money_ledger import FundingLeg
 from src.schemas.taxonomy import TaxonomyRead
 
 NAME_MAX_LENGTH = 200
@@ -73,6 +74,8 @@ class InitialPurchase(BaseModel):
     #: Where the stock lands. A case bought for the Store never has to pass through
     #: Inventory first.
     bucket: str = BucketField
+    #: Who paid. Same rule as any other purchase: whoever bought it, unless told otherwise.
+    funding: list[FundingLeg] | None = None
 
 
 class ProductCreate(ProductBase):

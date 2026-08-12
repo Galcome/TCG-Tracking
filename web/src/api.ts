@@ -337,6 +337,74 @@ export interface Attention {
 
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
 
+/**
+ * A pot money sits in, or a person money is owed to.
+ *
+ * `balance_means` is on the wire on purpose: -500 on the joint account is a hole, and
+ * -500 on a member account is that person holding the group's money. Reading a bare
+ * number without knowing which is how a ledger gets misread.
+ */
+export interface Account {
+  id: string
+  kind: 'joint' | 'member'
+  name: string
+  member_id: string | null
+  is_active: boolean
+  balance: string
+  balance_means: 'cash' | 'owed'
+}
+
+export interface AccountsPage {
+  items: Account[]
+  /** Cash in the joint account. Never added to `total_owed` — see the Money page. */
+  joint_balance: string
+  total_owed: string
+}
+
+export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment'
+
+export interface MovementLeg {
+  account_id: string
+  account_name: string
+  account_kind: 'joint' | 'member'
+  /** Signed cash flow through that account. Positive is money arriving. */
+  amount: string
+}
+
+export interface Movement {
+  id: string
+  kind: MovementKind
+  occurred_on: string | null
+  /** Always positive. The legs carry the direction. */
+  amount: string
+  legs: MovementLeg[]
+  purchase_id: string | null
+  sale_id: string | null
+  product_name: string | null
+  notes: string | null
+  status: string
+}
+
+export interface MovementPage {
+  items: Movement[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Who paid for a purchase. `amount` may be omitted when one account paid all of it. */
+export interface FundingLeg {
+  account_id: string
+  amount?: string
+}
+
+export const MOVEMENT_LABELS: Record<MovementKind, string> = {
+  funding: 'Bought stock',
+  proceeds: 'Sold stock',
+  transfer: 'Transfer',
+  adjustment: 'Adjustment',
+}
+
 export interface NewProduct {
   name: string
   game_id: string
@@ -353,6 +421,8 @@ export interface NewProduct {
     fees?: string
     purchase_date?: string
     source?: string | null
+    /** Who paid. Omitted, it goes on whoever bought it. `[]` records no money at all. */
+    funding?: FundingLeg[]
   }
 }
 
@@ -368,6 +438,8 @@ export interface NewPurchase {
   purchase_date?: string
   source?: string | null
   notes?: string | null
+  /** Who paid. Omitted, it goes on whoever bought it. `[]` records no money at all. */
+  funding?: FundingLeg[]
 }
 
 export interface NewSale {
@@ -383,6 +455,8 @@ export interface NewSale {
   sold_by_member_id?: string | null
   marketplace?: string | null
   notes?: string | null
+  /** Where the money landed. Omitted, it follows the seller. */
+  proceeds_account_id?: string | null
   allow_oversell?: boolean
 }
 
@@ -539,4 +613,40 @@ export const api = {
   /** Not period-scoped: what is on the shelf today is not a function of a date range. */
   aging: () => request<AgingLot[]>('/api/v1/reports/aging'),
   attention: () => request<Attention>('/api/v1/reports/attention'),
+
+  accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
+
+  movements: (params: { account_id?: string; kind?: MovementKind; limit?: number }) =>
+    request<MovementPage>(`/api/v1/money/movements${query(params)}`),
+
+  /** Paying a partner back, putting cash in, and settling up are all this one call. */
+  createTransfer: (transfer: {
+    from_account_id: string
+    to_account_id: string
+    amount: string
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/transfers', {
+      method: 'POST',
+      body: JSON.stringify(transfer),
+    }),
+
+  /** `amount` is signed, in the account's own terms: +5000 on a member means owed $5,000. */
+  createMoneyAdjustment: (adjustment: {
+    account_id: string
+    amount: number
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/adjustments', {
+      method: 'POST',
+      body: JSON.stringify(adjustment),
+    }),
+
+  voidMovement: (id: string, reason: string) =>
+    request<Movement>(`/api/v1/money/movements/${id}/void`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 }
