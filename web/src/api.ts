@@ -29,10 +29,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   const token = await user.getIdToken()
+  // FormData sets its own Content-Type, including the multipart boundary. Forcing JSON
+  // here would produce a body the server cannot parse and an error nobody could read.
+  const isUpload = init.body instanceof FormData
   const response = await fetch(`${config.apiUrl}${path}`, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isUpload ? {} : { 'Content-Type': 'application/json' }),
       Authorization: `Bearer ${token}`,
       ...init.headers,
     },
@@ -518,6 +521,19 @@ export interface VaultHolding {
   days_in_store_first: number | null
 }
 
+/** One card a photo turned up. Empty strings mean the model would not say. */
+export interface ReadCard {
+  name: string
+  set_name: string
+  variant: string
+}
+
+export interface ReadResult {
+  /** False when no key is configured — the button is hidden rather than always failing. */
+  available: boolean
+  cards: ReadCard[]
+}
+
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
 
 /**
@@ -807,6 +823,19 @@ export const api = {
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
+  /** Whether reading photos is switched on at all. */
+  visionStatus: () => request<ReadResult>('/api/v1/vision/status'),
+
+  /**
+   * What cards are in this photo. Fills in a form; it never writes to the ledger, and it
+   * is never asked what anything is worth.
+   */
+  readCards: async (file: File): Promise<ReadResult> => {
+    const body = new FormData()
+    body.append('photo', file)
+    return request<ReadResult>('/api/v1/vision/cards', { method: 'POST', body })
+  },
+
   /** What is in the Vault, measured on appreciation rather than velocity. */
   vaultHoldings: () => request<VaultHolding[]>('/api/v1/reports/vault'),
 

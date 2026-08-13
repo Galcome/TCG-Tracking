@@ -90,3 +90,16 @@ test('the estimate never becomes the profit', async ({ page }) => {
   await expect(statAmount(page, 'Inventory at cost')).resolves.toBe(150)
   await expect(statAmount(page, 'Realized profit')).resolves.toBe(0)
 })
+
+test('the camera is not offered when nothing can read a photo', async ({ page }) => {
+  const boxName = await addBox(page, '150.00')
+
+  await openProduct(page, boxName)
+  await page.getByRole('button', { name: 'Rip open' }).click()
+
+  // No key is configured in the e2e environment, so the button is absent rather than
+  // present and failing. The typing path below it is untouched.
+  const dialog = page.locator('form')
+  await expect(dialog.getByText('Photograph them instead')).toBeHidden()
+  await expect(dialog.getByLabel('Hit 1 name')).toBeVisible()
+})

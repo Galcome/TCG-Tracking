@@ -13,7 +13,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { Plus, X } from 'lucide-react'
+import { Camera, Plus, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { BUCKET_LABELS, BUCKETS, api, type Bucket, type ProductDetail } from '../api'
@@ -67,6 +67,11 @@ export function RipDialog({
   const [occurredOn, setDate] = useState(todayIso())
   const [rows, setRows] = useState<HitRow[]>([emptyRow()])
   const [error, setError] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+
+  // Hidden when no key is configured, rather than offered and always failing.
+  const vision = useQuery({ queryKey: ['visionStatus'], queryFn: api.visionStatus })
 
   const unitCost = Number(product.stats.average_unit_cost ?? 0)
   const boxCost = unitCost * Number(boxes || 0)
@@ -243,6 +248,66 @@ export function RipDialog({
           Add another
         </button>
       </div>
+
+      {/* Eyes, not judgement. The photo fills in rows; a person still presses save, and
+          nothing here is ever asked what a card is worth. Hidden entirely when no key is
+          configured, rather than offered and always failing. */}
+      {vision.data?.available && (
+        <div>
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-(--color-accent) hover:underline">
+            <Camera size={13} />
+            {reading ? 'Reading the photo…' : 'Photograph them instead'}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              disabled={reading}
+              onChange={async (event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                if (!file) return
+
+                setPhotoError(null)
+                setReading(true)
+                try {
+                  const found = await api.readCards(file)
+                  // Batches append. Accuracy falls off on twenty overlapping cards, so
+                  // several relaxed photos beat one crowded one and the flow should
+                  // encourage that rather than fight it.
+                  if (found.cards.length > 0) {
+                    setRows((current) => [
+                      ...current.filter((row) => row.name.trim() || row.productId),
+                      ...found.cards.map((card) => ({
+                        ...emptyRow(),
+                        name: card.name,
+                        value: '',
+                        bucket: current[0]?.bucket ?? ('inventory' as Bucket),
+                      })),
+                      emptyRow(),
+                    ])
+                  } else {
+                    setPhotoError('Nothing readable in that one. Try a less crowded shot.')
+                  }
+                } catch (error) {
+                  // Degrades to typing, always. The field below still works.
+                  setPhotoError((error as Error).message)
+                } finally {
+                  setReading(false)
+                }
+              }}
+            />
+          </label>
+          <p className="mt-1 text-xs text-(--color-faint)">
+            Names only, and only what it is sure of &mdash; check the set and the variant
+            yourself. An Iconic foil against a regular is $560 against about $2, and it is
+            the one thing a photo gets wrong.
+          </p>
+          {photoError && (
+            <p className="mt-1 text-xs text-(--color-loss)">{photoError}</p>
+          )}
+        </div>
+      )}
 
       {/* The write-off, growing as you type. A bad rip should look bad while you are
           recording it, not in a report three weeks later. */}
