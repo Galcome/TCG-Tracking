@@ -18,13 +18,13 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 4. Sets, suggestions, seeded calendars | **Shipped** - branch `feature/sets` |
 | 5. Transformations: cases and cracking | **Shipped** - branch `feature/transformations` |
 | 6. The rip screen | **Shipped** - branch `feature/rip-screen` |
-| 7. Grading | Next |
-| 8. Reporting: tier, lineage, set rollup | |
+| 7. Grading | **Shipped** - branch `feature/grading` |
+| 8. Reporting: tier, lineage, set rollup | Next |
 | 9. Vault valuation and ageing exemption | |
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-568 backend tests, 68 e2e, 100% coverage.
+592 backend tests, 70 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -214,6 +214,30 @@ The dialog shows the split live as values are typed, and the write-off growing b
 a bad rip should look bad while you are recording it. One bug the browser pass caught that
 the suite did not: the live preview divided dollars by 100 and showed $1.47 where the split
 was $147.06.
+
+### Step 7 - what shipped
+
+The primitive a third time, with the two decisions Joseph made about it.
+
+**The card keeps its bucket and carries a flag** rather than moving to an "Out" state - it
+is still the group's stock and still their money. The condition attached to that was the day
+count, and it is on the card: anything away shows how long, turning red past 90 days. That
+is the protection a separate state would have given, which was stopping a card quietly
+sitting at PSA for months.
+
+**The return is the transformation, not the send.** The grade is unknown when it leaves, so
+there is nothing to produce until it comes back. Tapping the flag is how the return gets
+recorded, and the graded card's name is pre-filled from the raw one plus grader and grade -
+"Mickey Mouse Iconic" becomes "Mickey Mouse Iconic - PSA 10". Shown, editable, never silent.
+
+**Fees join the cost basis.** Grading, postage and insurance ride on the produced purchase's
+fee column, so the graded card costs raw plus fees and its ROI is not overstated. A PSA 7
+that comes back worth less than raw uses the identical mechanic; the loss is simply visible,
+which is the point of measuring grading at all.
+
+One refinement to the money-out rule from step 5: a derived purchase's *gross* is carried
+cost, but anything in its shipping, tax or fees is new money. Grading fees arrive exactly
+that way, so they show as spending while the carried card cost still does not.
 
 ---
 

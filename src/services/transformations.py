@@ -92,6 +92,7 @@ def transform(
     source_bucket: str,
     outputs: list[OutputSpec],
     costs: list[int] | None = None,
+    added_cost: int = 0,
     occurred_on: date | None,
     member_id: uuid.UUID | None,
     notes: str | None = None,
@@ -106,6 +107,9 @@ def transform(
     Omitted, the source's cost is divided across the produced *units* with a
     largest-remainder split, so six boxes out of a $100 case come to
     1667 + 1667 + 1667 + 1667 + 1666 + 1666 and sum back exactly.
+
+    `added_cost` is money spent to make the transformation happen - grading fees, shipping,
+    insurance. It joins what the outputs carry, because the card really has absorbed it.
 
     A source whose cost is genuinely unknown produces outputs whose cost is unknown too.
     Spreading a zero would say the boxes were free, which is a different claim.
@@ -144,6 +148,13 @@ def transform(
     record.consuming_adjustment_id = consuming.id
     record.source_cost_cents = None if consuming.has_unknown_cost else consuming.cost_removed_cents
 
+    # Money spent to make the transformation happen - grading fees, shipping, insurance.
+    # It joins the outputs' cost basis because the card really has absorbed it, and leaving
+    # it out would overstate every graded card's ROI by roughly the fee.
+    carried = record.source_cost_cents
+    if added_cost and carried is not None:
+        carried += added_cost
+
     shares: list[int | None]
     if costs is not None:
         shares = list(costs)
@@ -151,13 +162,16 @@ def transform(
         # than carried as an asset nobody would ever choose to acquire.
         record.bulk_cost_cents = max((record.source_cost_cents or 0) - sum(costs), 0)
     else:
-        shares = _shares(record.source_cost_cents, outputs)
+        shares = _shares(carried, outputs)
 
     for spec, share in zip(outputs, shares):
         produced = Purchase(
             product_id=spec.product_id,
             quantity=spec.quantity,
-            gross_amount_cents=share or 0,
+            gross_amount_cents=max((share or 0) - added_cost, 0),
+            # New money, kept apart from the carried gross so the dashboard can tell
+            # spending from cost that merely moved.
+            fees_cents=added_cost if share is not None else 0,
             # The whole point. Not `occurred_on`.
             purchase_date=record.inherited_purchase_date,
             purchased_by_member_id=member_id,

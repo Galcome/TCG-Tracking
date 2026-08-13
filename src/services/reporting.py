@@ -265,8 +265,18 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     # Derived purchases are excluded: they are cost carried across a transformation, not
     # money that left the group. Six boxes out of a $900 case are six derived purchases
     # totalling $900, and counting them here would say the group spent $1,800.
-    purchases = select(func.coalesce(func.sum(_LANDED), 0)).where(
-        Purchase.status == STATUS_ACTIVE, Purchase.is_derived.is_(False)
+    #
+    # A derived purchase's *gross* is carried cost, but anything in its shipping, tax or
+    # fees is new money - grading fees arrive exactly that way - so those still count.
+    spent = case(
+        (
+            Purchase.is_derived.is_(True),
+            Purchase.shipping_cents + Purchase.tax_cents + Purchase.fees_cents,
+        ),
+        else_=_LANDED,
+    )
+    purchases = select(func.coalesce(func.sum(spent), 0)).where(
+        Purchase.status == STATUS_ACTIVE
     )
     result.total_invested_cents = int(db.scalar(purchases) or 0)
     if start is not None:
