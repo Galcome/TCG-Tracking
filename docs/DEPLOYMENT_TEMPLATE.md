@@ -113,14 +113,61 @@ Authorized domains by hand, and every per-deployment preview URL would need addi
 Google sign-in fails there with `auth/unauthorized-domain`. Hosting the SPA on the same
 project as Auth removes that entire class of problem.
 
-The Firebase CLI is already authenticated, so deploys need no browser login:
+### Deploys are automatic
+
+`deploy-web` in `.github/workflows/ci.yml` publishes on every push to `main`, gated on
+`tests-required` so nothing ships that has not passed the backend suite, the web build and
+the browser suite.
+
+It was not always so. The API has auto-deployed from `main` since day one and the web app
+never did, so six merges once landed a backend nobody could see - every new screen was
+live in the API and absent from the app. If you find yourself explaining that a feature is
+"merged" while somebody is looking at a page that does not have it, this is the first place
+to check.
+
+**What has to be configured, once:**
+
+| Where | Name | Value |
+| --- | --- | --- |
+| Secret | `FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING` | Service-account JSON with Firebase Hosting access |
+| Variable | `VITE_API_URL` | The Railway API URL |
+| Variable | `VITE_FIREBASE_API_KEY` | Firebase web API key |
+| Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `tcg-tracking.firebaseapp.com` |
+| Variable | `VITE_FIREBASE_PROJECT_ID` | `tcg-tracking` |
+| Variable | `VITE_SENTRY_DSN` | Optional; blank disables Sentry |
+
+The `VITE_*` values are repository **variables**, not secrets. Every one of them is
+compiled into the bundle and served to any browser that loads the site, so hiding them
+would be theatre - and a secret that silently resolves to an empty string is worse than a
+visible one. The service account is the only real credential.
+
+The quickest way to create the secret is to let Firebase do it:
+
+```powershell
+firebase init hosting:github
+```
+
+It creates the service account, grants it hosting access and writes the secret to the repo
+under exactly the name above. It also writes two workflows of its own - delete both; the
+job in `ci.yml` supersedes them and is gated on the tests, which theirs are not.
+
+### Deploying by hand
+
+Still works, and is the fallback when Actions is down or you need to publish something that
+is not on `main`:
 
 ```powershell
 cd web
-npm run build          # with the VITE_* values for the target environment
+$env:VITE_API_URL = "https://api-production-6ea5.up.railway.app"
+npm run build
 cd ..
 firebase deploy --only hosting --project tcg-tracking
 ```
+
+Setting `VITE_API_URL` on the command line is not optional. `web/.env` points at
+`localhost:8000` for local development, and a build that picks that up produces a site that
+looks perfectly normal and talks to nothing. The CI job greps the built bundle for
+`localhost:8000` and refuses to publish if it finds it; by hand, you are the check.
 
 `VITE_*` values are baked in **at build time**, not read at runtime. Building with the wrong
 `VITE_API_URL` produces a bundle that quietly talks to the wrong backend, so set them on the
