@@ -8,7 +8,14 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { amount, gotoInventory, openProduct, statAmount, uniqueName } from './helpers'
+import {
+  addProduct,
+  amount,
+  gotoInventory,
+  openProduct,
+  statAmount,
+  uniqueName,
+} from './helpers'
 
 /**
  * Create an actual **case** with an opening purchase and return its name.
@@ -28,7 +35,7 @@ async function addCase(page: Page, total: string): Promise<string> {
   await dialog.getByLabel('Product type').selectOption({ label: 'Sealed Case' })
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
-  await dialog.getByRole('button', { name: 'Save' }).click()
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(dialog).toBeHidden()
 
   return name
@@ -162,4 +169,44 @@ test('what came out of what is on the page, and can be undone', async ({ page })
 
   // The case is back.
   await expect(statAmount(page, 'In stock')).resolves.toBe(1)
+})
+
+/**
+ * Joseph, opening a booster box: "What the fuck is this?"
+ *
+ * The dialog asked "How many cases", offered "Boxes per case: 6", and promised the boxes
+ * would keep the case's purchase date — while actually turning his box into packs. The
+ * type had been made dynamic; every word around it was still hardcoded to the case story.
+ *
+ * The number was wrong too: 6 is boxes-in-a-case. A Pokémon box holds 36 packs, so the
+ * suggestion was six times too small on the screen whose entire job is splitting cost.
+ */
+test('opening a box talks about packs, not cases', async ({ page }) => {
+  const box = await addProduct(page, {
+    name: uniqueName('Wordy Box'),
+    quantity: 1,
+    total: '500.00',
+    type: 'Booster Box',
+  })
+  await openProduct(page, box)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  const dialog = page.locator('form')
+  await expect(dialog.getByText('How many boxes')).toBeVisible()
+  await expect(dialog.getByText('Packs per box')).toBeVisible()
+  await expect(dialog.getByText(/packs keep the box.s purchase date/)).toBeVisible()
+
+  // 36 packs in a Pokémon box, not the 6 boxes that live in a case.
+  await expect(dialog.getByLabel('Packs per box')).toHaveValue('36')
+  await expect(dialog.getByText(/How many cases/)).toBeHidden()
+})
+
+test('opening a case still talks about cases and boxes', async ({ page }) => {
+  const kase = await addCase(page, '900.00')
+  await openProduct(page, kase)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  const dialog = page.locator('form')
+  await expect(dialog.getByText('How many cases')).toBeVisible()
+  await expect(dialog.getByLabel('Boxes per case')).toHaveValue('6')
 })

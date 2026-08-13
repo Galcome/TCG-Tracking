@@ -408,6 +408,32 @@ export function caseSize(gameSlug: string, language?: string | null): number | u
     ?.boxes
 }
 
+/**
+ * How many packs are in a sealed booster box.
+ *
+ * A different question from the one above, and it needs its own table: a case holds *six*
+ * Pokémon boxes, a box holds *thirty-six* packs. Offering 6 for a box - which is what
+ * happened when one dialog served both jobs - suggests a number six times too small on a
+ * screen whose whole purpose is splitting cost accurately.
+ *
+ * Same rules as case size: language matters, and anything unconfirmed is simply absent
+ * rather than guessed.
+ */
+export const BOX_SIZES: { game: string; japanese?: boolean; packs: number }[] = [
+  { game: 'pokemon', packs: 36 },
+  { game: 'pokemon', japanese: true, packs: 30 },
+  { game: 'lorcana', packs: 24 },
+  { game: 'magic-the-gathering', packs: 36 },
+  { game: 'one-piece', packs: 24 },
+]
+
+/** The suggested pack count for a box, or undefined when nobody has confirmed one. */
+export function boxSize(gameSlug: string, language?: string | null): number | undefined {
+  const japanese = (language ?? '').trim().toLowerCase().startsWith('jap')
+  return BOX_SIZES.find((row) => row.game === gameSlug && Boolean(row.japanese) === japanese)
+    ?.packs
+}
+
 export interface TransformationOutput {
   product_id: string
   product_name: string

@@ -1,5 +1,12 @@
 /**
- * Opening a sealed case into the boxes inside it.
+ * Opening sealed product into what is inside it.
+ *
+ * Two jobs, one screen: a **case** becomes boxes, a **box** becomes packs. Every noun and
+ * every default on it is derived from the source, because for a while they were not - it
+ * asked "How many cases" and offered "Boxes per case: 6" while turning a box into packs.
+ * Six is the boxes in a case; a Pokemon box holds thirty-six packs, so the suggestion was
+ * both the wrong word and six times too small, on the screen whose entire job is splitting
+ * cost correctly.
  *
  * The shape of this screen follows one rule from the brief: a default that is **shown and
  * editable**, never silently applied. Case size is suggested from the game and the
@@ -19,6 +26,7 @@ import {
   BUCKET_LABELS,
   BUCKETS,
   api,
+  boxSize,
   caseSize,
   type Bucket,
   type Product,
@@ -31,24 +39,27 @@ import { useLedgerMutation } from './forms'
 import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
 
 /**
- * The name a box out of this case probably has.
+ * The name of whatever comes out.
  *
  * Prefers the set plus the type actually being produced, so the name agrees with the type
  * rather than contradicting it: a case of "Mega Evolution: Pitch Black Night" yields
  * "Mega Evolution: Pitch Black Night Booster Box", not "… Night Box".
  *
- * Falls back to swapping "case" out of the source's own name, which is all there is to go
- * on for a product carrying no set.
+ * Falls back to swapping the source's own noun out of its name, which is all there is to
+ * go on for a product carrying no set. The noun comes from the produced type, so opening a
+ * box gives "… Booster Pack" rather than the "Box" this used to hardcode.
  */
 function suggestBoxName(
-  caseName: string,
+  sourceName: string,
   setLabel: string | null,
   type: Taxonomy | undefined,
 ): string {
   const fromSet = suggestedProductName(setLabel ?? '', type)
   if (fromSet) return fromSet
-  const swapped = caseName.replace(/\bcases?\b/i, 'Box')
-  return swapped === caseName ? `${caseName} Box` : swapped
+
+  const child = type?.name ?? 'Box'
+  const swapped = sourceName.replace(/\b(cases?|boxes|box)\b/i, child)
+  return swapped === sourceName ? `${sourceName} ${child}` : swapped
 }
 
 export function CrackCaseDialog({
@@ -60,7 +71,19 @@ export function CrackCaseDialog({
 }) {
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
 
-  const suggested = caseSize(product.game.slug, product.language)
+  // The dialog serves two jobs - a case into boxes, a box into packs - so every word and
+  // every default has to come from what is actually being opened. It used to say "How many
+  // cases" and "Boxes per case: 6" while turning a box into packs, which is both the wrong
+  // noun and a number six times too small: a Pokemon case holds 6 boxes, a box holds 36
+  // packs.
+  const openingACase = product.product_type.slug === 'sealed-case'
+  const words = openingACase
+    ? { source: 'case', sources: 'cases', child: 'box', children: 'boxes' }
+    : { source: 'box', sources: 'boxes', child: 'pack', children: 'packs' }
+
+  const suggested = openingACase
+    ? caseSize(product.game.slug, product.language)
+    : boxSize(product.game.slug, product.language)
   const held = product.stats.by_bucket
 
   const [fromBucket, setFromBucket] = useState<Bucket>(
@@ -135,18 +158,18 @@ export function CrackCaseDialog({
     setError(null)
 
     if (total <= 0) {
-      setError('Say how many boxes came out.')
+      setError(`Say how many ${words.children} came out.`)
       return
     }
     if (!untouched && allocated !== total) {
-      setError(`The split adds up to ${allocated}, but ${total} boxes came out.`)
+      setError(`The split adds up to ${allocated}, but ${total} ${words.children} came out.`)
       return
     }
 
     let productId = existingId
     if (!productId) {
       if (!effectiveName.trim()) {
-        setError('The boxes need a name.')
+        setError(`The ${words.children} need a name.`)
         return
       }
       // Created here rather than made a prerequisite. Being unable to record what you
@@ -181,7 +204,7 @@ export function CrackCaseDialog({
       error={error ?? (run.error ? (run.error as Error).message : null)}
     >
       <div className="grid grid-cols-2 gap-4">
-        <Field label="How many cases">
+        <Field label={`How many ${words.sources}`}>
           <input
             required
             type="number"
@@ -193,7 +216,7 @@ export function CrackCaseDialog({
           />
         </Field>
         <Field
-          label="Boxes per case"
+          label={`${words.children[0].toUpperCase()}${words.children.slice(1)} per ${words.source}`}
           hint={
             suggested
               ? `Usually ${suggested} for ${product.game.name}. Change it if this one differs.`
@@ -300,7 +323,7 @@ export function CrackCaseDialog({
 
       <div>
         <span className="text-sm font-medium text-(--color-muted)">
-          Where they go{total > 0 ? ` — ${total} boxes` : ''}
+          Where they go{total > 0 ? ` — ${total} ${words.children}` : ''}
         </span>
         <div className="mt-1.5 grid grid-cols-3 gap-3">
           {BUCKETS.map((bucket) => (
@@ -327,7 +350,7 @@ export function CrackCaseDialog({
       {/* The two facts that make cracking safe to do, said before the button rather than
           discovered in a report afterwards. */}
       <p className="rounded-lg border border-(--color-edge) bg-(--color-ink)/50 px-3 py-2 text-xs text-(--color-muted)">
-        The boxes keep the case&rsquo;s purchase date
+        The {words.children} keep the {words.source}&rsquo;s purchase date
         {product.stats.average_unit_cost
           ? ` and split its ${money(product.stats.average_unit_cost)} between them`
           : ''}
