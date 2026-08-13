@@ -6,8 +6,13 @@ browser-test data - which is exactly what happened the first time this suite was
 
 So it gets its own database, derived from DATABASE_URL by suffixing the name, and this
 module refuses to touch anything whose name does not say `e2e`. That guard is the whole
-point: this module drops nothing, but it does hand a URL to a suite that will happily fill
-it with fixtures.
+point: everything below is destructive, and it must never reach a real database.
+
+The data tables are emptied before each run. Left to accumulate, the suite's own fixtures
+made every page slower than the run before - `list_products` computes stats for every
+matching product before paging, so a few hundred leftover rows eventually pushed page loads
+past the assertion timeout and the suite started failing a different test each time. A
+flaky suite is worse than no suite, because it teaches you to ignore it.
 
 Run before the e2e server starts:
     uv run python -m tests.e2e.prepare
@@ -72,6 +77,37 @@ def resolve() -> str:
     return e2e_url(settings.database_url)
 
 
+#: Emptied before every run, children first. Taxonomy and the seeded set calendar are
+#: left alone: they come from migrations, not from the suite.
+DATA_TABLES = (
+    "money_postings",
+    "money_movements",
+    "money_accounts",
+    "cost_allocations",
+    "stock_moves",
+    "inventory_adjustments",
+    "sales",
+    "purchases",
+    "audit_log",
+    "products",
+)
+
+
+def clear_data(url: str) -> None:
+    """Empty the suite's own rows so each run starts from the same place."""
+    name = urlparse(url).path.lstrip("/")
+    if SUFFIX.strip("_") not in name:
+        raise SystemExit(f"refusing to clear {name!r}: an e2e database must be named for it")
+
+    engine = sqlalchemy.create_engine(url)
+    with engine.begin() as connection:
+        # One statement so foreign keys between them never block the order.
+        connection.execute(text(f"TRUNCATE {', '.join(DATA_TABLES)} CASCADE"))
+        # Sets somebody's product created, but not the seeded calendar.
+        connection.execute(text("DELETE FROM card_sets WHERE released_on IS NULL"))
+    engine.dispose()
+
+
 def main() -> None:
     url = resolve()
     ensure_database(url)
@@ -84,6 +120,7 @@ def main() -> None:
     if migrate.returncode != 0:
         raise SystemExit("migrations failed against the e2e database")
 
+    clear_data(url)
     print(url)
 
 

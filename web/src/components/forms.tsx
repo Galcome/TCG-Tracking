@@ -6,7 +6,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import {
   ADJUSTMENT_REASONS,
@@ -33,6 +33,16 @@ export function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone
       onDone()
     },
   })
+}
+
+export /** Debounce so typing a set name does not fire a request per keystroke. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return debounced
 }
 
 export const MONEY_INPUT = {
@@ -116,7 +126,12 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Game">
-          <select value={gameId} onChange={(e) => setGame(e.target.value)} className={FIELD_CLASS}>
+          <select
+            aria-label="Game"
+            value={gameId}
+            onChange={(e) => setGame(e.target.value)}
+            className={FIELD_CLASS}
+          >
             {games.data?.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -125,7 +140,12 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
           </select>
         </Field>
         <Field label="Product type">
-          <select value={typeId} onChange={(e) => setType(e.target.value)} className={FIELD_CLASS}>
+          <select
+            aria-label="Product type"
+            value={typeId}
+            onChange={(e) => setType(e.target.value)}
+            className={FIELD_CLASS}
+          >
             {types.data?.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -167,6 +187,12 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
           className={FIELD_CLASS}
         />
       </Field>
+
+        <SetField
+          gameSlug={games.data?.find((option) => option.id === gameId)?.slug}
+          value={setLabel}
+          onChange={setSetLabel}
+        />
 
       <BucketField
         label="Goes to"
@@ -210,13 +236,6 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
             />
           </Field>
         </div>
-        <Field label="Set">
-          <input
-            value={setLabel}
-            onChange={(e) => setSetLabel(e.target.value)}
-            className={FIELD_CLASS}
-          />
-        </Field>
         <Field label="Storage location">
           <input
             value={storage}
@@ -791,7 +810,10 @@ function AccountField({
   return (
     <div>
       <span className="text-sm font-medium text-(--color-muted)">{label}</span>
-      <div className="mt-1.5 flex flex-wrap gap-2">
+      {/* Bounded for the same reason the sale form's destinations are: a group that has
+          dealt with a dozen shops keeps every one of them one tap away, and the fields
+          below stay on screen. */}
+      <div className="mt-1.5 flex max-h-[7.5rem] flex-wrap gap-2 overflow-y-auto">
         {spendable.map((account) => (
           <button
             key={account.id}
@@ -917,6 +939,85 @@ function ProceedsField({
           : 'Holding it yourself lowers what the group owes you. Move it later if you want.'}
       </span>
     </div>
+  )
+}
+
+
+/**
+ * Which set this belongs to, typed or tapped.
+ *
+ * Free text plus a suggestion list is how "Fable", "Fabled" and "Lorcana Fable" become
+ * three sets that split every rollup between them, so this asks "did you mean Fabled?"
+ * before the duplicate exists. It asks - it never corrects, and it never blocks: somebody
+ * entering stock at 11pm must not be stopped because a set is missing.
+ *
+ * Suggestions are what the group has actually bought, most recent first, with the seeded
+ * release calendar filling in behind. The calendar is the bonus, not the source of truth:
+ * unmaintained it goes stale, and a stale calendar confidently naming the wrong latest set
+ * is worse than no calendar at all.
+ */
+function SetField({
+  gameSlug,
+  value,
+  onChange,
+}: {
+  /** Sets belong to a game, so suggestions are scoped to it. */
+  gameSlug: string | undefined
+  value: string
+  onChange: (name: string) => void
+}) {
+  const typed = useDebouncedValue(value, 250)
+
+  const found = useQuery({
+    queryKey: ['sets', gameSlug, typed],
+    enabled: Boolean(gameSlug),
+    queryFn: () => api.sets({ game: gameSlug!, q: typed || undefined }),
+  })
+
+  const suggestions = found.data?.items ?? []
+  const didYouMean = found.data?.did_you_mean ?? null
+
+  return (
+    <Field label="Set">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Start typing, or pick one below"
+        className={FIELD_CLASS}
+      />
+
+      {didYouMean && (
+        <button
+          type="button"
+          onClick={() => onChange(didYouMean)}
+          className="mt-1.5 text-xs text-(--color-accent) hover:underline"
+        >
+          Did you mean {didYouMean}?
+        </button>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {suggestions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onChange(option.name)}
+              className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                value.trim().toLowerCase() === option.name.toLowerCase()
+                  ? 'border-(--color-accent) bg-(--color-accent)/12 text-(--color-accent)'
+                  : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+              }`}
+            >
+              {option.name}
+              {/* Nothing bought from it yet, so it is the calendar talking rather than
+                  the group's own history. Worth saying which. */}
+              {option.uses === 0 && <span className="ml-1 opacity-60">new</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </Field>
   )
 }
 
@@ -1223,7 +1324,12 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
       </Field>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Game">
-          <select value={gameId} onChange={(e) => setGame(e.target.value)} className={FIELD_CLASS}>
+          <select
+            aria-label="Game"
+            value={gameId}
+            onChange={(e) => setGame(e.target.value)}
+            className={FIELD_CLASS}
+          >
             {games.data?.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -1232,7 +1338,12 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
           </select>
         </Field>
         <Field label="Product type">
-          <select value={typeId} onChange={(e) => setType(e.target.value)} className={FIELD_CLASS}>
+          <select
+            aria-label="Product type"
+            value={typeId}
+            onChange={(e) => setType(e.target.value)}
+            className={FIELD_CLASS}
+          >
             {types.data?.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -1310,13 +1421,11 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
       )}
 
       <Advanced>
-        <Field label="Set">
-          <input
-            value={setLabel}
-            onChange={(e) => setSetLabel(e.target.value)}
-            className={FIELD_CLASS}
-          />
-        </Field>
+        <SetField
+          gameSlug={games.data?.find((option) => option.id === gameId)?.slug}
+          value={setLabel}
+          onChange={setSetLabel}
+        />
         <Field label="Storage location">
           <input
             value={storage}

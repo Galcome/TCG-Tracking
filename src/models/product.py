@@ -15,6 +15,7 @@ from sqlalchemy import Boolean, CheckConstraint, Computed, ForeignKey, Index, St
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database import Base
+from src.models.card_set import CardSet
 from src.models.member import Member
 from src.models.mixins import TimestampMixin
 from src.models.taxonomy import Game, ProductType
@@ -51,6 +52,16 @@ class Product(Base, TimestampMixin):
     )
 
     # Optional identity detail. None of this is required to track an item.
+    #: The set this belongs to. Authoritative - `set_name` below is a copy of its name.
+    set_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("card_sets.id"), nullable=True, index=True
+    )
+    #: Denormalised from `set_id`, and written only by the resolver that assigns it.
+    #:
+    #: It exists because `search_text` is a stored generated column, and a generated column
+    #: cannot join to another table. Dropping it would mean either losing set names from
+    #: product search or replacing the generated column with a trigger, both worse than one
+    #: copy maintained in one place.
     set_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     collector_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     variant: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -73,6 +84,7 @@ class Product(Base, TimestampMixin):
         Text, Computed(SEARCH_TEXT_EXPRESSION, persisted=True), nullable=False
     )
 
+    card_set: Mapped["CardSet | None"] = relationship(lazy="joined")
     game: Mapped[Game] = relationship(lazy="joined")
     product_type: Mapped[ProductType] = relationship(lazy="joined")
     created_by: Mapped[Member | None] = relationship(lazy="joined")

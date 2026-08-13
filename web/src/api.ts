@@ -137,6 +137,8 @@ export interface Transaction {
 
 export interface Product {
   id: string
+  /** The set record behind `set_name`. */
+  set_id?: string | null
   name: string
   game: Taxonomy
   product_type: Taxonomy
@@ -336,6 +338,26 @@ export interface Attention {
   sales_missing_cost: number
   products_with_negative_stock: number
   negative_stock_products: { id: string; name: string; quantity: number }[]
+}
+
+/**
+ * A set worth offering for one game.
+ *
+ * `released_on` null means somebody typed it. A date means it came from the seeded
+ * calendar, which is why a set can appear on its release day with nobody doing anything.
+ */
+export interface CardSet {
+  id: string
+  game_id: string
+  name: string
+  released_on: string | null
+  uses: number
+}
+
+export interface SetSuggestions {
+  items: CardSet[]
+  /** The set this was probably meant to be. A question, never a correction. */
+  did_you_mean: string | null
 }
 
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
@@ -630,6 +652,10 @@ export const api = {
   /** Not period-scoped: what is on the shelf today is not a function of a date range. */
   aging: () => request<AgingLot[]>('/api/v1/reports/aging'),
   attention: () => request<Attention>('/api/v1/reports/attention'),
+
+  /** Sets worth offering for one game, best first. Scoped to a game on purpose. */
+  sets: (params: { game: string; q?: string; limit?: number }) =>
+    request<SetSuggestions>(`/api/v1/sets${query(params)}`),
 
   accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
 

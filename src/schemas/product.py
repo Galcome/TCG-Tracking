@@ -184,6 +184,8 @@ class ProductRead(ProductBase):
     name: str
     game: TaxonomyRead
     product_type: TaxonomyRead
+    #: The set record behind `set_name`. Null when the product has no set.
+    set_id: uuid.UUID | None
     is_archived: bool
     created_by_member_id: uuid.UUID | None
     created_at: datetime

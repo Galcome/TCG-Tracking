@@ -22,7 +22,7 @@ from src.schemas.product import (
     ProductStatsRead,
     ProductUpdate,
 )
-from src.services import history, inventory, ledger
+from src.services import history, inventory, ledger, sets
 from src.services import money as money_service
 from src.services.search import escape_like
 
@@ -64,6 +64,30 @@ def _matches_stock(stock: str | None, quantity_on_hand: int) -> bool:
     if stock == STOCK_OUT:
         return quantity_on_hand == 0
     return True
+
+
+def _attach_set(
+    db: Session,
+    fields: dict,
+    *,
+    game_id: uuid.UUID,
+    member_id: uuid.UUID | None,
+) -> None:
+    """Turn a typed `set_name` into a real set, in place.
+
+    Writes both `set_id` - the identity everything groups by - and `set_name`, the copy the
+    generated search column reads. Both come from the set's own name, so "fabled" saves as
+    "Fabled" and stops being a second row in every report that groups by set.
+    """
+    if "set_name" not in fields:
+        return
+
+    typed = fields.pop("set_name")
+    record = (
+        sets.resolve(db, game_id=game_id, name=typed, member_id=member_id) if typed else None
+    )
+    fields["set_id"] = record.id if record else None
+    fields["set_name"] = record.name if record else None
 
 
 def _require_taxonomy(db: Session, model: type[Base], record_id: uuid.UUID, label: str) -> None:
@@ -188,6 +212,8 @@ def create_product(
     _require_taxonomy(db, ProductType, payload.product_type_id, "product type")
 
     fields = payload.model_dump(exclude={"initial_purchase"})
+    _attach_set(db, fields, game_id=payload.game_id, member_id=member.id)
+
     product = Product(**fields, created_by_member_id=member.id)
     db.add(product)
     db.flush()
@@ -275,6 +301,15 @@ def update_product(
         _require_taxonomy(db, Game, changes["game_id"], "game")
     if "product_type_id" in changes:
         _require_taxonomy(db, ProductType, changes["product_type_id"], "product type")
+
+    # The set is resolved against whichever game the product ends up on, so moving a
+    # product between games re-homes its set rather than pointing at another game's.
+    _attach_set(
+        db,
+        changes,
+        game_id=changes.get("game_id", product.game_id),
+        member_id=None,
+    )
 
     for field, value in changes.items():
         setattr(product, field, value)
