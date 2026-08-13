@@ -71,8 +71,9 @@ jobs:
         working-directory: web
 
     env:
-      # Placeholders only. Real values come from the Cloudflare Pages build settings;
-      # these just keep the bundle from embedding "undefined".
+      # Placeholders only - this job proves the bundle compiles, it does not publish it.
+      # The real values live in repository variables and are used by `deploy-web` below.
+      # VITE_* are baked in at build time, so a bundle built here must never be deployed.
       VITE_API_URL: https://api.example.invalid
       VITE_FIREBASE_API_KEY: ci-placeholder
       VITE_FIREBASE_AUTH_DOMAIN: ci-placeholder.firebaseapp.com
@@ -195,3 +196,88 @@ jobs:
             exit 1
           fi
           echo "All checks passed"
+
+  deploy-web:
+    name: Deploy web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only after every test has passed, and only for a real push to main. The API has
+    # deployed itself from main since day one; the web app did not, and six merges
+    # shipped a backend nobody could see before anyone noticed.
+    needs: [tests-required]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+
+    environment:
+      name: production
+      url: https://tcg-tracking.web.app
+
+    env:
+      # Repository *variables*, not secrets: every VITE_* value is compiled into the
+      # bundle and served to the browser, so treating them as secret would be theatre.
+      # The one real credential is the service account below.
+      VITE_API_URL: ${{ vars.VITE_API_URL }}
+      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      # An unset variable becomes an empty string and Vite compiles it happily, producing
+      # a bundle that fails at runtime for reasons nobody can see. Fail here instead.
+      - name: Require the production values
+        run: |
+          missing=""
+          for name in VITE_API_URL VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "::error::Set them under Settings -> Secrets and variables -> Actions -> Variables."
+            echo "::error::They must be Variables, not Secrets - this job reads vars.*"
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run build
+        working-directory: web
+
+      # The exact mistake this workflow exists to prevent. web/.env points at localhost,
+      # and a build that picks it up produces a site that silently talks to nothing.
+      - name: Refuse to publish a bundle that talks to localhost
+        run: |
+          if grep -rlq 'localhost:8000' dist/assets/ 2>/dev/null; then
+            echo "::error::The bundle contains localhost:8000 - VITE_API_URL did not take effect."
+            exit 1
+          fi
+          if ! grep -rlq -- "$VITE_API_URL" dist/assets/ 2>/dev/null; then
+            echo "::error::The bundle does not contain $VITE_API_URL."
+            exit 1
+          fi
+        working-directory: web
+
+      # `entryPoint` is the repo root on purpose: firebase.json lives there and points at
+      # web/dist. channelId `live` is the real site rather than a preview channel.
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING }}
+          projectId: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          channelId: live
