@@ -500,6 +500,24 @@ export interface LineageRollup {
   tree: LineageNode[]
 }
 
+export interface VaultHolding {
+  product_id: string
+  product_name: string
+  units: number
+  cost: string
+  /** null means never valued, and it stays null — cost is not a substitute for worth. */
+  value: string | null
+  valued_on: string | null
+  days_since_valued: number | null
+  appreciation: string | null
+  appreciation_pct: number | null
+  /** Per year held, and only past a year. */
+  annualised: number | null
+  days_held: number | null
+  /** How long it sat in the Store before being moved here. The loophole guard. */
+  days_in_store_first: number | null
+}
+
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
 
 /**
@@ -789,6 +807,21 @@ export const api = {
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
+  /** What is in the Vault, measured on appreciation rather than velocity. */
+  vaultHoldings: () => request<VaultHolding[]>('/api/v1/reports/vault'),
+
+  /** Write down what something is worth today. An estimate, and it stays one. */
+  recordValuation: (input: {
+    product_id: string
+    value: string
+    captured_on?: string
+    notes?: string | null
+  }) =>
+    request<unknown>('/api/v1/valuations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   /** How each tier has performed, with the spread and not just the average. */
   byTier: () => request<TierRow[]>('/api/v1/reports/by-tier'),
 

@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
 from src.models.member import Member
-from src.schemas.money import MoneyOut, MoneyOutOptional
-from src.services import reporting, rollups
+from src.models.price_snapshot import PriceSnapshot
+from src.models.product import Product
+from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.services import reporting, rollups, vault
 
 router = APIRouter()
 
@@ -302,3 +304,102 @@ def set_report(
     hold describes neither of them.
     """
     return [SetRead.model_validate(row, from_attributes=True) for row in rollups.by_set(db)]
+
+
+# -------------------------------------------------------------------------- vault
+
+
+class ValuationRequest(BaseModel):
+    """What something is thought to be worth today, per unit.
+
+    An estimate, and it stays one. It never touches cost basis or realized profit - those
+    follow what was actually paid and actually received. Estimates inform decisions; they
+    do not score them.
+    """
+
+    product_id: uuid.UUID
+    value: MoneyIn
+    captured_on: date = Field(default_factory=date.today)
+    notes: str | None = None
+
+
+class ValuationRead(BaseModel):
+    model_config = _CONFIG
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    value: MoneyOut = Field(validation_alias="value_cents")
+    captured_on: date
+    source: str
+
+
+class VaultHoldingRead(BaseModel):
+    model_config = _CONFIG
+
+    product_id: uuid.UUID
+    product_name: str
+    units: int
+    cost: MoneyOut = Field(validation_alias="cost_cents")
+
+    #: null means never valued, and it stays null. Reporting cost as value would invent
+    #: a number, which is the one thing this app refuses everywhere.
+    value: MoneyOutOptional = Field(validation_alias="value_cents")
+    valued_on: date | None
+    #: How stale the estimate is. The workbook revalues annually; older than that is worth
+    #: showing rather than quietly presenting as current.
+    days_since_valued: int | None
+
+    appreciation: MoneyOutOptional = Field(validation_alias="appreciation_cents")
+    appreciation_pct: float | None = Field(validation_alias="appreciation")
+    #: Per year held, and only past a year - multiplying a three-week gain by seventeen
+    #: produces a confident number about nothing.
+    annualised: float | None
+
+    #: Held for, not warned about. The Vault is not measured on velocity.
+    days_held: int | None
+    #: How long it sat in the Store before being moved here. This is the loophole guard:
+    #: exempting the Vault from ageing must not make it where slow stock disappears.
+    days_in_store_first: int | None
+
+
+@router.post("/valuations", response_model=ValuationRead, status_code=status.HTTP_201_CREATED)
+def record_valuation(
+    payload: ValuationRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> ValuationRead:
+    """Write down what something is worth today.
+
+    The annual manual valuation is the floor, and it always works with no dependency on
+    anybody else's price feed - which is exactly what the workbook's Vault tab already does.
+    """
+    if db.get(Product, payload.product_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    snapshot = PriceSnapshot(
+        product_id=payload.product_id,
+        value_cents=payload.value,
+        captured_on=payload.captured_on,
+        notes=(payload.notes or "").strip() or None,
+        created_by_member_id=member.id,
+    )
+    db.add(snapshot)
+    db.flush()
+    return ValuationRead.model_validate(snapshot, from_attributes=True)
+
+
+@router.get("/reports/vault", response_model=list[VaultHoldingRead])
+def vault_report(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> list[VaultHoldingRead]:
+    """What is in the Vault, and what it has done since it went in.
+
+    Measured on **appreciation** rather than velocity, because that is what a deliberate
+    long hold is for. There is no days-to-sell figure here on purpose, and the Vault does
+    not appear in the ageing report at all - it is not asleep, it is parked.
+    """
+    return [
+        VaultHoldingRead.model_validate(row, from_attributes=True)
+        for row in vault.holdings(db)
+    ]
