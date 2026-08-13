@@ -15,6 +15,7 @@ import uuid
 from datetime import date, timedelta
 
 from src.models.ledger import BUCKET_INVENTORY, BUCKET_STORE, BUCKET_VAULT
+from src.services import transformations
 
 TODAY = date.today()
 LAST_YEAR = TODAY - timedelta(days=365)
@@ -387,3 +388,155 @@ def test_a_blank_note_is_stored_as_nothing(client, make_product):
         client, case["id"], [{"product_id": box["id"], "quantity": 6}], notes=None
     )
     assert response.json()["notes"] is None
+
+
+# ----------------------------------------------------------- what cannot be opened
+
+
+def type_id(client, slug: str) -> str:
+    """The id of a seeded product type, looked up by slug.
+
+    By slug, never by list position. Defaulting to `types[0]` is how the crack screen came
+    to file every box it produced as a `Single` - the first entry in a seed list, chosen by
+    nothing.
+    """
+    types = client.get("/api/v1/product-types").json()
+    rows = types["items"] if isinstance(types, dict) else types
+    match = next(row for row in rows if row["slug"] == slug)
+    return match["id"]
+
+
+def rip(client, product_id, hits=None):
+    return client.post(
+        "/api/v1/transformations/rip",
+        json={"product_id": product_id, "hits": hits or []},
+    )
+
+
+def test_a_single_cannot_be_cracked_open(client, make_product):
+    """A card is not a container.
+
+    Until this existed nothing refused: cracking a single consumed the card, produced
+    "boxes" out of it, split its cost across them and wrote the lineage. `kind` was a label
+    on a record and never a constraint.
+    """
+    card = make_product("Lone Card", product_type_id=type_id(client, "single"))
+    box = make_product("Some Box")
+    buy(client, card["id"], 1, "500.00")
+
+    response = crack(client, card["id"], [{"product_id": box["id"], "quantity": 6}])
+
+    assert response.status_code == 422, response.text
+    assert "cannot be cracked open" in response.json()["detail"]
+    # The card is untouched. A refusal that half-happened would be worse than none.
+    assert stats(client, card["id"])["quantity_on_hand"] == 1
+
+
+def test_a_single_cannot_be_ripped_open(client, make_product):
+    card = make_product("Lone Card Two", product_type_id=type_id(client, "single"))
+    buy(client, card["id"], 1, "500.00")
+
+    response = rip(client, card["id"])
+
+    assert response.status_code == 422
+    assert stats(client, card["id"])["quantity_on_hand"] == 1
+
+
+def test_a_graded_card_cannot_be_opened_either(client, make_product):
+    slab = make_product("Slabbed", product_type_id=type_id(client, "graded-card"))
+    buy(client, slab["id"], 1, "2000.00")
+
+    assert rip(client, slab["id"]).status_code == 422
+    refused = crack(client, slab["id"], [{"product_id": slab["id"], "quantity": 2}])
+    assert refused.status_code == 422
+
+
+def test_a_case_is_cracked_and_never_ripped(client, make_product):
+    """You open a case into boxes. Nobody rips a case one card at a time."""
+    case = make_product("Real Case", product_type_id=type_id(client, "sealed-case"))
+    buy(client, case["id"], 1, "900.00")
+
+    response = rip(client, case["id"])
+
+    assert response.status_code == 422
+    assert "cannot be ripped open" in response.json()["detail"]
+
+
+def test_a_case_can_still_be_cracked(client, make_product):
+    case = make_product("Crackable Case", product_type_id=type_id(client, "sealed-case"))
+    box = make_product("Its Boxes", product_type_id=type_id(client, "booster-box"))
+    buy(client, case["id"], 1, "900.00")
+
+    opened = crack(client, case["id"], [{"product_id": box["id"], "quantity": 6}])
+    assert opened.status_code == 201, opened.text
+
+
+def test_a_box_can_be_both_cracked_into_packs_and_ripped(client, make_product):
+    """Joseph: "A box can be split into packs. We almost never sell packs but maybe."
+
+    So a box keeps both actions. The deny-list only refuses the genuinely impossible.
+    """
+    box = make_product("Two Ways Box", product_type_id=type_id(client, "booster-box"))
+    packs = make_product("Its Packs", product_type_id=type_id(client, "booster-pack"))
+    buy(client, box["id"], 2, "300.00")
+
+    opened = crack(client, box["id"], [{"product_id": packs["id"], "quantity": 36}])
+    assert opened.status_code == 201, opened.text
+    assert rip(client, box["id"]).status_code == 201
+
+
+def test_a_pack_is_ripped_and_never_cracked(client, make_product):
+    """There is nothing sealed inside a pack to crack it into."""
+    pack = make_product("Lone Pack", product_type_id=type_id(client, "booster-pack"))
+    other = make_product("Anything")
+    buy(client, pack["id"], 1, "5.00")
+
+    refused = crack(client, pack["id"], [{"product_id": other["id"], "quantity": 1}])
+    assert refused.status_code == 422
+    assert rip(client, pack["id"]).status_code == 201
+
+
+def test_an_unpredictable_container_is_left_permitted(client, make_product):
+    """`Lot`, `Other` and friends stay open on purpose.
+
+    Nobody can say what a lot holds, and blocking a real workflow is a worse failure than
+    allowing an odd one. The rule is a deny-list, not a whitelist.
+    """
+    lot = make_product("Mystery Lot", product_type_id=type_id(client, "lot"))
+    out = make_product("Whatever Was In It")
+    buy(client, lot["id"], 1, "100.00")
+
+    opened = crack(client, lot["id"], [{"product_id": out["id"], "quantity": 3}])
+    assert opened.status_code == 201, opened.text
+
+
+def test_grading_a_single_is_still_allowed(client, make_product):
+    """The guard must not catch the one transformation a card is *supposed* to have."""
+    card = make_product("Gradeable", product_type_id=type_id(client, "single"))
+    buy(client, card["id"], 1, "560.00")
+
+    response = client.post(
+        "/api/v1/grading",
+        json={"product_id": card["id"], "company": "PSA", "fees": "25.00"},
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_grading_is_never_refused_by_the_opening_guard(db, client, make_product):
+    """The guard answers for crack and rip only.
+
+    Grading is the one transformation a card is *supposed* to have, so it must never be
+    reachable by this rule even if a future caller passes its kind in.
+    """
+    card = make_product("Guard Passthrough", product_type_id=type_id(client, "single"))
+
+    assert transformations.opening_refusal(db, uuid.UUID(card["id"]), "grade") is None
+
+
+def test_a_missing_product_is_left_to_the_404(db):
+    """Not this guard's job to decide a product does not exist.
+
+    The routes already answer 404 before asking; returning None here keeps one reason for
+    one answer rather than two places inventing their own.
+    """
+    assert transformations.opening_refusal(db, uuid.uuid4(), "crack") is None

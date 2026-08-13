@@ -23,13 +23,30 @@ import {
   type Bucket,
   type Product,
   type ProductDetail,
+  type Taxonomy,
 } from '../api'
 import { money, todayIso } from '../format'
+import { bySlug, opensInto, suggestedProductName } from '../product-types'
 import { useLedgerMutation } from './forms'
 import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
 
-/** The name a box out of this case probably has. "Fabled Case" -> "Fabled Box". */
-function suggestBoxName(caseName: string): string {
+/**
+ * The name a box out of this case probably has.
+ *
+ * Prefers the set plus the type actually being produced, so the name agrees with the type
+ * rather than contradicting it: a case of "Mega Evolution: Pitch Black Night" yields
+ * "Mega Evolution: Pitch Black Night Booster Box", not "… Night Box".
+ *
+ * Falls back to swapping "case" out of the source's own name, which is all there is to go
+ * on for a product carrying no set.
+ */
+function suggestBoxName(
+  caseName: string,
+  setLabel: string | null,
+  type: Taxonomy | undefined,
+): string {
+  const fromSet = suggestedProductName(setLabel ?? '', type)
+  if (fromSet) return fromSet
   const swapped = caseName.replace(/\bcases?\b/i, 'Box')
   return swapped === caseName ? `${caseName} Box` : swapped
 }
@@ -53,10 +70,19 @@ export function CrackCaseDialog({
   const [boxes, setBoxes] = useState(String(suggested ?? ''))
   const [occurredOn, setDate] = useState(todayIso())
 
+  // What a case yields is boxes, and what a box yields is packs. Looked up by slug: this
+  // used to fall through to `types.data[0]`, which is `Single` purely because it sorts
+  // first, so every box a crack produced was filed as a single and quietly wrecked the
+  // tier report - the one place product type is load-bearing.
+  const producedType = bySlug(types.data, opensInto(product.product_type.slug))
+
   // Which existing product the boxes are, or blank to make a new one.
   const [existingId, setExistingId] = useState('')
-  const [newName, setNewName] = useState(suggestBoxName(product.name))
+  const [newName, setNewName] = useState('')
   const [newTypeId, setNewType] = useState('')
+
+  const effectiveTypeId = newTypeId || producedType?.id || types.data?.[0]?.id || ''
+  const effectiveName = newName || suggestBoxName(product.name, product.set_name, producedType)
 
   // How the boxes are shared out. Everything to Inventory until somebody says otherwise.
   const [split, setSplit] = useState<Record<Bucket, string>>({
@@ -71,6 +97,17 @@ export function CrackCaseDialog({
     queryKey: ['products', 'crack-candidates', product.game.slug],
     queryFn: () => api.products({ game: product.game.slug, stock: '' }),
   })
+
+  // Same set first. Default stays "Create a new product" - correct the first time a set
+  // is cracked, and it never picks a product on somebody's behalf.
+  const pickable = (candidates.data?.items ?? []).filter(
+    (item: Product) => item.id !== product.id,
+  )
+  const setKey = (product.set_name ?? '').trim().toLowerCase()
+  const sameSet = setKey
+    ? pickable.filter((item: Product) => (item.set_name ?? '').trim().toLowerCase() === setKey)
+    : []
+  const others = pickable.filter((item: Product) => !sameSet.includes(item))
 
   const total = Number(cases || 0) * Number(boxes || 0)
   const allocated = BUCKETS.reduce((sum, bucket) => sum + Number(split[bucket] || 0), 0)
@@ -108,16 +145,16 @@ export function CrackCaseDialog({
 
     let productId = existingId
     if (!productId) {
-      if (!newName.trim()) {
+      if (!effectiveName.trim()) {
         setError('The boxes need a name.')
         return
       }
       // Created here rather than made a prerequisite. Being unable to record what you
       // just opened because a product does not exist yet is how an app stops being used.
       const created = await api.createProduct({
-        name: newName.trim(),
+        name: effectiveName.trim(),
         game_id: product.game.id,
-        product_type_id: newTypeId || types.data?.[0]?.id || '',
+        product_type_id: effectiveTypeId,
         set_name: product.set_name ?? null,
       })
       productId = created.id
@@ -211,13 +248,27 @@ export function CrackCaseDialog({
           className={FIELD_CLASS}
         >
           <option value="">Create a new product</option>
-          {(candidates.data?.items ?? [])
-            .filter((item: Product) => item.id !== product.id)
-            .map((item: Product) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
+          {/* The set you are cracking leads. Everything else stays reachable rather than
+              filtered away - a mis-set product would otherwise become unpickable, which is
+              how people end up creating a second copy of something they already own. */}
+          {sameSet.length > 0 && (
+            <optgroup label="From this set">
+              {sameSet.map((item: Product) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {others.length > 0 && (
+            <optgroup label={sameSet.length > 0 ? 'Everything else' : 'Your products'}>
+              {others.map((item: Product) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </Field>
 
@@ -225,7 +276,7 @@ export function CrackCaseDialog({
         <div className="grid grid-cols-2 gap-4">
           <Field label="Name">
             <input
-              value={newName}
+              value={effectiveName}
               onChange={(e) => setNewName(e.target.value)}
               className={FIELD_CLASS}
             />
@@ -233,7 +284,7 @@ export function CrackCaseDialog({
           <Field label="Type">
             <select
               aria-label="Type"
-              value={newTypeId || types.data?.[0]?.id || ''}
+              value={effectiveTypeId}
               onChange={(e) => setNewType(e.target.value)}
               className={FIELD_CLASS}
             >

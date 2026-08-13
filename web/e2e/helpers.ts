@@ -33,9 +33,22 @@ export async function gotoInventory(page: Page) {
  * Create a product with an opening purchase, through the real Add product dialog.
  * Returns the name so the caller can find it again.
  */
+/**
+ * `type` defaults to Booster Box rather than whatever the dialog opens on.
+ *
+ * The dialog's own default is the first seeded type, `Single` — and a card can be neither
+ * cracked nor ripped, so a suite built on the default was testing those flows against a
+ * product that should never have offered them. Specs that need a case pass `Sealed Case`.
+ */
 export async function addProduct(
   page: Page,
-  options: { name?: string; quantity: number; total: string; shipping?: string },
+  options: {
+    name?: string
+    quantity: number
+    total: string
+    shipping?: string
+    type?: string
+  },
 ): Promise<string> {
   const name = options.name ?? uniqueName('E2E Box')
 
@@ -44,6 +57,7 @@ export async function addProduct(
 
   const dialog = page.locator('form')
   await dialog.getByLabel('Name').fill(name)
+  await dialog.getByLabel('Product type').selectOption({ label: options.type ?? 'Booster Box' })
   await dialog.getByLabel('Quantity').fill(String(options.quantity))
   await dialog.getByLabel('Total paid').fill(options.total)
 

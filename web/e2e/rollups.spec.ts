@@ -9,12 +9,21 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { gotoInventory, openProduct, uniqueName } from './helpers'
 
-async function addProduct(page: Page, name: string, total: string, set?: string) {
+async function addProduct(
+  page: Page,
+  name: string,
+  total: string,
+  set?: string,
+  type?: string,
+) {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
   const dialog = page.locator('form')
   await dialog.getByLabel('Name').fill(name)
+  // Tier is grouped by product type, so a rollup spec that left everything at the default
+  // was comparing one tier against itself.
+  await dialog.getByLabel('Product type').selectOption({ label: type ?? 'Booster Box' })
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
   if (set) await dialog.getByPlaceholder('Start typing, or pick one below').fill(set)
@@ -74,7 +83,7 @@ test('a set is shown as three figures and never one', async ({ page }) => {
 test('a case shows what it returned all-in', async ({ page }) => {
   const caseName = uniqueName('All In Case')
   const boxName = uniqueName('All In Box')
-  await addProduct(page, caseName, '600.00')
+  await addProduct(page, caseName, '600.00', undefined, 'Sealed Case')
 
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()

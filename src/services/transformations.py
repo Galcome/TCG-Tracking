@@ -35,6 +35,7 @@ from src.models.ledger import (
     InventoryAdjustment,
     Purchase,
 )
+from src.models.product import Product
 from src.models.transformation import Transformation, TransformationOutput
 from src.services import inventory, ledger
 from src.services.costing import split_cost
@@ -42,6 +43,46 @@ from src.services.costing import split_cost
 #: The reason a consuming adjustment carries. Kept apart from `written_off` because the
 #: cost did not evaporate - it moved to whatever came out.
 REASON_TRANSFORMED = "transformed"
+
+
+#: A card is not a container. Cracking or ripping one consumed it and produced "boxes" out
+#: of a single, splitting its cost across them and writing the lineage - and until this
+#: existed, nothing anywhere refused. `kind` was a label on a record, never a constraint.
+_NOT_A_CONTAINER = frozenset({"single", "raw-single", "graded-card"})
+
+#: A case is opened into boxes, never one card at a time. A pack has nothing sealed inside
+#: it, so there is nothing to crack it into.
+CANNOT_BE_CRACKED = _NOT_A_CONTAINER | {"booster-pack"}
+CANNOT_BE_RIPPED = _NOT_A_CONTAINER | {"sealed-case"}
+
+#: Deliberately deny-lists. `lot`, `collection`, `box-set`, `binder`, `deck` and `other`
+#: stay permitted because nobody can say what they hold, and blocking a real workflow is a
+#: worse failure than allowing an odd one. Only the genuinely impossible is refused.
+_REFUSALS = {
+    "crack": (CANNOT_BE_CRACKED, "cracked open"),
+    "rip": (CANNOT_BE_RIPPED, "ripped open"),
+}
+
+
+def opening_refusal(db: Session, product_id: uuid.UUID, kind: str) -> str | None:
+    """Why this product cannot be opened that way, or `None` when it can.
+
+    Grading is never refused here: sending a raw single away and getting a slab back is
+    exactly what that kind is for.
+    """
+    rule = _REFUSALS.get(kind)
+    if rule is None:
+        return None
+
+    forbidden, verb = rule
+    product = db.get(Product, product_id)
+    if product is None:
+        return None
+
+    slug = product.product_type.slug
+    if slug not in forbidden:
+        return None
+    return f"A {product.product_type.name} cannot be {verb}."
 
 
 @dataclass(frozen=True)

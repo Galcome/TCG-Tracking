@@ -169,3 +169,63 @@ test('a box can be opened from the inventory list without knowing where to look'
   await expect(page.getByRole('button', { name: 'Rip open' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send to grading' })).toBeVisible()
 })
+
+/**
+ * Joseph, on a Single's page: "crack open and rip aren't actually a thing right? What
+ * happens if I click?"
+ *
+ * They worked. Cracking a single consumed the card, produced "boxes" out of it and split
+ * its cost across them — nothing in the UI or the API refused, because `kind` was a label
+ * on a record and never a constraint.
+ */
+test('a card is not offered actions that would consume it into boxes', async ({ page }) => {
+  const card = await addProduct(page, {
+    name: uniqueName('Lone Card'),
+    quantity: 1,
+    total: '500.00',
+    type: 'Single',
+  })
+  await openProduct(page, card)
+
+  await expect(page.getByRole('button', { name: 'Crack open' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Rip open' })).toBeHidden()
+  // The actions a card genuinely has are untouched.
+  await expect(page.getByRole('button', { name: 'Send to grading' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Record sale' })).toBeVisible()
+})
+
+test('a case is cracked and never ripped', async ({ page }) => {
+  const kase = await addProduct(page, {
+    name: uniqueName('Real Case'),
+    quantity: 1,
+    total: '900.00',
+    type: 'Sealed Case',
+  })
+  await openProduct(page, kase)
+
+  await expect(page.getByRole('button', { name: 'Crack open' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Rip open' })).toBeHidden()
+})
+
+test('cracking a case produces boxes, not singles', async ({ page }) => {
+  const kase = await addProduct(page, {
+    name: uniqueName('Typed Case'),
+    quantity: 1,
+    total: '900.00',
+    type: 'Sealed Case',
+  })
+  await openProduct(page, kase)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  const dialog = page.locator('form')
+  // The default came from `types[0]` — `Single`, first in a seed list — so every box a
+  // crack produced was filed as a card and quietly wrecked the tier report.
+  await expect(dialog.getByLabel('Type')).toHaveValue(
+    await dialog
+      .getByLabel('Type')
+      .locator('option', { hasText: 'Booster Box' })
+      .first()
+      .getAttribute('value')
+      .then((v) => v ?? ''),
+  )
+})
