@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 
 import { api, type AgingLot, type GroupBy, type GroupRow, type Period } from '../api'
 import { PageHeader, type PageActions } from '../components/AppShell'
+import { SetReport, TierReport } from '../components/rollups'
 import { Card, Empty, FifoNote, GameDot, Skeleton, gameColour } from '../components/ui'
 import { money, moneyCompact, percent, shortDate, signedMoney, toneFor } from '../format'
 
@@ -124,6 +125,26 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
           </div>
         </div>
       </div>
+
+      <section>
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+          Was the strategy right?
+        </h2>
+        <p className="mb-3 text-xs text-(--color-faint)">
+          What each kind of thing has actually returned, and how widely it varied.
+        </p>
+        <TierReport />
+      </section>
+
+      <section>
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+          By set
+        </h2>
+        <p className="mb-3 text-xs text-(--color-faint)">
+          Sold, still trying, and held on purpose &mdash; as three figures, never one.
+        </p>
+        <SetReport />
+      </section>
 
       {rows.isLoading && <Skeleton className="h-80 w-full" />}
       {rows.isError && (

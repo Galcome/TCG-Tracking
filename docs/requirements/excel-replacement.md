@@ -19,12 +19,12 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 5. Transformations: cases and cracking | **Shipped** - branch `feature/transformations` |
 | 6. The rip screen | **Shipped** - branch `feature/rip-screen` |
 | 7. Grading | **Shipped** - branch `feature/grading` |
-| 8. Reporting: tier, lineage, set rollup | Next |
-| 9. Vault valuation and ageing exemption | |
+| 8. Reporting: tier, lineage, set rollup | **Shipped** - branch `feature/rollups` |
+| 9. Vault valuation and ageing exemption | Next |
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-592 backend tests, 70 e2e, 100% coverage.
+613 backend tests, 73 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -238,6 +238,29 @@ which is the point of measuring grading at all.
 One refinement to the money-out rule from step 5: a derived purchase's *gross* is carried
 cost, but anything in its shipping, tax or fees is new money. Grading fees arrive exactly
 that way, so they show as spending while the carried card cost still does not.
+
+### Step 8 - what shipped
+
+The payoff. Three reports, deliberately kept apart because they overlap.
+
+**Tier** - what each kind of thing has returned, with the **spread** beside the middle:
+worst, median, best, and how many products the average is drawn from. That is the
+survivorship guard. "We got lucky on that Fabled case" is the case anybody remembers, and a
+view that only ever surfaced winners would always conclude that ripping pays. The page says
+outright to read a row against its own history, because a $900 case is harder to move than a
+$150 box and *should* sit longer.
+
+**Lineage** - one product, all-in, across everything it became, with the tree beneath it.
+Measured against the root's cost, because that is the only money ever really spent; the
+descendants carry it rather than adding to it. Bulk lost on the way is part of the story.
+
+**Set** - three figures, never one: sold with its realized return, in the Store with how long
+the oldest has been sitting, in the Vault with no ageing figure at all. The Vault is parked
+deliberately rather than asleep, so ageing it would describe nothing.
+
+**Lineage and tier are never summed**, on screen or in the data. A case's lineage return
+*is* the aggregate of its descendants, so a combined total would count the same money twice.
+Both views say so where they are shown.
 
 ---
 

@@ -138,8 +138,12 @@ test('what came out of what is on the page, and can be undone', async ({ page })
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
   await expect(dialog).toBeHidden()
 
-  // The chain, on the case's own page.
-  const row = page.getByRole('listitem').filter({ hasText: boxName })
+  // The chain, on the case's own page. Scoped to the row that can be undone: the
+  // all-in lineage summary above it lists the same box and has no Undo of its own.
+  const row = page
+    .getByRole('listitem')
+    .filter({ hasText: boxName })
+    .filter({ has: page.getByRole('button', { name: 'Undo' }) })
   await expect(row).toBeVisible({ timeout: 10_000 })
 
   await row.getByRole('button', { name: 'Undo' }).click()
