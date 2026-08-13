@@ -40,32 +40,6 @@ STOCK_IN = "in"
 STOCK_OUT = "out"
 
 
-def _matches_bucket(bucket: str | None, by_bucket: dict[str, int]) -> bool:
-    """Whether a product has any stock in the requested bucket.
-
-    Zero means it is not there, so a product with 3 in the Vault and none in the Store is
-    absent from the Store view. Unlike the stock filter this does *not* keep negatives: a
-    bucket cannot go negative, because moving out more than it holds is refused.
-    """
-    if bucket is None:
-        return True
-    return by_bucket.get(bucket, 0) > 0
-
-
-def _matches_stock(stock: str | None, quantity_on_hand: int) -> bool:
-    """Whether a product belongs in the requested stock view.
-
-    `in` means "not zero", which deliberately includes *negative* stock. An oversell means
-    the ledger disagrees with the shelf, and this list is the screen where that gets
-    fixed - hiding it here is how the error becomes permanent.
-    """
-    if stock == STOCK_IN:
-        return quantity_on_hand != 0
-    if stock == STOCK_OUT:
-        return quantity_on_hand == 0
-    return True
-
-
 def _attach_set(
     db: Session,
     fields: dict,
@@ -154,43 +128,63 @@ def list_products(
     """
     search = (q or "").strip() or None
 
-    filtered = _apply_filters(select(Product), search, game, product_type, include_archived)
+    # Stock is an aggregate over four tables, so it lives in a subquery the database can
+    # join, filter and page on. It used to be applied in Python, which meant loading the
+    # whole catalogue and computing cost basis for every product to show fifty - fine at a
+    # few hundred, and it was already slowing the e2e suite past its timeouts.
+    totals = inventory.stock_totals()
+    on_hand = func.coalesce(totals.c.on_hand, 0)
+
+    def matching() -> Select:
+        """Everything the search, taxonomy and stock filters keep. Not the bucket filter."""
+        stmt = select(Product).outerjoin(totals, totals.c.product_id == Product.id)
+        stmt = _apply_filters(stmt, search, game, product_type, include_archived)
+        if stock == STOCK_IN:
+            # Deliberately `!= 0`, so negative stock stays visible. An oversell means the
+            # ledger disagrees with the shelf, and this list is where that gets fixed.
+            return stmt.where(on_hand != 0)
+        if stock == STOCK_OUT:
+            return stmt.where(on_hand == 0)
+        return stmt
+
+    # Counted before the bucket filter narrows anything, so a tab's count says what
+    # pressing it would show rather than what is already on screen.
+    counted = db.execute(
+        select(*[func.coalesce(func.sum(totals.c[name]), 0) for name in BUCKETS]).where(
+            totals.c.product_id.in_(matching().with_only_columns(Product.id))
+        )
+    ).one()
+    bucket_totals = {name: int(value) for name, value in zip(BUCKETS, counted)}
+
+    narrowed = matching()
+    if bucket is not None:
+        # Zero in a bucket means not there, so a product with 3 in the Vault and none in
+        # the Store is absent from the Store view.
+        narrowed = narrowed.where(func.coalesce(totals.c[bucket], 0) > 0)
+
+    total = db.scalar(
+        select(func.count()).select_from(narrowed.with_only_columns(Product.id).subquery())
+    )
+
     if search:
-        filtered = filtered.order_by(
+        narrowed = narrowed.order_by(
             func.word_similarity(search, Product.search_text).desc(),
             Product.name.asc(),
             Product.id.asc(),
         )
     else:
-        filtered = filtered.order_by(Product.name.asc(), Product.id.asc())
+        narrowed = narrowed.order_by(Product.name.asc(), Product.id.asc())
 
-    # Stock is an aggregate over three tables, so it cannot be filtered in the same query.
-    # It is therefore applied here - but *before* paging, not after. Filtering a page and
-    # then reporting its length as the total is how "60 products" becomes "30" on load.
-    # `product_stats` runs a fixed number of queries whatever the size, so this is cheap
-    # at store scale.
-    matched = db.scalars(filtered).unique().all()
-    stats_by_product = inventory.product_stats(db, [item.id for item in matched])
+    page = db.scalars(narrowed.limit(limit).offset(offset)).unique().all()
 
-    kept = []
-    bucket_totals = dict.fromkeys(BUCKETS, 0)
-    for item in matched:
-        stats = _stats_for(stats_by_product, item.id)
-        if not _matches_stock(stock, stats.quantity_on_hand):
-            continue
-        # Counted before the bucket filter, so a tab's count says what pressing it would
-        # show rather than what is already on screen.
-        for name, quantity in stats.by_bucket.items():
-            bucket_totals[name] += quantity
-        if not _matches_bucket(bucket, stats.by_bucket):
-            continue
-        item.stats = stats
-        kept.append(item)
+    # Cost basis and profit are only ever wanted for what is on screen.
+    stats_by_product = inventory.product_stats(db, [item.id for item in page])
+    for item in page:
+        item.stats = _stats_for(stats_by_product, item.id)
 
-    page = kept[offset : offset + limit]
     return ProductList(
         items=[ProductRead.model_validate(item, from_attributes=True) for item in page],
-        total=len(kept),
+        total=total or 0,
         limit=limit,
         offset=offset,
         bucket_totals=bucket_totals,

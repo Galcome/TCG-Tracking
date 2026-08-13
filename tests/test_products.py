@@ -263,3 +263,88 @@ def test_filter_by_game_and_type(client, db, game_id, product_type_id, make_prod
 
 def test_limit_is_capped(client):
     assert client.get("/api/v1/products", params={"limit": 5000}).status_code == 422
+
+
+# ---------------------------------------------------------------------- paging
+
+
+def test_only_the_page_has_its_cost_computed(client, make_product, monkeypatch):
+    """The list must not get slower every time the catalogue grows.
+
+    It used to load every matching product and compute cost basis and profit for all of
+    them to show fifty. Fine at a few hundred; it had already started pushing the browser
+    suite past its assertion timeouts, and real use gets there too.
+    """
+    from src.routes import products as products_route
+
+    for index in range(6):
+        make_product(f"Paged Product {index}", initial_purchase={"quantity": 1, "amount": "10.00"})
+
+    asked_for: list[int] = []
+    original = products_route.inventory.product_stats
+
+    def spy(db, product_ids=None):
+        asked_for.append(len(product_ids) if product_ids is not None else -1)
+        return original(db, product_ids)
+
+    monkeypatch.setattr(products_route.inventory, "product_stats", spy)
+
+    page = client.get("/api/v1/products", params={"limit": 2}).json()
+
+    assert len(page["items"]) == 2
+    assert page["total"] >= 6
+    # Two products on the page, two products costed. Never the whole catalogue.
+    assert asked_for == [2]
+
+
+def test_the_total_counts_everything_the_filters_kept(client, make_product):
+    """Filtering a page and reporting its length as the total is how 60 becomes 30."""
+    for index in range(5):
+        make_product(f"Counted Product {index}", initial_purchase={"quantity": 1, "amount": "5.00"})
+
+    page = client.get("/api/v1/products", params={"limit": 2, "stock": "in"}).json()
+
+    assert len(page["items"]) == 2
+    assert page["total"] >= 5
+
+
+def test_paging_does_not_repeat_or_skip_a_product(client, make_product):
+    for index in range(5):
+        make_product(f"Stable Page {index}", initial_purchase={"quantity": 1, "amount": "5.00"})
+
+    seen: list[str] = []
+    for offset in (0, 2, 4):
+        page = client.get(
+            "/api/v1/products", params={"q": "Stable Page", "limit": 2, "offset": offset}
+        ).json()
+        seen.extend(item["name"] for item in page["items"])
+
+    assert len(seen) == len(set(seen)) == 5
+
+
+def test_negative_stock_still_shows_under_in_stock(client, make_product):
+    """An oversell means the ledger disagrees with the shelf, and this is where it is fixed.
+
+    The filter moved into SQL; it must still keep negatives, not clamp them away.
+    """
+    product = make_product("Oversold In SQL")
+    client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product["id"],
+            "quantity": 2,
+            "amount": "50.00",
+            "allow_oversell": True,
+        },
+    )
+
+    page = client.get("/api/v1/products", params={"q": "Oversold In SQL", "stock": "in"}).json()
+    assert [item["name"] for item in page["items"]] == ["Oversold In SQL"]
+    assert page["items"][0]["stats"]["quantity_on_hand"] == -2
+
+
+def test_a_product_with_no_transactions_at_all_is_sold_out(client, make_product):
+    make_product("Never Traded")
+
+    page = client.get("/api/v1/products", params={"q": "Never Traded", "stock": "out"}).json()
+    assert [item["name"] for item in page["items"]] == ["Never Traded"]

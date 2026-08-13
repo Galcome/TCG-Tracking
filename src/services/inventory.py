@@ -14,8 +14,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Select, case, func, select, union_all
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Subquery
 
 from src.models.ledger import (
     BUCKETS,
@@ -70,6 +71,57 @@ class ProductStats:
         if self.quantity_on_hand <= 0:
             return None
         return round(self.remaining_cost_cents / self.quantity_on_hand)
+
+
+def stock_totals() -> Subquery:
+    """Per-product stock, per bucket, as a subquery the database can filter and page on.
+
+    The same supply-minus-consumption arithmetic `product_stats` does in Python, expressed
+    in SQL so the inventory list does not have to load the whole catalogue to answer "which
+    of these are in stock". `product_stats` stays as it is: it computes cost basis and
+    profit as well, and that is only ever wanted for one page at a time.
+
+    Columns: `product_id`, `on_hand`, and one per bucket. A product with no transactions has
+    no row at all, so every reader has to coalesce - which is correct, because no rows means
+    zero of everything.
+    """
+    # A move is the one row that touches two buckets, so it appears twice: out of
+    # `from_bucket` and into `bucket`. It nets to zero in `on_hand`, which is the point.
+    pieces = [
+        select(
+            Purchase.product_id.label("product_id"),
+            Purchase.bucket.label("bucket"),
+            Purchase.quantity.label("delta"),
+        ).where(Purchase.status == STATUS_ACTIVE),
+        select(Sale.product_id, Sale.bucket, -Sale.quantity).where(Sale.status == STATUS_ACTIVE),
+        select(
+            InventoryAdjustment.product_id,
+            InventoryAdjustment.bucket,
+            InventoryAdjustment.quantity_delta,
+        ).where(InventoryAdjustment.status == STATUS_ACTIVE),
+        select(StockMove.product_id, StockMove.bucket, StockMove.quantity).where(
+            StockMove.status == STATUS_ACTIVE
+        ),
+        select(StockMove.product_id, StockMove.from_bucket, -StockMove.quantity).where(
+            StockMove.status == STATUS_ACTIVE
+        ),
+    ]
+    flat = union_all(*pieces).subquery("stock_deltas")
+
+    return (
+        select(
+            flat.c.product_id,
+            func.coalesce(func.sum(flat.c.delta), 0).label("on_hand"),
+            *[
+                func.coalesce(func.sum(flat.c.delta).filter(flat.c.bucket == bucket), 0).label(
+                    bucket
+                )
+                for bucket in BUCKETS
+            ],
+        )
+        .group_by(flat.c.product_id)
+        .subquery("stock_totals")
+    )
 
 
 def _by_product(stmt: Select, product_ids: list[uuid.UUID] | None, column) -> Select:
