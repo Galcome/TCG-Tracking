@@ -17,14 +17,14 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 3. Store credit | **Shipped** - branch `feature/store-credit` |
 | 4. Sets, suggestions, seeded calendars | **Shipped** - branch `feature/sets` |
 | 5. Transformations: cases and cracking | **Shipped** - branch `feature/transformations` |
-| 6. The rip screen | Next |
-| 7. Grading | |
+| 6. The rip screen | **Shipped** - branch `feature/rip-screen` |
+| 7. Grading | Next |
 | 8. Reporting: tier, lineage, set rollup | |
 | 9. Vault valuation and ageing exemption | |
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-546 backend tests, 65 e2e, 100% coverage.
+568 backend tests, 68 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -186,6 +186,34 @@ because nobody confirmed it. The boxes can be split across buckets as they come 
 box product is created inline if it does not exist yet - being unable to record what you
 just opened because somebody has not set up a product first is exactly the friction that
 stops the app being used.
+
+### Step 6 - what shipped
+
+Same primitive as step 5, one level down, with the one difference that matters: **a box is
+a lottery, not a division.**
+
+- **Cost follows what the hits are worth.** $500, $50 and $10 out of a $150 box come to
+  $133.93, $13.39 and $2.68. An even split would price a $10 card the same as a $500 one and
+  make per-card ROI meaningless. Every row can be overridden.
+- **Bulk is written off where it happens.** Whatever the hits do not take is a write-off at
+  rip time, not an asset. A rip with no hits at all is allowed and is the honest record of a
+  bad one: the box is gone and all of it is a loss.
+- **`price_snapshots` exists now**, because this use case needs it independently of the
+  parked price feed. The value typed at rip time is kept dated.
+- **Estimates never become cost or profit.** Valuing a hit at $50 out of a $150 box reads as
+  down $100 that day - a true statement of that day. Cost basis stays $150, and selling for
+  $1,500 on day 400 reads as +$1,350. The journey, not just the latest number.
+- **Zero cost is not unknown cost.** A later bulk sale counts at full margin and reports no
+  ROI, which `GroupRow.roi` already returns when cost is zero.
+
+Bulk is separated from real write-offs in the accounting too: `bulk_cost_cents` on the
+transformation is shifted out of `cost_transformed` and into `cost_written_off`, so the
+dashboard says loss where it was a loss and moved where it moved.
+
+The dialog shows the split live as values are typed, and the write-off growing beside it -
+a bad rip should look bad while you are recording it. One bug the browser pass caught that
+the suite did not: the live preview divided dollars by 100 and showed $1.47 where the split
+was $147.06.
 
 ---
 

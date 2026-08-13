@@ -16,15 +16,24 @@ from sqlalchemy.orm import Session
 from src.dependencies import db_session, get_current_member
 from src.models.ledger import BUCKET_INVENTORY, BUCKETS, STATUS_ACTIVE
 from src.models.member import Member
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
-from src.models.transformation import TRANSFORM_CRACK, Transformation, TransformationOutput
+from src.models.transformation import (
+    TRANSFORM_CRACK,
+    TRANSFORM_RIP,
+    Transformation,
+    TransformationOutput,
+)
 from src.schemas.ledger import VoidRequest
-from src.schemas.money import MoneyOutOptional
-from src.services import transformations
+from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.services import inventory, transformations
+from src.services.money import proportional_split
 
 router = APIRouter()
 
 MAX_OUTPUT_UNITS = 10_000
+
+BUCKET_PATTERN = f"^({chr(124).join(BUCKETS)})$"
 
 
 class OutputRequest(BaseModel):
@@ -37,7 +46,7 @@ class OutputRequest(BaseModel):
 
     product_id: uuid.UUID
     quantity: int = Field(gt=0, le=MAX_OUTPUT_UNITS)
-    bucket: str = Field(default=BUCKET_INVENTORY, pattern=f"^({'|'.join(BUCKETS)})$")
+    bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
 
 
 class CrackRequest(BaseModel):
@@ -46,7 +55,7 @@ class CrackRequest(BaseModel):
     product_id: uuid.UUID
     #: How many cases. Usually one.
     quantity: int = Field(default=1, gt=0, le=1_000)
-    from_bucket: str = Field(default=BUCKET_INVENTORY, pattern=f"^({'|'.join(BUCKETS)})$")
+    from_bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
     outputs: list[OutputRequest] = Field(min_length=1)
     occurred_on: date = Field(default_factory=date.today)
     notes: str | None = None
@@ -95,6 +104,8 @@ class TransformationRead(BaseModel):
     #: was opened. This is what stops cracking from resetting the ageing clock.
     inherited_purchase_date: date | None
     source_cost: MoneyOutOptional = Field(validation_alias="source_cost_cents")
+    #: What the outputs did not take, written off where it happened.
+    bulk_cost: MoneyOut = Field(validation_alias="bulk_cost_cents")
     outputs: list[OutputRead]
     notes: str | None
     status: str
@@ -119,6 +130,7 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
         occurred_on=record.occurred_on,
         inherited_purchase_date=record.inherited_purchase_date,
         source_cost=record.source_cost_cents,
+        bulk_cost=record.bulk_cost_cents,
         outputs=[
             OutputRead(
                 product_id=output.product_id,
@@ -191,6 +203,167 @@ def crack_case(
         member_id=member.id,
         notes=payload.notes,
     )
+    return _read(db, record)
+
+
+class HitRequest(BaseModel):
+    """One card worth recording out of a rip, and what it looked worth on the day.
+
+    `value` is an estimate, not a cost. It decides how the box's cost is shared out and it
+    is kept as a dated snapshot, but it never touches cost basis or realized profit -
+    those follow what the box really cost. Estimates inform decisions; they do not score
+    them, or the group would be marking its own homework.
+    """
+
+    product_id: uuid.UUID
+    quantity: int = Field(default=1, gt=0, le=MAX_OUTPUT_UNITS)
+    bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
+    value: MoneyIn = 0
+    #: Overrides the proportional share. Whatever the hits leave is written off as bulk.
+    cost: MoneyIn | None = None
+
+
+class RipRequest(BaseModel):
+    """Open boxes or packs for what is inside them."""
+
+    product_id: uuid.UUID
+    quantity: int = Field(default=1, gt=0, le=1_000)
+    from_bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
+    #: The cards worth tracking. Everything else is bulk, and bulk is not an asset.
+    hits: list[HitRequest] = Field(default_factory=list)
+    occurred_on: date = Field(default_factory=date.today)
+    notes: str | None = None
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def one_entry_per_product_and_bucket(self) -> "RipRequest":
+        seen = {(hit.product_id, hit.bucket) for hit in self.hits}
+        if len(seen) != len(self.hits):
+            raise ValueError("each product and bucket combination can only appear once")
+        return self
+
+
+def _hit_costs(db: Session, payload: RipRequest) -> list[int]:
+    """Each hit's share of the box, in proportion to what it is thought to be worth.
+
+    Anything given an explicit `cost` keeps it and the rest share what is left. Hits with
+    no value at all fall back to an even split: a box has to land somewhere, and refusing
+    to record a rip because nobody put a number on it would be the wrong trade.
+    """
+    if not payload.hits:
+        return []
+
+    stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
+    unit_cost = stats.average_unit_cost_cents if stats else None
+    total = (unit_cost or 0) * payload.quantity
+
+    explicit = [hit.cost for hit in payload.hits]
+    if all(value is not None for value in explicit):
+        return [value or 0 for value in explicit]
+
+    remaining = max(total - sum(value for value in explicit if value is not None), 0)
+    open_rows = [index for index, value in enumerate(explicit) if value is None]
+    weights = [payload.hits[index].value for index in open_rows]
+    if not any(weights):
+        weights = [1] * len(open_rows)
+
+    shared = proportional_split(weights, remaining)
+
+    costs = [value or 0 for value in explicit]
+    for index, share in zip(open_rows, shared):
+        costs[index] = share
+    return costs
+
+
+@router.post("/rip", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
+def rip_open(
+    payload: RipRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> TransformationRead:
+    """Open boxes or packs, and record the hits worth tracking.
+
+    Unlike cracking a case, this is a lottery rather than a division. Thirty-six packs make
+    roughly 360 cards and three of them matter, so the box's cost is shared **in proportion
+    to what the hits are thought to be worth** - three hits at $500, $50 and $10 out of a
+    $150 box come to $134, $13 and $3. An even split would price a $10 card the same as a
+    $500 one and make per-card ROI meaningless.
+
+    Whatever the hits do not take is written off as bulk, immediately. The group has said
+    outright it would never rip something in order to sell the bulk, so the leftovers are
+    not an asset - and a bad rip should look bad straight away rather than at some tidier
+    moment later.
+
+    A rip with no hits at all is allowed, and is the honest record of a bad one: the box is
+    gone and its whole cost is a write-off.
+    """
+    if db.get(Product, payload.product_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    available = transformations.available_in_bucket(
+        db, payload.product_id, payload.from_bucket
+    )
+    if payload.quantity > available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{payload.from_bucket} holds {available}, so {payload.quantity} cannot be "
+                "ripped out of it"
+            ),
+        )
+
+    for hit in payload.hits:
+        if db.get(Product, hit.product_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="One of the hits does not exist"
+            )
+        if hit.product_id == payload.product_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A box cannot be a hit out of itself",
+            )
+
+    costs = _hit_costs(db, payload)
+
+    record = transformations.transform(
+        db,
+        kind=TRANSFORM_RIP,
+        source_product_id=payload.product_id,
+        source_quantity=payload.quantity,
+        source_bucket=payload.from_bucket,
+        outputs=[
+            transformations.OutputSpec(
+                product_id=hit.product_id, quantity=hit.quantity, bucket=hit.bucket
+            )
+            for hit in payload.hits
+        ],
+        costs=costs,
+        occurred_on=payload.occurred_on,
+        member_id=member.id,
+        notes=payload.notes,
+    )
+
+    # The typed values, kept as dated estimates. This is what turns "$50 on the day, $1,500
+    # four hundred days later" into a journey the app can show rather than one number
+    # quietly replacing another.
+    for hit in payload.hits:
+        db.add(
+            PriceSnapshot(
+                product_id=hit.product_id,
+                value_cents=hit.value,
+                captured_on=payload.occurred_on,
+                created_by_member_id=member.id,
+                notes="valued when ripped",
+            )
+        )
+    db.flush()
+
     return _read(db, record)
 
 
