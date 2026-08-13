@@ -1,0 +1,282 @@
+/**
+ * Ripping a box open, and logging the hits.
+ *
+ * The shape follows the one thing that makes per-card ROI mean anything: cost is shared
+ * **in proportion to what the hits are worth**, not evenly. Three hits at $500, $50 and $10
+ * out of a $150 box come to $134, $13 and $3, so the big hit carries the risk it earned.
+ * The split is shown live as values are typed, and every row can be overridden.
+ *
+ * Whatever the hits do not take is bulk, and bulk is written off here rather than carried
+ * as an asset. The group said it outright: nobody would ever rip something in order to sell
+ * the bulk. Showing the write-off as it grows is the point - a bad rip should look bad
+ * while you are recording it, not in a report three weeks later.
+ */
+
+import { useQuery } from '@tanstack/react-query'
+import { Plus, X } from 'lucide-react'
+import { useState } from 'react'
+
+import { BUCKET_LABELS, BUCKETS, api, type Bucket, type ProductDetail } from '../api'
+import { money, todayIso } from '../format'
+import { MONEY_INPUT, useLedgerMutation } from './forms'
+import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
+
+interface HitRow {
+  key: number
+  /** Blank means "make a new product for this one". */
+  productId: string
+  name: string
+  value: string
+  bucket: Bucket
+}
+
+let nextKey = 1
+
+function emptyRow(): HitRow {
+  return { key: nextKey++, productId: '', name: '', value: '', bucket: 'inventory' }
+}
+
+/**
+ * What each hit's share works out at, live.
+ *
+ * Mirrors the server's largest-remainder split closely enough to be honest about the
+ * shape - the server recomputes it and its answer is the one that gets written. Showing an
+ * approximation here beats showing nothing while somebody decides what to type.
+ */
+function shares(values: number[], total: number): number[] {
+  const pool = values.reduce((sum, value) => sum + value, 0)
+  if (total <= 0) return values.map(() => 0)
+  if (pool <= 0) return values.map(() => total / values.length)
+  return values.map((value) => (total * value) / pool)
+}
+
+export function RipDialog({
+  product,
+  onClose,
+}: {
+  product: ProductDetail
+  onClose: () => void
+}) {
+  const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
+
+  const held = product.stats.by_bucket
+  const [fromBucket, setFromBucket] = useState<Bucket>(
+    BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
+  )
+  const [boxes, setBoxes] = useState('1')
+  const [occurredOn, setDate] = useState(todayIso())
+  const [rows, setRows] = useState<HitRow[]>([emptyRow()])
+  const [error, setError] = useState<string | null>(null)
+
+  const unitCost = Number(product.stats.average_unit_cost ?? 0)
+  const boxCost = unitCost * Number(boxes || 0)
+
+  const filled = rows.filter((row) => row.name.trim() || row.productId)
+  const split = shares(
+    filled.map((row) => Number(row.value || 0)),
+    boxCost,
+  )
+
+  const run = useLedgerMutation(
+    (hits: { product_id: string; quantity: number; bucket: Bucket; value: string }[]) =>
+      api.ripOpen({
+        product_id: product.id,
+        quantity: Number(boxes),
+        from_bucket: fromBucket,
+        hits,
+        occurred_on: occurredOn,
+      }),
+    onClose,
+  )
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setError(null)
+
+    const hits = []
+    for (const row of filled) {
+      let productId = row.productId
+      if (!productId) {
+        // Created inline. Being unable to log the card you are holding because nobody set
+        // up a product for it first is exactly how this screen would go unused.
+        const created = await api.createProduct({
+          name: row.name.trim(),
+          game_id: product.game.id,
+          product_type_id: types.data?.find((t) => t.slug === 'single')?.id
+            ?? types.data?.[0]?.id
+            ?? '',
+          set_name: product.set_name ?? null,
+        })
+        productId = created.id
+      }
+      hits.push({
+        product_id: productId,
+        quantity: 1,
+        bucket: row.bucket,
+        value: row.value || '0',
+      })
+    }
+
+    run.mutate(hits)
+  }
+
+  const assigned = split.reduce((sum, share) => sum + share, 0)
+  const bulk = Math.max(boxCost - assigned, 0)
+
+  return (
+    <Dialog
+      title={`Rip open — ${product.name}`}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel={filled.length === 0 ? 'Rip it, nothing worth keeping' : 'Log the hits'}
+      busy={run.isPending}
+      error={error ?? (run.error ? (run.error as Error).message : null)}
+    >
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="How many">
+          <input
+            required
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={boxes}
+            onChange={(e) => setBoxes(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+        <Field label="Date">
+          <input
+            required
+            type="date"
+            value={occurredOn}
+            onChange={(e) => setDate(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+      </div>
+
+      <div>
+        <span className="text-sm font-medium text-(--color-muted)">Ripped out of</span>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {BUCKETS.map((bucket) => (
+            <button
+              key={bucket}
+              type="button"
+              onClick={() => setFromBucket(bucket)}
+              className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                fromBucket === bucket
+                  ? 'border-(--color-accent) bg-(--color-accent)/12 font-medium text-(--color-accent)'
+                  : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+              }`}
+            >
+              {BUCKET_LABELS[bucket]} ({held[bucket] ?? 0})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <span className="text-sm font-medium text-(--color-muted)">
+          What were the hits?
+        </span>
+        <p className="mt-1 text-xs text-(--color-faint)">
+          Only the cards worth tracking. Everything else is bulk, and bulk is written off
+          here rather than carried as stock.
+        </p>
+
+        <ul className="mt-2 space-y-2">
+          {rows.map((row, index) => {
+            const position = filled.indexOf(row)
+            return (
+              <li key={row.key} className="grid grid-cols-[1fr_7rem_auto] gap-2">
+                <input
+                  value={row.name}
+                  onChange={(e) =>
+                    setRows(
+                      rows.map((other) =>
+                        other.key === row.key ? { ...other, name: e.target.value } : other,
+                      ),
+                    )
+                  }
+                  placeholder="Card name"
+                  aria-label={`Hit ${index + 1} name`}
+                  className={`${FIELD_CLASS} mt-0`}
+                />
+                <input
+                  {...MONEY_INPUT}
+                  value={row.value}
+                  onChange={(e) =>
+                    setRows(
+                      rows.map((other) =>
+                        other.key === row.key ? { ...other, value: e.target.value } : other,
+                      ),
+                    )
+                  }
+                  aria-label={`Hit ${index + 1} value`}
+                  className={`${FIELD_CLASS} mt-0`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setRows(rows.filter((other) => other.key !== row.key))}
+                  aria-label={`Remove hit ${index + 1}`}
+                  disabled={rows.length === 1}
+                  className="rounded-md border border-(--color-edge) px-2 text-(--color-faint) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss) disabled:opacity-30"
+                >
+                  <X size={14} />
+                </button>
+                {position >= 0 && boxCost > 0 && (
+                  <span className="col-span-3 -mt-1 text-xs text-(--color-faint)">
+                    takes {money(split[position].toFixed(2))} of the box
+                  </span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+
+        <button
+          type="button"
+          onClick={() => setRows([...rows, emptyRow()])}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs text-(--color-accent) hover:underline"
+        >
+          <Plus size={13} />
+          Add another
+        </button>
+      </div>
+
+      {/* The write-off, growing as you type. A bad rip should look bad while you are
+          recording it, not in a report three weeks later. */}
+      {boxCost > 0 && (
+        <p className="rounded-lg border border-(--color-edge) bg-(--color-ink)/50 px-3 py-2 text-xs text-(--color-muted)">
+          {money(boxCost.toFixed(2))} of box.{' '}
+          {filled.length === 0
+            ? 'All of it written off as bulk.'
+            : `${money(bulk.toFixed(2))} left over, written off as bulk.`}
+          <span className="mt-1 block text-(--color-faint)">
+            What you type is an estimate on the day. It shares out the cost and is kept as a
+            dated value — it never becomes profit.
+          </span>
+        </p>
+      )}
+
+      <Advanced>
+        <Field label="Where the hits go">
+          <select
+            aria-label="Where the hits go"
+            value={rows[0]?.bucket ?? 'inventory'}
+            onChange={(e) =>
+              setRows(rows.map((row) => ({ ...row, bucket: e.target.value as Bucket })))
+            }
+            className={FIELD_CLASS}
+          >
+            {BUCKETS.map((bucket) => (
+              <option key={bucket} value={bucket}>
+                {BUCKET_LABELS[bucket]}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </Advanced>
+    </Dialog>
+  )
+}

@@ -13,12 +13,14 @@ import {
   VoidDialog,
 } from '../components/forms'
 import { CrackCaseDialog, VoidTransformationDialog } from '../components/crack-forms'
+import { RipDialog } from '../components/rip-forms'
 import {
   ArrowLeft,
   ArrowLeftRight,
   Minus,
   Package,
   Pencil,
+  Scissors,
   Plus,
   Receipt,
 } from 'lucide-react'
@@ -36,7 +38,7 @@ import {
 } from '../components/ui'
 import { humanise, money, percent, shortDate, signedMoney, toneFor } from '../format'
 
-type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | 'crack' | null
+type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | 'crack' | 'rip' | null
 
 /**
  * What this came out of, and what it became.
@@ -88,6 +90,8 @@ function Lineage({
               <span className="flex shrink-0 items-center gap-3">
                 <span className="text-xs text-(--color-faint)">
                   {money(row.source_cost, 'cost unknown')}
+                  {Number(row.bulk_cost) > 0 &&
+                    ` · ${money(row.bulk_cost)} bulk`}
                   {row.inherited_purchase_date &&
                     ` · dated ${shortDate(row.inherited_purchase_date)}`}
                 </span>
@@ -196,6 +200,10 @@ export function ProductDetail() {
             <Button type="button" onClick={() => setDialog('crack')} variant="ghost">
               <Package size={15} />
               Crack open
+            </Button>
+            <Button type="button" onClick={() => setDialog('rip')} variant="ghost">
+              <Scissors size={15} />
+              Rip open
             </Button>
             <Button type="button" onClick={() => setDialog('adjust')} variant="ghost">
               <Minus size={15} />
@@ -390,6 +398,7 @@ export function ProductDetail() {
       {dialog === 'edit' && <EditItemDialog productId={item.id} onClose={() => setDialog(null)} />}
       {dialog === 'move' && <MoveStockDialog product={item} onClose={() => setDialog(null)} />}
       {dialog === 'crack' && <CrackCaseDialog product={item} onClose={() => setDialog(null)} />}
+      {dialog === 'rip' && <RipDialog product={item} onClose={() => setDialog(null)} />}
       {undoing && <VoidTransformationDialog id={undoing} onClose={() => setUndoing(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />

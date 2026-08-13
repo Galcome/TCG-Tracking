@@ -27,6 +27,7 @@ from src.models.ledger import (
     Sale,
     StockMove,
 )
+from src.models.transformation import Transformation
 
 #: Cost leaving a product because it became another one. Part of the ledger model's
 #: reason list; named here so the aggregate can tell it from a real write-off.
@@ -260,6 +261,24 @@ def product_stats(
         entry.cost_transformed_cents = int(transformed or 0)
         # Stock counted in via an adjustment is invested capital too, when its cost is known.
         entry.total_invested_cents += int(added_cost or 0)
+
+    # Bulk from a rip is written off, not transformed. The consuming adjustment cannot
+    # know that - it removes the whole box's cost in one row - so the part the hits did not
+    # take is moved across here. Remaining cost is unaffected either way; what changes is
+    # whether the dashboard calls it a write-off, which is what it actually was.
+    bulk = select(
+        Transformation.source_product_id,
+        func.coalesce(func.sum(Transformation.bulk_cost_cents), 0),
+    ).where(Transformation.status == STATUS_ACTIVE)
+    if product_ids is not None:
+        bulk = bulk.where(Transformation.source_product_id.in_(product_ids))
+    for product_id, written_off_as_bulk in db.execute(
+        bulk.group_by(Transformation.source_product_id)
+    ):
+        entry = row(product_id)
+        amount = int(written_off_as_bulk or 0)
+        entry.cost_transformed_cents -= amount
+        entry.cost_written_off_cents += amount
 
     # Stock per bucket. Buckets are a location dimension over the same rows, so this is the
     # same supply-minus-consumption arithmetic grouped one level finer, plus moves.

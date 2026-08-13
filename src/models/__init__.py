@@ -8,6 +8,7 @@ from src.models.card_set import CardSet
 from src.models.ledger import CostAllocation, InventoryAdjustment, Purchase, Sale, StockMove
 from src.models.member import Member
 from src.models.money import MoneyAccount, MoneyMovement, MoneyPosting
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.models.transformation import Transformation, TransformationOutput
@@ -22,6 +23,7 @@ __all__ = [
     "MoneyAccount",
     "MoneyMovement",
     "MoneyPosting",
+    "PriceSnapshot",
     "Product",
     "ProductType",
     "Purchase",

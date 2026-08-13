@@ -86,6 +86,12 @@ class Transformation(Base, TimestampMixin):
     #: outputs. NULL when the source's cost is genuinely unknown, which stays unknown.
     source_cost_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    #: Cost the outputs did not take, written off as bulk. A ripped box's leftovers are
+    #: never an asset - the group has said outright it would never rip something to sell
+    #: the bulk - so the remainder is a write-off at rip time and a bad rip looks bad
+    #: straight away rather than at some tidier moment later.
+    bulk_cost_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+
     #: The adjustment that took the source out of stock. Voiding the transformation voids it.
     consuming_adjustment_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("inventory_adjustments.id"), nullable=True

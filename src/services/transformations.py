@@ -91,15 +91,21 @@ def transform(
     source_quantity: int,
     source_bucket: str,
     outputs: list[OutputSpec],
+    costs: list[int] | None = None,
     occurred_on: date | None,
     member_id: uuid.UUID | None,
     notes: str | None = None,
 ) -> Transformation:
     """Consume the source, produce the outputs, carry the cost and the date across.
 
-    The source's cost is divided across the produced *units* with a largest-remainder
-    split, so six boxes out of a $100 case come to 1667 + 1667 + 1667 + 1667 + 1666 + 1666
-    and sum back exactly.
+    `costs` lets a caller decide each row's share itself. The rip screen does, because a
+    box is a lottery rather than a division: three hits at $500, $50 and $10 split a $150
+    box $134 / $13 / $3, so the big hit carries the risk it earned and each card's ROI
+    stands on its own. Whatever the hits do not take is written off as bulk.
+
+    Omitted, the source's cost is divided across the produced *units* with a
+    largest-remainder split, so six boxes out of a $100 case come to
+    1667 + 1667 + 1667 + 1667 + 1666 + 1666 and sum back exactly.
 
     A source whose cost is genuinely unknown produces outputs whose cost is unknown too.
     Spreading a zero would say the boxes were free, which is a different claim.
@@ -138,7 +144,14 @@ def transform(
     record.consuming_adjustment_id = consuming.id
     record.source_cost_cents = None if consuming.has_unknown_cost else consuming.cost_removed_cents
 
-    shares = _shares(record.source_cost_cents, outputs)
+    shares: list[int | None]
+    if costs is not None:
+        shares = list(costs)
+        # Anything the outputs did not take is bulk, and bulk is written off here rather
+        # than carried as an asset nobody would ever choose to acquire.
+        record.bulk_cost_cents = max((record.source_cost_cents or 0) - sum(costs), 0)
+    else:
+        shares = _shares(record.source_cost_cents, outputs)
 
     for spec, share in zip(outputs, shares):
         produced = Purchase(

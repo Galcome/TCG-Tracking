@@ -398,6 +398,17 @@ export interface TransformationOutput {
   cost: string | null
 }
 
+export interface RipHit {
+  product_id: string
+  quantity?: number
+  bucket?: Bucket
+  /** What it looked worth on the day. An estimate — it shares out the cost and is kept
+   *  as a dated snapshot, and it never becomes cost basis or profit. */
+  value?: string
+  /** Overrides the proportional share. Whatever the hits leave is written off as bulk. */
+  cost?: string
+}
+
 export interface Transformation {
   id: string
   kind: 'crack' | 'rip' | 'grade'
@@ -410,6 +421,8 @@ export interface Transformation {
    *  was opened. This is what stops cracking from resetting the ageing clock. */
   inherited_purchase_date: string | null
   source_cost: string | null
+  /** What the hits did not take, written off as bulk where it happened. */
+  bulk_cost: string
   outputs: TransformationOutput[]
   notes: string | null
   status: string
@@ -722,6 +735,20 @@ export const api = {
     notes?: string | null
   }) =>
     request<Transformation>('/api/v1/transformations/crack', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** Open boxes or packs, recording the hits worth tracking. */
+  ripOpen: (input: {
+    product_id: string
+    quantity?: number
+    from_bucket?: Bucket
+    hits: RipHit[]
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Transformation>('/api/v1/transformations/rip', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
