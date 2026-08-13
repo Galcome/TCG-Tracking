@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff check .)",
+      "Bash(uv run ruff check src/)",
+      "Bash(uv run ruff check src/ tests/)",
+      "Bash(uv run alembic check)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npx vitest run)",
+      "Bash(npx vitest run *)",
+      "Bash(npx playwright test)",
+      "Bash(npx playwright test *)",
+      "Bash(railway status)",
+      "Bash(railway deployment list *)",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__get_page_text",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__resize_window"
+    ]
+  }
+}
