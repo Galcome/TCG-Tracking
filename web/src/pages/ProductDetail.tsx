@@ -12,7 +12,16 @@ import {
   RecordSaleDialog,
   VoidDialog,
 } from '../components/forms'
-import { ArrowLeft, ArrowLeftRight, Minus, Pencil, Plus, Receipt } from 'lucide-react'
+import { CrackCaseDialog, VoidTransformationDialog } from '../components/crack-forms'
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  Minus,
+  Package,
+  Pencil,
+  Plus,
+  Receipt,
+} from 'lucide-react'
 
 import {
   Button,
@@ -20,13 +29,79 @@ import {
   Empty,
   FifoNote,
   GameDot,
+  RowAction,
   Skeleton,
   Stat,
   StatSkeleton,
 } from '../components/ui'
 import { humanise, money, percent, shortDate, signedMoney, toneFor } from '../format'
 
-type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | null
+type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | 'crack' | null
+
+/**
+ * What this came out of, and what it became.
+ *
+ * Shown on both sides of every transformation because the chain is the point: a graded hit
+ * is only interesting when you can see it came out of a box that came out of the Fabled
+ * case. One row is where that chain gets walked.
+ */
+function Lineage({
+  productId,
+  onUndo,
+}: {
+  productId: string
+  onUndo: (id: string) => void
+}) {
+  const found = useQuery({
+    queryKey: ['transformations', productId],
+    queryFn: () => api.transformations({ product_id: productId }),
+  })
+
+  const rows = found.data ?? []
+  if (rows.length === 0) return null
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+        Opened
+      </h2>
+      <Card className="p-0">
+        <ul className="divide-y divide-(--color-edge)">
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm ${
+                row.status === 'voided' ? 'text-(--color-muted) line-through' : ''
+              }`}
+            >
+              <span className="min-w-0">
+                {row.source_quantity}&times; {row.source_product_name}
+                <span className="mx-2 text-(--color-faint)">&rarr;</span>
+                {row.outputs
+                  .map(
+                    (output) =>
+                      `${output.quantity} ${output.product_name} (${BUCKET_LABELS[output.bucket]})`,
+                  )
+                  .join(', ')}
+                {row.status === 'voided' && <span className="ml-2 text-xs">(undone)</span>}
+              </span>
+              <span className="flex shrink-0 items-center gap-3">
+                <span className="text-xs text-(--color-faint)">
+                  {money(row.source_cost, 'cost unknown')}
+                  {row.inherited_purchase_date &&
+                    ` · dated ${shortDate(row.inherited_purchase_date)}`}
+                </span>
+                {row.status !== 'voided' && (
+                  <RowAction onClick={() => onUndo(row.id)}>Undo</RowAction>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  )
+}
 
 export function ProductDetail() {
   const { productId = '' } = useParams()
@@ -36,6 +111,7 @@ export function ProductDetail() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [voiding, setVoiding] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<Transaction | null>(null)
+  const [undoing, setUndoing] = useState<string | null>(null)
 
   const product = useQuery({
     queryKey: ['product', productId],
@@ -116,6 +192,10 @@ export function ProductDetail() {
             <Button type="button" onClick={() => setDialog('move')} variant="ghost">
               <ArrowLeftRight size={15} />
               Move
+            </Button>
+            <Button type="button" onClick={() => setDialog('crack')} variant="ghost">
+              <Package size={15} />
+              Crack open
             </Button>
             <Button type="button" onClick={() => setDialog('adjust')} variant="ghost">
               <Minus size={15} />
@@ -276,6 +356,8 @@ export function ProductDetail() {
         </Card>
       </section>
 
+      <Lineage productId={item.id} onUndo={setUndoing} />
+
       <section className="flex flex-wrap items-center gap-3 border-t border-(--color-edge) pt-5">
         <Button
           type="button"
@@ -307,6 +389,8 @@ export function ProductDetail() {
       )}
       {dialog === 'edit' && <EditItemDialog productId={item.id} onClose={() => setDialog(null)} />}
       {dialog === 'move' && <MoveStockDialog product={item} onClose={() => setDialog(null)} />}
+      {dialog === 'crack' && <CrackCaseDialog product={item} onClose={() => setDialog(null)} />}
+      {undoing && <VoidTransformationDialog id={undoing} onClose={() => setUndoing(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />
       )}

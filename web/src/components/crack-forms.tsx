@@ -1,0 +1,343 @@
+/**
+ * Opening a sealed case into the boxes inside it.
+ *
+ * The shape of this screen follows one rule from the brief: a default that is **shown and
+ * editable**, never silently applied. Case size is suggested from the game and the
+ * language, the split across buckets is pre-filled with everything going to Inventory, and
+ * every number on screen can be changed before anything is written.
+ *
+ * The boxes may not exist as a product yet, so the form can create one - pre-filled from
+ * the case's own name, game and set. Being unable to record what you just opened because
+ * somebody has not set up a product first is exactly the friction that stops people using
+ * the app at all.
+ */
+
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+
+import {
+  BUCKET_LABELS,
+  BUCKETS,
+  api,
+  caseSize,
+  type Bucket,
+  type Product,
+  type ProductDetail,
+} from '../api'
+import { money, todayIso } from '../format'
+import { useLedgerMutation } from './forms'
+import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
+
+/** The name a box out of this case probably has. "Fabled Case" -> "Fabled Box". */
+function suggestBoxName(caseName: string): string {
+  const swapped = caseName.replace(/\bcases?\b/i, 'Box')
+  return swapped === caseName ? `${caseName} Box` : swapped
+}
+
+export function CrackCaseDialog({
+  product,
+  onClose,
+}: {
+  product: ProductDetail
+  onClose: () => void
+}) {
+  const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
+
+  const suggested = caseSize(product.game.slug, product.language)
+  const held = product.stats.by_bucket
+
+  const [fromBucket, setFromBucket] = useState<Bucket>(
+    BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
+  )
+  const [cases, setCases] = useState('1')
+  const [boxes, setBoxes] = useState(String(suggested ?? ''))
+  const [occurredOn, setDate] = useState(todayIso())
+
+  // Which existing product the boxes are, or blank to make a new one.
+  const [existingId, setExistingId] = useState('')
+  const [newName, setNewName] = useState(suggestBoxName(product.name))
+  const [newTypeId, setNewType] = useState('')
+
+  // How the boxes are shared out. Everything to Inventory until somebody says otherwise.
+  const [split, setSplit] = useState<Record<Bucket, string>>({
+    inventory: '',
+    store: '',
+    vault: '',
+  })
+
+  const [error, setError] = useState<string | null>(null)
+
+  const candidates = useQuery({
+    queryKey: ['products', 'crack-candidates', product.game.slug],
+    queryFn: () => api.products({ game: product.game.slug, stock: '' }),
+  })
+
+  const total = Number(cases || 0) * Number(boxes || 0)
+  const allocated = BUCKETS.reduce((sum, bucket) => sum + Number(split[bucket] || 0), 0)
+  // Nothing typed means "all of them to the source's bucket" rather than an error.
+  const untouched = allocated === 0
+  const available = held[fromBucket] ?? 0
+
+  const run = useLedgerMutation(
+    async (input: {
+      productId: string
+      outputs: { product_id: string; quantity: number; bucket: Bucket }[]
+    }) =>
+      api.crackCase({
+        product_id: product.id,
+        quantity: Number(cases),
+        from_bucket: fromBucket,
+        outputs: input.outputs,
+        occurred_on: occurredOn,
+      }),
+    onClose,
+  )
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setError(null)
+
+    if (total <= 0) {
+      setError('Say how many boxes came out.')
+      return
+    }
+    if (!untouched && allocated !== total) {
+      setError(`The split adds up to ${allocated}, but ${total} boxes came out.`)
+      return
+    }
+
+    let productId = existingId
+    if (!productId) {
+      if (!newName.trim()) {
+        setError('The boxes need a name.')
+        return
+      }
+      // Created here rather than made a prerequisite. Being unable to record what you
+      // just opened because a product does not exist yet is how an app stops being used.
+      const created = await api.createProduct({
+        name: newName.trim(),
+        game_id: product.game.id,
+        product_type_id: newTypeId || types.data?.[0]?.id || '',
+        set_name: product.set_name ?? null,
+      })
+      productId = created.id
+    }
+
+    const outputs = untouched
+      ? [{ product_id: productId, quantity: total, bucket: fromBucket }]
+      : BUCKETS.filter((bucket) => Number(split[bucket] || 0) > 0).map((bucket) => ({
+          product_id: productId,
+          quantity: Number(split[bucket]),
+          bucket,
+        }))
+
+    run.mutate({ productId, outputs })
+  }
+
+  return (
+    <Dialog
+      title={`Crack open — ${product.name}`}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel="Crack it open"
+      busy={run.isPending}
+      error={error ?? (run.error ? (run.error as Error).message : null)}
+    >
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="How many cases">
+          <input
+            required
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={cases}
+            onChange={(e) => setCases(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+        <Field
+          label="Boxes per case"
+          hint={
+            suggested
+              ? `Usually ${suggested} for ${product.game.name}. Change it if this one differs.`
+              : 'No confirmed size for this game — type what was in it.'
+          }
+        >
+          <input
+            required
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={boxes}
+            onChange={(e) => setBoxes(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+      </div>
+
+      <div>
+        <span className="text-sm font-medium text-(--color-muted)">Opened out of</span>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {BUCKETS.map((bucket) => (
+            <button
+              key={bucket}
+              type="button"
+              onClick={() => setFromBucket(bucket)}
+              className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                fromBucket === bucket
+                  ? 'border-(--color-accent) bg-(--color-accent)/12 font-medium text-(--color-accent)'
+                  : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+              }`}
+            >
+              {BUCKET_LABELS[bucket]} ({held[bucket] ?? 0})
+            </button>
+          ))}
+        </div>
+        {Number(cases || 0) > available && (
+          <span className="mt-1 block text-xs text-(--color-loss)">
+            {BUCKET_LABELS[fromBucket]} only holds {available}.
+          </span>
+        )}
+      </div>
+
+      <Field
+        label="What came out"
+        hint="Pick the box if it already exists, or leave it blank and one gets created."
+      >
+        <select
+          aria-label="What came out"
+          value={existingId}
+          onChange={(e) => setExistingId(e.target.value)}
+          className={FIELD_CLASS}
+        >
+          <option value="">Create a new product</option>
+          {(candidates.data?.items ?? [])
+            .filter((item: Product) => item.id !== product.id)
+            .map((item: Product) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+        </select>
+      </Field>
+
+      {!existingId && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Name">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className={FIELD_CLASS}
+            />
+          </Field>
+          <Field label="Type">
+            <select
+              aria-label="Type"
+              value={newTypeId || types.data?.[0]?.id || ''}
+              onChange={(e) => setNewType(e.target.value)}
+              className={FIELD_CLASS}
+            >
+              {types.data?.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
+      <div>
+        <span className="text-sm font-medium text-(--color-muted)">
+          Where they go{total > 0 ? ` — ${total} boxes` : ''}
+        </span>
+        <div className="mt-1.5 grid grid-cols-3 gap-3">
+          {BUCKETS.map((bucket) => (
+            <Field key={bucket} label={BUCKET_LABELS[bucket]}>
+              <input
+                type="number"
+                min={0}
+                inputMode="numeric"
+                placeholder="0"
+                value={split[bucket]}
+                onChange={(e) => setSplit({ ...split, [bucket]: e.target.value })}
+                className={FIELD_CLASS}
+              />
+            </Field>
+          ))}
+        </div>
+        <span className="mt-1 block text-xs text-(--color-faint)">
+          {untouched
+            ? `Leave these blank and all ${total || 0} go to ${BUCKET_LABELS[fromBucket]}.`
+            : `${allocated} of ${total} allocated.`}
+        </span>
+      </div>
+
+      {/* The two facts that make cracking safe to do, said before the button rather than
+          discovered in a report afterwards. */}
+      <p className="rounded-lg border border-(--color-edge) bg-(--color-ink)/50 px-3 py-2 text-xs text-(--color-muted)">
+        The boxes keep the case&rsquo;s purchase date
+        {product.stats.average_unit_cost
+          ? ` and split its ${money(product.stats.average_unit_cost)} between them`
+          : ''}
+        , so nothing resets the clock on how long the money has been asleep.
+      </p>
+
+      <Advanced>
+        <Field label="Date opened" hint="Recorded separately from the purchase date above.">
+          <input
+            required
+            type="date"
+            value={occurredOn}
+            onChange={(e) => setDate(e.target.value)}
+            className={FIELD_CLASS}
+          />
+        </Field>
+      </Advanced>
+    </Dialog>
+  )
+}
+
+/** Undoing a crack. The case comes back, the boxes go away, the row stays as the reason. */
+export function VoidTransformationDialog({
+  id,
+  onClose,
+}: {
+  id: string
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const run = useLedgerMutation(
+    (input: string) => api.voidTransformation(id, input),
+    onClose,
+  )
+
+  return (
+    <Dialog
+      title="Undo this"
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault()
+        run.mutate(reason.trim())
+      }}
+      submitLabel="Undo it"
+      busy={run.isPending}
+      error={run.error ? (run.error as Error).message : null}
+    >
+      <p className="text-sm text-(--color-muted)">
+        The case comes back into stock and the boxes go away. The row stays on the record as
+        the explanation.
+      </p>
+      <Field label="Reason">
+        <input
+          required
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Wrong case"
+          className={FIELD_CLASS}
+        />
+      </Field>
+    </Dialog>
+  )
+}

@@ -261,7 +261,13 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     )
 
     # Purchases made during the period - deliberately distinct from cost of sales.
-    purchases = select(func.coalesce(func.sum(_LANDED), 0)).where(Purchase.status == STATUS_ACTIVE)
+    #
+    # Derived purchases are excluded: they are cost carried across a transformation, not
+    # money that left the group. Six boxes out of a $900 case are six derived purchases
+    # totalling $900, and counting them here would say the group spent $1,800.
+    purchases = select(func.coalesce(func.sum(_LANDED), 0)).where(
+        Purchase.status == STATUS_ACTIVE, Purchase.is_derived.is_(False)
+    )
     result.total_invested_cents = int(db.scalar(purchases) or 0)
     if start is not None:
         purchases = purchases.where(

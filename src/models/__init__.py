@@ -10,6 +10,7 @@ from src.models.member import Member
 from src.models.money import MoneyAccount, MoneyMovement, MoneyPosting
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
+from src.models.transformation import Transformation, TransformationOutput
 
 __all__ = [
     "AuditLog",
@@ -25,5 +26,7 @@ __all__ = [
     "ProductType",
     "Purchase",
     "Sale",
+    "Transformation",
+    "TransformationOutput",
     "StockMove",
 ]

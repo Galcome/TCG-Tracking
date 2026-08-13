@@ -45,6 +45,10 @@ ADJUSTMENT_REASONS = (
     "personal_use",
     "returned",
     "written_off",
+    # Stock consumed by a transformation - a case cracked, a box ripped, a card sent to be
+    # graded. Its cost is not written off; it moved to whatever came out, so it is reported
+    # apart from real write-offs.
+    "transformed",
     "other",
 )
 
@@ -112,6 +116,15 @@ class Purchase(Base, _LedgerEntry):
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True
     )
+
+    #: True when this purchase is cost carried across from a transformation rather than
+    #: money that left the group. Six boxes out of a $900 case are six derived purchases
+    #: totalling $900; counting them as spending would say the group paid $1,800.
+    #:
+    #: They are real purchases in every other respect - FIFO consumes them, the ageing
+    #: report ages them from the case's own date, and per-product cost basis needs them.
+    #: Only the "money out" figures skip them.
+    is_derived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     @property
     def landed_cost_cents(self) -> int:
@@ -204,7 +217,8 @@ class InventoryAdjustment(Base, _LedgerEntry):
         ),
         CheckConstraint(
             "reason IN ('opening_inventory', 'correction', 'damaged', 'missing', 'opened', "
-            "'given_away', 'personal_use', 'returned', 'written_off', 'other')",
+            "'given_away', 'personal_use', 'returned', 'written_off', 'transformed', "
+            "'other')",
             name="ck_adjustments_reason",
         ),
         CheckConstraint(_STATUS_CHECK, name="ck_adjustments_status"),
