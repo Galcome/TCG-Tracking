@@ -20,6 +20,7 @@ import {
 } from '../components/forms'
 import { CrackCaseDialog, VoidTransformationDialog } from '../components/crack-forms'
 import { RipDialog } from '../components/rip-forms'
+import { LineageReport } from '../components/rollups'
 import {
   ReturnFromGradingDialog,
   SendToGradingDialog,
@@ -447,6 +448,8 @@ export function ProductDetail() {
           )}
         </Card>
       </section>
+
+      <LineageReport productId={item.id} />
 
       <AtTheGrader productId={item.id} onReturn={setReturning} />
 

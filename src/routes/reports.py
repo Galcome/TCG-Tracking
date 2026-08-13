@@ -3,14 +3,14 @@
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
 from src.models.member import Member
 from src.schemas.money import MoneyOut, MoneyOutOptional
-from src.services import reporting
+from src.services import reporting, rollups
 
 router = APIRouter()
 
@@ -183,3 +183,122 @@ def read_attention(
 ):
     """States where a number on screen cannot be trusted. Empty when the ledger is sound."""
     return reporting.attention(db)
+
+
+# ------------------------------------------------------------------------ rollups
+
+
+class LineageNodeRead(BaseModel):
+    model_config = _CONFIG
+
+    product_id: uuid.UUID
+    product_name: str
+    depth: int
+    quantity_produced: int
+    cost: MoneyOutOptional = Field(validation_alias="cost_cents")
+    children: list["LineageNodeRead"]
+
+
+class LineageRead(BaseModel):
+    model_config = _CONFIG
+
+    product_id: uuid.UUID
+    product_name: str
+    #: What the root actually cost. The only money really spent on this chain.
+    cost: MoneyOut = Field(validation_alias="cost_cents")
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    remaining_cost: MoneyOut = Field(validation_alias="remaining_cost_cents")
+    written_off: MoneyOut = Field(validation_alias="written_off_cents")
+    units_sold: int
+    units_remaining: int
+    #: Measured against the root's cost. null until something has actually sold.
+    roi: float | None
+    tree: list[LineageNodeRead]
+
+
+class TierRead(BaseModel):
+    model_config = _CONFIG
+
+    key: str
+    label: str
+    products_traded: int
+    units_sold: int
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
+    roi: float | None
+    #: The average across products, and the spread around it. The spread is the point:
+    #: the case anybody remembers is the one that hit.
+    average_roi: float | None
+    best_roi: float | None
+    worst_roi: float | None
+    median_roi: float | None
+    avg_days_held: int | None
+
+
+class SetRead(BaseModel):
+    model_config = _CONFIG
+
+    set_id: uuid.UUID
+    name: str
+    game_slug: str
+
+    units_sold: int
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
+    sold_roi: float | None
+
+    units_in_store: int
+    store_cost: MoneyOut = Field(validation_alias="store_cost_cents")
+    #: How long the oldest thing still in the Store has been sitting. Store only - the
+    #: Vault is not asleep, it is parked on purpose.
+    oldest_store_days: int | None
+
+    units_in_vault: int
+    vault_cost: MoneyOut = Field(validation_alias="vault_cost_cents")
+
+
+@router.get("/reports/lineage/{product_id}", response_model=LineageRead)
+def lineage_report(
+    product_id: uuid.UUID,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> LineageRead:
+    """One product, all-in, across everything it became.
+
+    Deliberately **not** summable with the tier report below. A case's lineage return *is*
+    the aggregate of its descendants, so adding the two together would count the same money
+    twice. They answer different questions and are shown as different views.
+    """
+    found = rollups.lineage(db, product_id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return LineageRead.model_validate(found, from_attributes=True)
+
+
+@router.get("/reports/by-tier", response_model=list[TierRead])
+def tier_report(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> list[TierRead]:
+    """How each kind of thing has performed, with the spread and not just the average.
+
+    Comparing a case against a box is false - a $900 case is harder to move than a $150 box
+    and should sit longer - so this is meant to be read within a row, against that row's own
+    history, rather than across rows.
+    """
+    return [
+        TierRead.model_validate(row, from_attributes=True) for row in rollups.by_tier(db)
+    ]
+
+
+@router.get("/reports/by-set", response_model=list[SetRead])
+def set_report(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> list[SetRead]:
+    """One set, split into what sold, what is still trying, and what is held on purpose.
+
+    Never a single blended figure. Averaging a realized flip together with an unrealized
+    hold describes neither of them.
+    """
+    return [SetRead.model_validate(row, from_attributes=True) for row in rollups.by_set(db)]

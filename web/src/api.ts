@@ -445,6 +445,61 @@ export interface Transformation {
   status: string
 }
 
+export interface TierRow {
+  key: string
+  label: string
+  products_traded: number
+  units_sold: number
+  realized_profit: string
+  cost_of_sales: string
+  roi: number | null
+  /** The average across products, and the spread around it. The spread is the point. */
+  average_roi: number | null
+  best_roi: number | null
+  worst_roi: number | null
+  median_roi: number | null
+  avg_days_held: number | null
+}
+
+export interface SetRollupRow {
+  set_id: string
+  name: string
+  game_slug: string
+  units_sold: number
+  realized_profit: string
+  cost_of_sales: string
+  sold_roi: number | null
+  units_in_store: number
+  store_cost: string
+  /** Store only. The Vault is not asleep, it is parked on purpose. */
+  oldest_store_days: number | null
+  units_in_vault: number
+  vault_cost: string
+}
+
+export interface LineageNode {
+  product_id: string
+  product_name: string
+  depth: number
+  quantity_produced: number
+  cost: string | null
+  children: LineageNode[]
+}
+
+export interface LineageRollup {
+  product_id: string
+  product_name: string
+  /** What the root actually cost. The only money really spent on this chain. */
+  cost: string
+  realized_profit: string
+  remaining_cost: string
+  written_off: string
+  units_sold: number
+  units_remaining: number
+  roi: number | null
+  tree: LineageNode[]
+}
+
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
 
 /**
@@ -734,6 +789,16 @@ export const api = {
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
+  /** How each tier has performed, with the spread and not just the average. */
+  byTier: () => request<TierRow[]>('/api/v1/reports/by-tier'),
+
+  /** One set, as its parts. Deliberately never blended into a single figure. */
+  bySet: () => request<SetRollupRow[]>('/api/v1/reports/by-set'),
+
+  /** One product, all-in, across everything it became. Never summed with byTier. */
+  lineage: (productId: string) =>
+    request<LineageRollup>(`/api/v1/reports/lineage/${productId}`),
+
   /** Not period-scoped: what is on the shelf today is not a function of a date range. */
   aging: () => request<AgingLot[]>('/api/v1/reports/aging'),
   attention: () => request<Attention>('/api/v1/reports/attention'),
