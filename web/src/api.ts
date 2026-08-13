@@ -409,6 +409,23 @@ export interface RipHit {
   cost?: string
 }
 
+export interface GradingSubmission {
+  id: string
+  product_id: string
+  product_name: string
+  quantity: number
+  bucket: Bucket
+  grading_company: string | null
+  sent_on: string
+  fees: string
+  status: 'out' | 'returned' | 'voided'
+  returned_on: string | null
+  grade: string | null
+  /** How long it has been away, or how long it took. The number the flag exists for. */
+  days_out: number
+  notes: string | null
+}
+
 export interface Transformation {
   id: string
   kind: 'crack' | 'rip' | 'grade'
@@ -724,6 +741,46 @@ export const api = {
   /** Sets worth offering for one game, best first. Scoped to a game on purpose. */
   sets: (params: { game: string; q?: string; limit?: number }) =>
     request<SetSuggestions>(`/api/v1/sets${query(params)}`),
+
+  /** Send cards to a grader. Nothing moves — the card is flagged where it sits. */
+  sendToGrading: (input: {
+    product_id: string
+    quantity?: number
+    bucket?: Bucket
+    grading_company?: string | null
+    sent_on?: string
+    fees?: string
+    notes?: string | null
+  }) =>
+    request<GradingSubmission>('/api/v1/grading', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  gradingSubmissions: (params: { product_id?: string; out_only?: boolean } = {}) =>
+    request<GradingSubmission[]>(`/api/v1/grading${query(params)}`),
+
+  /** It came back. The raw card is consumed and the graded one produced. */
+  returnFromGrading: (
+    id: string,
+    input: {
+      graded_product_id: string
+      grade?: string | null
+      returned_on?: string
+      extra_fees?: string
+      notes?: string | null
+    },
+  ) =>
+    request<GradingSubmission>(`/api/v1/grading/${id}/return`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  voidGradingSubmission: (id: string, reason: string) =>
+    request<GradingSubmission>(`/api/v1/grading/${id}/void`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 
   /** Open sealed cases into what was inside them. */
   crackCase: (input: {

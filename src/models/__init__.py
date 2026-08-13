@@ -5,6 +5,7 @@ All models must be imported in this file for `alembic revision --autogenerate` t
 
 from src.models.audit import AuditLog
 from src.models.card_set import CardSet
+from src.models.grading import GradingSubmission
 from src.models.ledger import CostAllocation, InventoryAdjustment, Purchase, Sale, StockMove
 from src.models.member import Member
 from src.models.money import MoneyAccount, MoneyMovement, MoneyPosting
@@ -18,6 +19,7 @@ __all__ = [
     "CardSet",
     "CostAllocation",
     "Game",
+    "GradingSubmission",
     "InventoryAdjustment",
     "Member",
     "MoneyAccount",

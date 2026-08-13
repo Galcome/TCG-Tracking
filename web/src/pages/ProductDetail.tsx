@@ -2,7 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { api, BUCKET_LABELS, BUCKETS, type Transaction } from '../api'
+import {
+  api,
+  BUCKET_LABELS,
+  BUCKETS,
+  type GradingSubmission,
+  type Transaction,
+} from '../api'
 import {
   AddPurchaseDialog,
   AdjustStockDialog,
@@ -15,12 +21,17 @@ import {
 import { CrackCaseDialog, VoidTransformationDialog } from '../components/crack-forms'
 import { RipDialog } from '../components/rip-forms'
 import {
+  ReturnFromGradingDialog,
+  SendToGradingDialog,
+} from '../components/grading-forms'
+import {
   ArrowLeft,
   ArrowLeftRight,
   Minus,
   Package,
   Pencil,
   Scissors,
+  Stamp,
   Plus,
   Receipt,
 } from 'lucide-react'
@@ -38,7 +49,75 @@ import {
 } from '../components/ui'
 import { humanise, money, percent, shortDate, signedMoney, toneFor } from '../format'
 
-type Dialog = 'purchase' | 'sale' | 'adjust' | 'edit' | 'move' | 'crack' | 'rip' | null
+type Dialog =
+  | 'purchase'
+  | 'sale'
+  | 'adjust'
+  | 'edit'
+  | 'move'
+  | 'crack'
+  | 'rip'
+  | 'grade'
+  | null
+
+/**
+ * What this card has away at a grader.
+ *
+ * The flag Joseph chose instead of an "Out" state, with the day count that was the
+ * condition of choosing it - a card quietly sitting at PSA for four months should be
+ * visible without anybody going looking. Tapping it is how the return gets recorded.
+ */
+function AtTheGrader({
+  productId,
+  onReturn,
+}: {
+  productId: string
+  onReturn: (submission: GradingSubmission) => void
+}) {
+  const found = useQuery({
+    queryKey: ['grading', productId],
+    queryFn: () => api.gradingSubmissions({ product_id: productId, out_only: true }),
+  })
+
+  const rows = found.data ?? []
+  if (rows.length === 0) return null
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+        At the grader
+      </h2>
+      <Card className="p-0">
+        <ul className="divide-y divide-(--color-edge)">
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+            >
+              <span>
+                {row.quantity}&times; at {row.grading_company ?? 'a grader'}
+                <span className="ml-2 text-xs text-(--color-faint)">
+                  sent {shortDate(row.sent_on)} &middot; {money(row.fees)} in fees
+                </span>
+              </span>
+              <span className="flex items-center gap-3">
+                {/* The number the whole flag exists for. */}
+                <span
+                  className={`text-xs tabular-nums ${
+                    row.days_out > 90 ? 'text-(--color-loss)' : 'text-(--color-faint)'
+                  }`}
+                >
+                  {row.days_out} days out
+                </span>
+                <RowAction onClick={() => onReturn(row)}>It came back</RowAction>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  )
+}
 
 /**
  * What this came out of, and what it became.
@@ -116,6 +195,7 @@ export function ProductDetail() {
   const [voiding, setVoiding] = useState<Transaction | null>(null)
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [undoing, setUndoing] = useState<string | null>(null)
+  const [returning, setReturning] = useState<GradingSubmission | null>(null)
 
   const product = useQuery({
     queryKey: ['product', productId],
@@ -204,6 +284,10 @@ export function ProductDetail() {
             <Button type="button" onClick={() => setDialog('rip')} variant="ghost">
               <Scissors size={15} />
               Rip open
+            </Button>
+            <Button type="button" onClick={() => setDialog('grade')} variant="ghost">
+              <Stamp size={15} />
+              Send to grading
             </Button>
             <Button type="button" onClick={() => setDialog('adjust')} variant="ghost">
               <Minus size={15} />
@@ -364,6 +448,8 @@ export function ProductDetail() {
         </Card>
       </section>
 
+      <AtTheGrader productId={item.id} onReturn={setReturning} />
+
       <Lineage productId={item.id} onUndo={setUndoing} />
 
       <section className="flex flex-wrap items-center gap-3 border-t border-(--color-edge) pt-5">
@@ -399,6 +485,17 @@ export function ProductDetail() {
       {dialog === 'move' && <MoveStockDialog product={item} onClose={() => setDialog(null)} />}
       {dialog === 'crack' && <CrackCaseDialog product={item} onClose={() => setDialog(null)} />}
       {dialog === 'rip' && <RipDialog product={item} onClose={() => setDialog(null)} />}
+      {dialog === 'grade' && (
+        <SendToGradingDialog product={item} onClose={() => setDialog(null)} />
+      )}
+      {returning && (
+        <ReturnFromGradingDialog
+          product={item}
+          submissionId={returning.id}
+          gradingCompany={returning.grading_company}
+          onClose={() => setReturning(null)}
+        />
+      )}
       {undoing && <VoidTransformationDialog id={undoing} onClose={() => setUndoing(null)} />}
       {voiding && (
         <VoidDialog kind={voiding.kind} id={voiding.id} onClose={() => setVoiding(null)} />
