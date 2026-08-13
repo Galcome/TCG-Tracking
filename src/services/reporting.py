@@ -29,6 +29,7 @@ from src.models.money import (
 )
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
+from src.services import vault
 from src.services.inventory import product_stats
 
 PERIOD_ALL = "all"
@@ -481,8 +482,19 @@ class AgingLot:
 
 
 def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
-    """Unsold stock, oldest money first. Undated lots sort last."""
+    """Unsold stock, oldest money first. Undated lots sort last.
+
+    The Vault is excluded. A Store box at 400 days is a problem and a Vault box at 400 days
+    is on plan - same number, opposite meaning - so averaging them describes neither.
+
+    Lots are not bucketed (buckets belong to transactions, and a move relocates stock
+    without touching the lot it came from), so the exclusion is applied per product against
+    its *newest* remaining lots first. That errs toward still showing the oldest money as
+    asleep, which is the safe direction: exempting the Vault must not make it the place
+    slow stock goes to disappear.
+    """
     reference = today or date.today()
+    vaulted = vault.vault_units(db)
     products = {
         row.id: row
         for row in db.execute(
@@ -493,21 +505,36 @@ def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
     }
 
     rows: list[AgingLot] = []
-    for lot in _remaining_lots(db):
+    # Newest first while the Vault allowance is spent, so the oldest lots survive it.
+    for lot in sorted(
+        _remaining_lots(db),
+        key=lambda row: (row.purchase_date is not None, row.purchase_date or date.min),
+        reverse=True,
+    ):
         product = products.get(lot.product_id)
         if product is None:  # pragma: no cover - a purchase always has its product
             continue
+
+        units = int(lot.remaining)
+        allowance = vaulted.get(lot.product_id, 0)
+        if allowance:
+            covered = min(allowance, units)
+            vaulted[lot.product_id] = allowance - covered
+            units -= covered
+            if units == 0:
+                continue
+
         rows.append(
             AgingLot(
                 purchase_id=lot.purchase_id,
                 product_id=lot.product_id,
                 product_name=product.name,
                 game_slug=product.game_slug,
-                units=int(lot.remaining),
+                units=units,
                 # Proportional, matching what the section has always claimed. Not the
                 # engine's largest-remainder split, which allocates against a consuming
                 # sale and has no meaning for units nobody has sold.
-                cost_cents=round(int(lot.landed_cents) * int(lot.remaining) / int(lot.bought)),
+                cost_cents=round(int(lot.landed_cents) * units / int(lot.bought)),
                 purchase_date=lot.purchase_date,
                 days_held=(
                     (reference - lot.purchase_date).days if lot.purchase_date is not None else None

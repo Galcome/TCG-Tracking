@@ -20,11 +20,11 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 6. The rip screen | **Shipped** - branch `feature/rip-screen` |
 | 7. Grading | **Shipped** - branch `feature/grading` |
 | 8. Reporting: tier, lineage, set rollup | **Shipped** - branch `feature/rollups` |
-| 9. Vault valuation and ageing exemption | Next |
-| 10. Photo to cards | |
+| 9. Vault valuation and ageing exemption | **Shipped** - branch `feature/vault` |
+| 10. Photo to cards | Next - the only step left |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-613 backend tests, 73 e2e, 100% coverage.
+630 backend tests, 75 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -261,6 +261,38 @@ deliberately rather than asleep, so ageing it would describe nothing.
 **Lineage and tier are never summed**, on screen or in the data. A case's lineage return
 *is* the aggregate of its descendants, so a combined total would count the same money twice.
 Both views say so where they are shown.
+
+### Step 9 - what shipped
+
+The worry that started this was misplaced, and saying so was worth more than the feature:
+ROI is computed on what **sold**, and a Vault item has not sold, so it was never dragging
+that number down. The distortion was only ever in two places, and both are now handled.
+
+**Ageing.** The Vault is out of the "money asleep" report entirely. A Store box at 400 days
+is a problem and a Vault box at 400 days is on plan - same number, opposite meaning.
+Lots are not bucketed (a move relocates stock without touching the lot it came from), so the
+exclusion is applied per product against its *newest* remaining lots first. That errs toward
+still showing the oldest money as asleep, which is the safe direction.
+
+**Capital.** "$8,000 is parked here" stays visible, and says outright that it is a
+constraint rather than a warning.
+
+**A different scoreboard.** Appreciation - value against cost, annualised past a year and
+deliberately not extrapolated below one. No days-to-sell column exists. That is exactly how
+the workbook's own Vault tab already works.
+
+**Valuations reuse `price_snapshots`** from step 6. Annual manual entry is the floor and
+needs nobody else's price feed. Anything never valued keeps saying "not valued" - reporting
+cost as worth would be inventing a number. Anything over a year stale shows its age.
+
+**The loophole is guarded.** Exempting the Vault would otherwise make it where slow stock
+goes to disappear, so a moved item shows "moved here after 180d in the Store". Nothing is
+blocked and nothing is nagged about; it is simply visible whether the Vault is a strategy
+or an excuse.
+
+The free daily price refresh is **not** wired in. TCGCSV's terms were to be verified before
+depending on it, and that has not happened - so the manual floor is what shipped, and the
+feed can layer on top later without changing anything here.
 
 ---
 
