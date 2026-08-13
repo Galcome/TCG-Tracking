@@ -284,3 +284,35 @@ curl -H "x-goog-api-key: $GEMINI_API_KEY" \
 
 The general rule: anything that depends on a third party still existing needs one real call
 against it, once, by hand. The suite covers our logic. It does not cover their inventory.
+
+## Firebase Hosting - A `/index.html` Header Rule Does Not Cover `/`
+
+`firebase.json` set `Cache-Control: no-cache` on `/index.html` and it worked - but nobody
+requests that path. A person opens `/`, and the app's own links are `/inventory`,
+`/money`, `/products/<id>`. Those are served the same file **through the SPA rewrite**, and
+header rules match the **request path**, not the file that ends up being served:
+
+```text
+/index.html   no-cache, must-revalidate    <- the rule everybody writes
+/             max-age=3600                 <- what a person actually gets
+/inventory    max-age=3600
+```
+
+The result: every deploy was invisible for up to an hour to anyone who had visited before.
+Three separate features were reported as "I don't see any changes" while being live and
+correct on the server, and each time the answer looked like a deploy problem.
+
+The fix is to put the cache rule on the **catch-all** `**` block. Ordering does the rest:
+`/assets/**` is listed first and keeps its immutable year, which is safe because Vite
+content-hashes those filenames - a new build produces a new name, so a stale one can never
+be served under the same URL.
+
+**Verify with the paths a person actually uses, never `/index.html`:**
+
+```bash
+curl -sI https://tcg-tracking.web.app/ | grep -i cache-control
+curl -sI https://tcg-tracking.web.app/inventory | grep -i cache-control
+```
+
+The general rule, and it is the same one as the retired Gemini model above: a config that
+is correct in the file can still be wrong in production. Check the thing the user touches.
