@@ -127,14 +127,20 @@ to check.
 
 **What has to be configured, once:**
 
-| Where | Name | Value |
-| --- | --- | --- |
-| Secret | `FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING` | Service-account JSON with Firebase Hosting access |
-| Variable | `VITE_API_URL` | The Railway API URL |
-| Variable | `VITE_FIREBASE_API_KEY` | Firebase web API key |
-| Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `tcg-tracking.firebaseapp.com` |
-| Variable | `VITE_FIREBASE_PROJECT_ID` | `tcg-tracking` |
-| Variable | `VITE_SENTRY_DSN` | Optional; blank disables Sentry |
+| Where | Name | Value | Status |
+| --- | --- | --- | --- |
+| Secret | `FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING` | Service-account JSON with Firebase Hosting access | Set |
+| Variable | `VITE_API_URL` | The Railway API URL | Set |
+| Variable | `VITE_FIREBASE_API_KEY` | Firebase web API key | Set |
+| Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `tcg-tracking.firebaseapp.com` | Set |
+| Variable | `VITE_FIREBASE_PROJECT_ID` | `tcg-tracking` | Set |
+| Variable | `VITE_SENTRY_DSN` | Optional; unset disables Sentry | Unset, deliberately |
+
+`VITE_SENTRY_DSN` is left **unset** rather than set to an empty string, because GitHub
+rejects a variable with an empty value (`422: missing required key: value`). An unset
+variable resolves to `""`, which is what the app wants when Sentry is off — so the
+required-values check below deliberately does not include it. The four it does check are
+the ones whose absence produces a bundle that builds fine and fails in the browser.
 
 The `VITE_*` values are repository **variables**, not secrets. Every one of them is
 compiled into the bundle and served to any browser that loads the site, so hiding them
