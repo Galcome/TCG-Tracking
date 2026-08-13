@@ -15,8 +15,8 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 1b. Store and Vault in the navigation | **Shipped** - branch `fix/store-vault-nav` |
 | 2. The money ledger | **Shipped** - branch `feature/money-ledger` |
 | 3. Store credit | **Shipped** - branch `feature/store-credit` |
-| 4. Sets, suggestions, seeded calendars | Next |
-| 5. Transformations: cases and cracking | |
+| 4. Sets, suggestions, seeded calendars | **Shipped** - branch `feature/sets` |
+| 5. Transformations: cases and cracking | Next |
 | 6. The rip screen | |
 | 7. Grading | |
 | 8. Reporting: tier, lineage, set rollup | |
@@ -24,7 +24,7 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-488 backend tests, 51 e2e, 100% coverage.
+515 backend tests, 59 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -113,6 +113,46 @@ Two things the real-browser pass caught that a green suite did not: account card
 ordered store-credit first, so a dozen shops buried the joint balance; and the "which shop?"
 field was shown when the typed name did *not* match an existing shop, so it vanished on the
 last keystroke of a name that did. Both fixed, the second with a regression test.
+
+### Step 4 - what shipped
+
+**A set is a record now**, unique per game and case-insensitively by name. Still created by
+typing a new one - nobody is blocked at 11pm because a set is missing - but typing "fabled"
+lands on the existing "Fabled" instead of making a second row that splits every rollup.
+
+- **Typing something close is questioned, never corrected.** "Did you mean Winterspell?"
+  appears under the field; tapping it fills it in, ignoring it does nothing.
+- **The calendar is seeded with release dates and reveals itself.** A set appears on its own
+  release day with nobody maintaining anything. `The Hobbit` lands 14 August, two days out -
+  a live test of the auto-reveal for free.
+- **Used sets lead, the calendar fills in behind.** That ordering is the whole reason the
+  calendar is safe to seed: when it goes stale nothing breaks, suggestions just fall back to
+  what the group actually buys. Calendar-only sets are marked `new`.
+- **Anything uncertain was left out** - Magic's TMNT crossover (two conflicting dates),
+  Lorcana's unnamed Q4 set, Yu-Gi-Oh's "Beyond the Brave", anything dated only to a month.
+  A missing set costs one typing session; a wrong one corrupts every set rollup.
+- **Four games added** so their sets had somewhere to go: Riftbound, Star Wars Unlimited,
+  Gundam, Dragon Ball. Sports stays for Panini and slabs, which have no calendar and fall
+  back to plain typing.
+- **A pre-order makes an unreleased set visible.** Once something uses a set it is real,
+  whatever its date says.
+
+`products.set_id` is the identity everything will group by; `products.set_name` stays as a
+denormalised copy, because `search_text` is a stored generated column and a generated column
+cannot join. It is written only by the resolver, from the set's own name.
+
+Two things this pass turned up. The set field was behind **Advanced** - a field nobody
+expands is a field nobody fills in, and the whole premise of this step is fast entry, so it
+is now a primary field. And the Game and Product type selects had no `aria-label`, so their
+accessible names included every option's text - "Box Set" made the type select match a
+search for "Set". Same bug class as the bucket selects earlier.
+
+**The e2e database now resets before each run.** It was never dropped, so the suite's own
+fixtures accumulated across every run and page loads slowly crept past the assertion
+timeout - the suite started failing a different test each time. A flaky suite is worse than
+no suite. Runtime went from 4.9 to 3.3 minutes. The underlying cause on the app side -
+`list_products` computing stats for every matching product before paging - is a separate
+task.
 
 ---
 
