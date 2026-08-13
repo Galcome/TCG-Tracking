@@ -1,9 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { api, BUCKET_LABELS, BUCKETS, type Bucket, type Product } from '../api'
-import { ArrowLeftRight, History, PackageSearch, Pencil, Plus, Receipt } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  PackageOpen,
+  PackageSearch,
+  Pencil,
+  Plus,
+  Receipt,
+} from 'lucide-react'
 
 import { PageHeader, type PageActions } from '../components/AppShell'
 import { EditItemDialog, MoveStockDialog } from '../components/forms'
@@ -276,7 +283,17 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     className="cursor-pointer transition-colors hover:bg-(--color-raised)"
                   >
                     <td className="px-4 py-3">
-                      <span className="font-medium text-(--color-text)">{product.name}</span>
+                      {/* The name is the way in. Everything a product can *do* - crack a
+                          case, rip a box, send it for grading - lives on its own page, and
+                          for a while the only route there was a button labelled "History",
+                          which nobody hunting for "open this box" would ever click. */}
+                      <Link
+                        to={`/products/${product.id}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="font-medium text-(--color-text) underline-offset-4 hover:text-(--color-accent) hover:underline"
+                      >
+                        {product.name}
+                      </Link>
                       {product.set_name && (
                         <span className="ml-2 text-xs text-(--color-faint)">
                           {product.set_name}
@@ -330,8 +347,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                           Edit
                         </RowAction>
                         <RowLink to={`/products/${product.id}`}>
-                          <History size={13} />
-                          History
+                          <PackageOpen size={13} />
+                          Open
                         </RowLink>
                       </span>
                     </td>
@@ -387,8 +404,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       Edit
                     </RowAction>
                     <RowLink to={`/products/${product.id}`}>
-                      <History size={13} />
-                      History
+                      <PackageOpen size={13} />
+                      Open
                     </RowLink>
                   </div>
                 </Card>
@@ -400,7 +417,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
             <FifoNote />
             {products.data && (
               <p className="text-xs text-(--color-muted)">
-                Click a row to edit it · {items.length} shown
+                Open a product to crack, rip or grade it · {items.length} shown
               </p>
             )}
           </div>

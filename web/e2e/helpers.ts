@@ -66,9 +66,12 @@ export function rx(name: string): RegExp {
 /**
  * Open a product's own page, where every figure belongs to it alone.
  *
- * Waits for the searched-for row rather than clicking the first History link: search is
- * debounced by 250ms, so clicking straight away opens whichever product happened to be
- * listed first.
+ * Waits for the searched-for row rather than clicking the first link: search is debounced
+ * by 250ms, so clicking straight away opens whichever product happened to be listed first.
+ *
+ * Clicks the product's *name*, which is how a person gets here. The row also carries an
+ * explicit "Open" action; both lead to the same page, and the name is the one somebody
+ * reaches for first.
  */
 export async function openProduct(page: Page, name: string) {
   await gotoInventory(page)
@@ -76,7 +79,7 @@ export async function openProduct(page: Page, name: string) {
 
   const row = page.getByRole('row', { name: rx(name) })
   await expect(row).toBeVisible({ timeout: 10_000 })
-  await row.getByRole('link', { name: 'History' }).click()
+  await row.getByRole('link', { name }).click()
 
   await expect(page.getByRole('heading', { name })).toBeVisible({ timeout: 10_000 })
 }
