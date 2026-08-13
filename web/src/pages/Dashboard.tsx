@@ -186,7 +186,12 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
                 <span className="w-10 shrink-0 text-right tabular-nums text-(--color-muted)">
                   {sale.quantity}x
                 </span>
-                <span className="w-20 shrink-0 text-right tabular-nums">
+                {/* Hidden on a phone, like the channel chip above it. Date, name,
+                    quantity and profit already need 360px of fixed width in a 343px card,
+                    and the overflow was silent - the page just scrolled sideways by a
+                    couple of pixels. Profit is the number worth the space; the full
+                    ledger is one tap away for the rest. */}
+                <span className="hidden w-20 shrink-0 text-right tabular-nums sm:block">
                   {money(sale.net_proceeds)}
                 </span>
                 <span
