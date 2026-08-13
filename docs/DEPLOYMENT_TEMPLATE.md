@@ -129,7 +129,7 @@ to check.
 
 | Where | Name | Value | Status |
 | --- | --- | --- | --- |
-| Secret | `FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING` | Service-account JSON with Firebase Hosting access | **Not set** |
+| Secret | `FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING` | Service-account JSON with Firebase Hosting access | Set |
 | Variable | `VITE_API_URL` | The Railway API URL | Set |
 | Variable | `VITE_FIREBASE_API_KEY` | Firebase web API key | Set |
 | Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `tcg-tracking.firebaseapp.com` | Set |
