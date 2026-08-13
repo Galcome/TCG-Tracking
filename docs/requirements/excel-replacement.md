@@ -16,15 +16,15 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 2. The money ledger | **Shipped** - branch `feature/money-ledger` |
 | 3. Store credit | **Shipped** - branch `feature/store-credit` |
 | 4. Sets, suggestions, seeded calendars | **Shipped** - branch `feature/sets` |
-| 5. Transformations: cases and cracking | Next |
-| 6. The rip screen | |
+| 5. Transformations: cases and cracking | **Shipped** - branch `feature/transformations` |
+| 6. The rip screen | Next |
 | 7. Grading | |
 | 8. Reporting: tier, lineage, set rollup | |
 | 9. Vault valuation and ageing exemption | |
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-515 backend tests, 59 e2e, 100% coverage.
+546 backend tests, 65 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -153,6 +153,39 @@ timeout - the suite started failing a different test each time. A flaky suite is
 no suite. Runtime went from 4.9 to 3.3 minutes. The underlying cause on the app side -
 `list_products` computing stats for every matching product before paging - is a separate
 task.
+
+### Step 5 - what shipped
+
+**One primitive, built once.** Case into boxes, box into cards, raw card into a graded card
+are the same operation, so `transformations` is one table with a `kind`. Steps 6 and 7 are
+that same table with a different cost split.
+
+The mechanics are ordinary ledger rows on purpose: consuming the source is a negative
+adjustment, producing each output is a purchase. Nothing invents a second way to hold stock,
+so FIFO, ageing and every per-product figure keep working without knowing transformations
+exist.
+
+- **The boxes inherit the case's purchase date**, taken from the lot the source came out of.
+  Cracking a case on its first birthday produces six year-old boxes, and the ageing report
+  proves it - that is the invariant UC2's flip-versus-hold comparison rests on.
+- **Cost is conserved, not doubled.** `purchases.is_derived` marks cost carried across
+  rather than money spent, and the money-out figures skip those rows. A $900 case becomes
+  $900 of boxes and the group has still spent $900, not $1,800.
+- **A cracked case is not a write-off.** New `transformed` adjustment reason and a
+  `cost_transformed` figure beside `cost_written_off`. The money moved; it did not evaporate.
+- **Largest-remainder split**, so $100 over six boxes sums back to exactly $100.
+- **Unknown stays unknown.** A case whose cost nobody knows produces boxes whose cost nobody
+  knows. Spreading a zero would claim they were free.
+- **Parentage is recorded**, which is the only reason step 8's lineage rollup can exist.
+- **Undo puts the case back** and takes the boxes away, leaving the row as the explanation.
+
+On screen: **Crack open** on the product page. Case size is suggested from game *and
+language* - 20 boxes for a Japanese Pokémon case against six for English - always shown,
+always editable, never silently applied. Yu-Gi-Oh is deliberately absent from the table
+because nobody confirmed it. The boxes can be split across buckets as they come out, and the
+box product is created inline if it does not exist yet - being unable to record what you
+just opened because somebody has not set up a product first is exactly the friction that
+stops the app being used.
 
 ---
 

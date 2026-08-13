@@ -143,6 +143,9 @@ class ProductStatsRead(BaseModel):
     remaining_cost: MoneyOut = Field(validation_alias="remaining_cost_cents")
     cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
     cost_written_off: MoneyOut = Field(validation_alias="cost_written_off_cents")
+    #: Cost that left this product by becoming another. Not a loss - the thing it
+    #: turned into is carrying it.
+    cost_transformed: MoneyOut = Field(validation_alias="cost_transformed_cents")
     gross_revenue: MoneyOut = Field(validation_alias="gross_revenue_cents")
     net_proceeds: MoneyOut = Field(validation_alias="net_proceeds_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
@@ -166,6 +169,7 @@ EMPTY_STATS = {
     "remaining_cost": 0,
     "cost_of_sales": 0,
     "cost_written_off": 0,
+    "cost_transformed": 0,
     "gross_revenue": 0,
     "net_proceeds": 0,
     "realized_profit": 0,

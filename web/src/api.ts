@@ -139,6 +139,8 @@ export interface Product {
   id: string
   /** The set record behind `set_name`. */
   set_id?: string | null
+  /** Japanese cases hold 20 boxes where English hold 6, so this drives the suggestion. */
+  language?: string | null
   name: string
   game: Taxonomy
   product_type: Taxonomy
@@ -358,6 +360,59 @@ export interface SetSuggestions {
   items: CardSet[]
   /** The set this was probably meant to be. A question, never a correction. */
   did_you_mean: string | null
+}
+
+/**
+ * How many boxes are in a sealed case.
+ *
+ * A suggestion, always shown and always editable - never silently applied. Size varies by
+ * *language* and by product line, not by game alone: a Japanese Pokémon case is 20 boxes
+ * against six for English, and One Piece Premium Booster cases are quoted at both 10 and
+ * 12. A table keyed on the game would be wrong the first time somebody buys Japanese.
+ *
+ * Yu-Gi-Oh is deliberately absent: it was not confirmed, and a wrong default that nobody
+ * checks is worse than no default at all.
+ */
+export const CASE_SIZES: { game: string; japanese?: boolean; boxes: number }[] = [
+  { game: 'pokemon', boxes: 6 },
+  { game: 'pokemon', japanese: true, boxes: 20 },
+  { game: 'lorcana', boxes: 4 },
+  { game: 'magic-the-gathering', boxes: 6 },
+  { game: 'one-piece', boxes: 6 },
+  { game: 'one-piece', japanese: true, boxes: 12 },
+]
+
+/** The suggested case size, or undefined when nobody has confirmed one. */
+export function caseSize(gameSlug: string, language?: string | null): number | undefined {
+  const japanese = (language ?? '').trim().toLowerCase().startsWith('jap')
+  return CASE_SIZES.find((row) => row.game === gameSlug && Boolean(row.japanese) === japanese)
+    ?.boxes
+}
+
+export interface TransformationOutput {
+  product_id: string
+  product_name: string
+  quantity: number
+  bucket: Bucket
+  /** This row's share of what the source cost. null when the source's cost is unknown. */
+  cost: string | null
+}
+
+export interface Transformation {
+  id: string
+  kind: 'crack' | 'rip' | 'grade'
+  source_product_id: string
+  source_product_name: string
+  source_quantity: number
+  source_bucket: Bucket
+  occurred_on: string | null
+  /** What the outputs are dated from — the lot the source came out of, not the day it
+   *  was opened. This is what stops cracking from resetting the ageing clock. */
+  inherited_purchase_date: string | null
+  source_cost: string | null
+  outputs: TransformationOutput[]
+  notes: string | null
+  status: string
 }
 
 export type Period = 'all' | 'ytd' | 'mtd' | '30d'
@@ -656,6 +711,30 @@ export const api = {
   /** Sets worth offering for one game, best first. Scoped to a game on purpose. */
   sets: (params: { game: string; q?: string; limit?: number }) =>
     request<SetSuggestions>(`/api/v1/sets${query(params)}`),
+
+  /** Open sealed cases into what was inside them. */
+  crackCase: (input: {
+    product_id: string
+    quantity: number
+    from_bucket?: Bucket
+    outputs: { product_id: string; quantity: number; bucket?: Bucket }[]
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Transformation>('/api/v1/transformations/crack', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** What a product was opened into, and what it came out of. */
+  transformations: (params: { product_id?: string } = {}) =>
+    request<Transformation[]>(`/api/v1/transformations${query(params)}`),
+
+  voidTransformation: (id: string, reason: string) =>
+    request<Transformation>(`/api/v1/transformations/${id}/void`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 
   accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
 

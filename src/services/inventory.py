@@ -28,6 +28,10 @@ from src.models.ledger import (
     StockMove,
 )
 
+#: Cost leaving a product because it became another one. Part of the ledger model's
+#: reason list; named here so the aggregate can tell it from a real write-off.
+REASON_TRANSFORMED = "transformed"
+
 
 @dataclass
 class ProductStats:
@@ -42,6 +46,10 @@ class ProductStats:
     remaining_cost_cents: int = 0  #: cost basis still sitting in stock
     cost_of_sales_cents: int = 0  #: cost basis of units actually sold
     cost_written_off_cents: int = 0  #: cost removed by negative adjustments
+    #: Cost that left this product by becoming another one. A cracked case did not
+    #: lose its $900; the boxes have it. Reported apart from real write-offs, and
+    #: subtracted from remaining cost just the same.
+    cost_transformed_cents: int = 0
 
     gross_revenue_cents: int = 0
     net_proceeds_cents: int = 0
@@ -214,7 +222,24 @@ def product_stats(
         select(
             InventoryAdjustment.product_id,
             func.sum(InventoryAdjustment.quantity_delta),
-            func.sum(func.coalesce(InventoryAdjustment.cost_removed_cents, 0)),
+            func.sum(
+                case(
+                    (
+                        InventoryAdjustment.reason != REASON_TRANSFORMED,
+                        func.coalesce(InventoryAdjustment.cost_removed_cents, 0),
+                    ),
+                    else_=0,
+                )
+            ),
+            func.sum(
+                case(
+                    (
+                        InventoryAdjustment.reason == REASON_TRANSFORMED,
+                        func.coalesce(InventoryAdjustment.cost_removed_cents, 0),
+                    ),
+                    else_=0,
+                )
+            ),
             func.sum(
                 case(
                     (
@@ -228,10 +253,11 @@ def product_stats(
         product_ids,
         InventoryAdjustment,
     )
-    for product_id, delta, written_off, added_cost in db.execute(adjustments):
+    for product_id, delta, written_off, transformed, added_cost in db.execute(adjustments):
         entry = row(product_id)
         entry.quantity_adjusted = int(delta or 0)
         entry.cost_written_off_cents = int(written_off or 0)
+        entry.cost_transformed_cents = int(transformed or 0)
         # Stock counted in via an adjustment is invested capital too, when its cost is known.
         entry.total_invested_cents += int(added_cost or 0)
 
@@ -273,7 +299,10 @@ def product_stats(
             entry.quantity_purchased + entry.quantity_adjusted - entry.quantity_sold
         )
         entry.remaining_cost_cents = max(
-            entry.total_invested_cents - entry.cost_of_sales_cents - entry.cost_written_off_cents,
+            entry.total_invested_cents
+            - entry.cost_of_sales_cents
+            - entry.cost_written_off_cents
+            - entry.cost_transformed_cents,
             0,
         )
 

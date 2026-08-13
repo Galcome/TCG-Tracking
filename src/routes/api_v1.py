@@ -14,6 +14,7 @@ from src.routes.products import router as products_router
 from src.routes.reports import router as reports_router
 from src.routes.sets import router as sets_router
 from src.routes.taxonomy import games_router, product_types_router
+from src.routes.transformations import router as transformations_router
 
 router = APIRouter(prefix="/api/v1")
 
@@ -25,3 +26,6 @@ router.include_router(product_types_router, prefix="/product-types", tags=["taxo
 router.include_router(ledger_router, tags=["ledger"])
 router.include_router(money_router, prefix="/money", tags=["money"])
 router.include_router(reports_router, tags=["reports"])
+router.include_router(
+    transformations_router, prefix="/transformations", tags=["transformations"]
+)
