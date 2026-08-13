@@ -38,8 +38,23 @@ export function SendToGradingDialog({
   const [sentOn, setSentOn] = useState(todayIso())
   const [fees, setFees] = useState('')
   const [notes, setNotes] = useState('')
+  const [rawValue, setRawValue] = useState('')
 
-  const run = useLedgerMutation(api.sendToGrading, onClose)
+  // Only knowable *now*. Once the card is at PSA the raw comp is gone, and no later screen
+  // can recover it - so a card graded without this can never be measured retrospectively.
+  // Optional and never suggested: the app does not invent values.
+  const run = useLedgerMutation(async (input: Parameters<typeof api.sendToGrading>[0]) => {
+    const submission = await api.sendToGrading(input)
+    if (rawValue.trim()) {
+      await api.recordValuation({
+        product_id: product.id,
+        value: rawValue,
+        captured_on: sentOn,
+        notes: 'Raw, before grading',
+      })
+    }
+    return submission
+  }, onClose)
 
   return (
     <Dialog
@@ -123,6 +138,21 @@ export function SendToGradingDialog({
         />
       </Field>
 
+      {/* The other half of "was grading worth it?". Cost basis cannot answer it: for a card
+          pulled from a box, cost is a share of that box and says nothing about what the
+          card was worth raw. */}
+      <Field
+        label="What is it worth raw?"
+        hint="Optional, and only answerable today — once it is at the grader this is gone."
+      >
+        <input
+          {...MONEY_INPUT}
+          value={rawValue}
+          onChange={(e) => setRawValue(e.target.value)}
+          className={FIELD_CLASS}
+        />
+      </Field>
+
       {/* Said plainly, because "it left the house but it is still in Inventory" is the
           sort of thing that reads as a bug when nobody explains it. */}
       <p className="rounded-lg border border-(--color-edge) bg-(--color-ink)/50 px-3 py-2 text-xs text-(--color-muted)">
@@ -186,6 +216,7 @@ export function ReturnFromGradingDialog({
   const [returnedOn, setReturnedOn] = useState(todayIso())
   const [extraFees, setExtraFees] = useState('')
   const [notes, setNotes] = useState('')
+  const [gradedValue, setGradedValue] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   // Pre-filled and editable, rebuilt as the grade is typed until somebody overrides it.
@@ -193,14 +224,32 @@ export function ReturnFromGradingDialog({
   const finalName = name || suggested
 
   const run = useLedgerMutation(
-    (gradedProductId: string) =>
-      api.returnFromGrading(submissionId, {
+    async (gradedProductId: string) => {
+      const returned = await api.returnFromGrading(submissionId, {
         graded_product_id: gradedProductId,
         grade: grade.trim() || null,
         returned_on: returnedOn,
         extra_fees: extraFees || undefined,
         notes: notes.trim() || null,
-      }),
+      })
+
+      // Recorded last, and never allowed to undo the return. The transformation is the
+      // fact; the estimate is a note about it, and losing a note must not lose a fact.
+      if (gradedValue.trim()) {
+        try {
+          await api.recordValuation({
+            product_id: gradedProductId,
+            value: gradedValue,
+            captured_on: returnedOn,
+          })
+        } catch {
+          setError(
+            'Recorded. The value estimate did not save — add it from the Vault.',
+          )
+        }
+      }
+      return returned
+    },
     onClose,
   )
 
@@ -259,6 +308,22 @@ export function ReturnFromGradingDialog({
         <input
           value={finalName}
           onChange={(e) => setName(e.target.value)}
+          className={FIELD_CLASS}
+        />
+      </Field>
+
+      {/* A PSA 10 landing is the biggest value event in the whole chain, and it used to
+          pass with nothing recorded: the card's cost was tracked to the cent while what
+          the grade actually did to it went unwritten. Dated to the return, not to whenever
+          somebody got round to typing it. */}
+      <Field
+        label="What is it worth now?"
+        hint="Optional. An estimate kept with its date — it never becomes cost or profit."
+      >
+        <input
+          {...MONEY_INPUT}
+          value={gradedValue}
+          onChange={(e) => setGradedValue(e.target.value)}
           className={FIELD_CLASS}
         />
       </Field>
