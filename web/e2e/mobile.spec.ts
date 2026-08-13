@@ -83,3 +83,24 @@ test('an empty shelf is not reported as an empty catalogue', async ({ page }) =>
   const copy = page.locator('body')
   await expect(copy).not.toContainText('No products yet', { timeout: 10_000 })
 })
+
+// Pixel 5 is 393px. The overflow only showed at 375, so this one pins the narrower
+// viewport rather than trusting the file's device.
+test.describe('at 375px', () => {
+  test.use({ viewport: { width: 375, height: 812 } })
+
+  test('no screen scrolls sideways', async ({ page }) => {
+    // Two pixels of sideways scroll is not a crisis, but it is invisible in a
+    // screenshot and impossible to unsee once you feel it. The Dashboard did it: the
+    // recent-sales row needed 360px of fixed columns inside a 343px card.
+    for (const path of ['/', '/inventory', '/sales', '/money', '/reports']) {
+      await page.goto(path)
+      await page.waitForTimeout(600)
+
+      const sideways = await page.evaluate(
+        () => document.body.scrollWidth > window.innerWidth + 1,
+      )
+      expect(sideways, `${path} scrolls sideways`).toBe(false)
+    }
+  })
+})
