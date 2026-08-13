@@ -65,7 +65,9 @@ test('a sale is booked against the bucket it actually came from', async ({ page 
   const dialog = page.locator('form')
   await dialog.getByLabel('Total received').fill('300.00')
   // Defaults to where the stock is, rather than silently saying Inventory.
-  await expect(dialog.getByRole('button', { name: /^Store/ })).toHaveClass(/color-accent/)
+  // The bucket chip reads "Store (2)"; anchoring on the count keeps this off the
+  // "Store credit…" destination chip, which also starts with the word Store.
+  await expect(dialog.getByRole('button', { name: /^Store \(/ })).toHaveClass(/color-accent/)
   await dialog.getByRole('button', { name: 'Record sale' }).click()
   await expect(dialog).toBeHidden()
 

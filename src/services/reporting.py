@@ -20,6 +20,13 @@ from sqlalchemy.orm import Session
 
 from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.member import Member
+from src.models.money import (
+    ACCOUNT_STORE_CREDIT,
+    MOVEMENT_PROCEEDS,
+    MoneyAccount,
+    MoneyMovement,
+    MoneyPosting,
+)
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.services.inventory import product_stats
@@ -71,6 +78,16 @@ class Dashboard:
     #: ever spent from one month's takings and call the result a balance.
     net_proceeds_cents: int = 0
     fees_paid_cents: int = 0
+    #: The slice of `net_proceeds_cents` that arrived as store credit rather than money.
+    #: Real value, and not spendable anywhere but that shop, so it is reported on its own
+    #: line and taken out of the cash balance. Folding restricted credit into a cash
+    #: figure is the same class of lie as valuing unpriced stock at zero.
+    store_credit_cents: int = 0
+
+    @property
+    def cash_received_cents(self) -> int:
+        """Of everything sales brought in, the part that was actually money."""
+        return self.net_proceeds_cents - self.store_credit_cents
 
     @property
     def cash_balance_cents(self) -> int:
@@ -78,8 +95,11 @@ class Dashboard:
 
         Negative while the store is growing, because the difference is sitting on the
         shelf. That is stock, not a loss - see `inventory_at_cost_cents`.
+
+        Store credit is excluded: it is value received, but it cannot pay for anything
+        outside the shop that issued it.
         """
-        return self.net_proceeds_cents - self.total_invested_cents
+        return self.cash_received_cents - self.total_invested_cents
 
     @property
     def roi(self) -> float | None:
@@ -221,6 +241,24 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     ).one()
     result.net_proceeds_cents = int(lifetime_net)
     result.fees_paid_cents = int(lifetime_gross) - int(lifetime_net)
+
+    # How much of that arrived as store credit. Taken from the money ledger rather than
+    # from a flag on the sale, because proceeds can be split - half cash, half credit - and
+    # the legs are the only place that is recorded.
+    result.store_credit_cents = int(
+        db.scalar(
+            select(func.coalesce(func.sum(MoneyPosting.delta_cents), 0))
+            .select_from(MoneyPosting)
+            .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+            .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+            .where(
+                MoneyMovement.status == STATUS_ACTIVE,
+                MoneyMovement.kind == MOVEMENT_PROCEEDS,
+                MoneyAccount.kind == ACCOUNT_STORE_CREDIT,
+            )
+        )
+        or 0
+    )
 
     # Purchases made during the period - deliberately distinct from cost of sales.
     purchases = select(func.coalesce(func.sum(_LANDED), 0)).where(Purchase.status == STATUS_ACTIVE)

@@ -21,7 +21,7 @@ import {
   type Transaction,
 } from '../api'
 import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
-import { Advanced, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
+import { Advanced, Chip, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
 
 export function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
   const queryClient = useQueryClient()
@@ -359,6 +359,7 @@ export function RecordSaleDialog({
   const [notes, setNotes] = useState('')
   const [bucket, setBucket] = useState<Bucket | null>(null)
   const [paidInto, setPaidInto] = useState('')
+  const [creditStore, setCreditStore] = useState<string | null>(null)
   const [allowOversell, setAllowOversell] = useState(false)
 
   const { accounts, mine } = useMyAccount()
@@ -431,7 +432,14 @@ export function RecordSaleDialog({
           sold_by_member_id: soldBy || null,
           marketplace: marketplace || null,
           bucket: soldFrom,
-          proceeds_account_id: proceedsTo || null,
+          // Exactly one destination. A shop name creates that shop's credit pot; anything
+          // else is an account that already exists.
+          proceeds:
+            creditStore !== null
+              ? [{ store: creditStore }]
+              : proceedsTo
+                ? [{ account_id: proceedsTo }]
+                : [],
           notes: notes.trim() || null,
           allow_oversell: allowOversell,
         })
@@ -508,12 +516,20 @@ export function RecordSaleDialog({
         onPickKnown={suggestFees}
       />
 
-      <AccountField
-        label="Money went to"
-        value={proceedsTo}
-        onChange={setPaidInto}
+      <ProceedsField
         accounts={accounts}
-        hint="Holding it yourself lowers what the group owes you. Move it later if you want."
+        accountId={creditStore === null ? proceedsTo : ''}
+        store={creditStore}
+        onPickAccount={(id) => {
+          setCreditStore(null)
+          setPaidInto(id)
+        }}
+        onPickStore={(name) => {
+          setCreditStore(name)
+          // The shop is the channel too: selling for credit means selling *to* that shop,
+          // so the name is typed once. Anything already chosen wins.
+          if (name && !marketplace) setMarketplace(name)
+        }}
       />
 
       <div className="grid grid-cols-2 gap-4">
@@ -767,11 +783,16 @@ function AccountField({
   accounts: Account[]
   hint?: string
 }) {
+  // Store credit with nothing left in it cannot pay for anything, so it is not offered.
+  const spendable = accounts.filter(
+    (account) => account.kind !== 'store_credit' || Number(account.balance) !== 0,
+  )
+
   return (
     <div>
       <span className="text-sm font-medium text-(--color-muted)">{label}</span>
       <div className="mt-1.5 flex flex-wrap gap-2">
-        {accounts.map((account) => (
+        {spendable.map((account) => (
           <button
             key={account.id}
             type="button"
@@ -797,6 +818,106 @@ function useMyAccount(): { accounts: Account[]; mine: Account | undefined } {
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const items = accounts.data?.items ?? []
   return { accounts: items, mine: items.find((account) => account.member_id === me.data?.id) }
+}
+
+
+/**
+ * Where a sale's money went: an account, or a shop that paid in credit.
+ *
+ * Store credit is real value received - it counts toward realized profit - and it is not
+ * money, so it can never be added into a cash figure. Making it a destination alongside
+ * the cash accounts is what keeps that distinction in one place: pick the shop and the
+ * whole system knows this sale produced no cash.
+ *
+ * Shops behave like marketplaces: free text, with everywhere already used offered as a
+ * chip. No managed list, and nobody blocked at 11pm because a shop is missing.
+ */
+function ProceedsField({
+  accounts,
+  accountId,
+  store,
+  onPickAccount,
+  onPickStore,
+}: {
+  accounts: Account[]
+  accountId: string
+  /** null when the money went to an account rather than a shop. */
+  store: string | null
+  onPickAccount: (accountId: string) => void
+  onPickStore: (store: string) => void
+}) {
+  // Held rather than derived from whether the typed name matches a shop. Derived, the
+  // input vanished mid-word the moment you finished typing the name of a shop that
+  // already existed - which is exactly when you were most sure you were doing it right.
+  const [typing, setTyping] = useState(false)
+
+  const pots = accounts.filter((account) => account.kind !== 'store_credit')
+  // Shops with credit left, biggest first. A shop that has been spent out is not a
+  // destination worth a tap, and it is still reachable by typing its name - which is how
+  // it got here in the first place.
+  const shops = accounts
+    .filter((account) => account.kind === 'store_credit' && Number(account.balance) !== 0)
+    .sort((a, b) => Number(b.balance) - Number(a.balance))
+
+  return (
+    <div>
+      <span className="text-sm font-medium text-(--color-muted)">Money went to</span>
+      {/* Scrolls rather than caps. A group that has dealt with fifteen shops still has
+          every one of them one tap away, and the fields below stay on screen either way -
+          hiding destinations would mean retyping a name the app already knows. */}
+      <div className="mt-1.5 flex max-h-[7.5rem] flex-wrap gap-2 overflow-y-auto">
+        {pots.map((account) => (
+          <Chip
+            key={account.id}
+            active={store === null && accountId === account.id}
+            onClick={() => {
+              setTyping(false)
+              onPickAccount(account.id)
+            }}
+          >
+            {account.name}
+          </Chip>
+        ))}
+        {shops.map((shop) => (
+          <Chip
+            key={shop.id}
+            active={!typing && store === shop.name}
+            onClick={() => {
+              setTyping(false)
+              onPickStore(shop.name)
+            }}
+          >
+            {shop.name}
+          </Chip>
+        ))}
+        <Chip
+          active={typing}
+          onClick={() => {
+            setTyping(true)
+            onPickStore('')
+          }}
+        >
+          Store credit…
+        </Chip>
+      </div>
+
+      {typing && (
+        <input
+          autoFocus
+          value={store ?? ''}
+          onChange={(e) => onPickStore(e.target.value)}
+          placeholder="Which shop?"
+          className={`${FIELD_CLASS} mt-2`}
+        />
+      )}
+
+      <span className="mt-1 block text-xs text-(--color-faint)">
+        {store !== null
+          ? 'Credit counts as profit and never as cash. It is spendable only at that shop.'
+          : 'Holding it yourself lowers what the group owes you. Move it later if you want.'}
+      </span>
+    </div>
+  )
 }
 
 /** The bucket holding the most stock - the one a sale most likely came out of. */

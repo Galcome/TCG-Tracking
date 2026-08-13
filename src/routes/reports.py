@@ -36,9 +36,14 @@ class DashboardRead(BaseModel):
     undated_sales: int
     products_with_negative_stock: int
 
-    #: Lifetime cash. These three ignore `period` - see the note on the dataclass.
+    #: Lifetime cash. These ignore `period` - see the note on the dataclass.
     net_proceeds: MoneyOut = Field(validation_alias="net_proceeds_cents")
     fees_paid: MoneyOut = Field(validation_alias="fees_paid_cents")
+    #: The part of `net_proceeds` that arrived as store credit rather than money. Real
+    #: value, spendable only at the shop that issued it, so it is reported on its own line
+    #: and left out of `cash_received` and `cash_balance`.
+    store_credit: MoneyOut = Field(validation_alias="store_credit_cents")
+    cash_received: MoneyOut = Field(validation_alias="cash_received_cents")
     #: Negative means money is on the shelf rather than in the bank, not that it was lost.
     cash_balance: MoneyOut = Field(validation_alias="cash_balance_cents")
 

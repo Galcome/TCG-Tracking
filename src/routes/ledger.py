@@ -436,9 +436,10 @@ def create_sale(
     money_service.sync_proceeds(
         db,
         sale,
-        account_id=resolve_proceeds(
+        proceeds=resolve_proceeds(
             db,
-            account_id=payload.proceeds_account_id,
+            legs=payload.proceeds,
+            net_proceeds=sale.net_proceeds_cents,
             default_member_id=sale.sold_by_member_id or member.id,
         ),
         member_id=member.id,
@@ -465,7 +466,7 @@ def update_sale(
     sale = _require_active(db, Sale, sale_id, "Sale")
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
-    changes.pop("proceeds_account_id", None)
+    changes.pop("proceeds", None)
 
     if "quantity" in changes:
         _guard_oversell(
@@ -480,13 +481,14 @@ def update_sale(
     money_service.sync_proceeds(
         db,
         sale,
-        account_id=(
+        proceeds=(
             resolve_proceeds(
                 db,
-                account_id=payload.proceeds_account_id,
+                legs=payload.proceeds,
+                net_proceeds=sale.net_proceeds_cents,
                 default_member_id=sale.sold_by_member_id or member.id,
             )
-            if "proceeds_account_id" in payload.model_fields_set
+            if "proceeds" in payload.model_fields_set
             else None
         ),
         member_id=member.id,

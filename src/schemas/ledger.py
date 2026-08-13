@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.models.ledger import ADJUSTMENT_REASONS, BUCKET_INVENTORY, BUCKETS
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
-from src.schemas.money_ledger import FundingLeg
+from src.schemas.money_ledger import FundingLeg, ProceedsLeg
 from src.schemas.taxonomy import TaxonomyRead
 
 MAX_QUANTITY = 1_000_000
@@ -133,7 +133,8 @@ class SaleCreate(BaseModel):
     notes: str | None = None
     #: Where the money landed. Omitted, it follows the seller, because that is where an
     #: eBay payout actually goes. Moving it to the joint account is a separate, later act.
-    proceeds_account_id: uuid.UUID | None = None
+    #: A leg naming a `store` is store credit: value received, and no cash anywhere.
+    proceeds: list[ProceedsLeg] | None = None
     #: Deliberate override for correcting history. Without it, overselling is a 409.
     allow_oversell: bool = False
 
@@ -155,8 +156,8 @@ class SaleUpdate(BaseModel):
     notes: str | None = None
     reason: str | None = Field(default=None, max_length=500)
     #: Sent, this moves where the money landed. Left out, an existing proceeds record
-    #: follows the sale's new net amount.
-    proceeds_account_id: uuid.UUID | None = None
+    #: follows the sale's new net amount, keeping any split in proportion.
+    proceeds: list[ProceedsLeg] | None = None
 
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> "SaleUpdate":

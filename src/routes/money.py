@@ -12,13 +12,16 @@ approval step; the audit trail is what makes a mistake recoverable.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
 from src.models.ledger import STATUS_ACTIVE, Purchase, Sale
 from src.models.member import Member
 from src.models.money import (
+    ACCOUNT_JOINT,
+    ACCOUNT_MEMBER,
+    ACCOUNT_STORE_CREDIT,
     MOVEMENT_ADJUSTMENT,
     MOVEMENT_KINDS,
     MOVEMENT_TRANSFER,
@@ -36,6 +39,7 @@ from src.schemas.money_ledger import (
     MovementList,
     MovementRead,
     PostingRead,
+    ProceedsLeg,
     TransferCreate,
 )
 from src.services import ledger, money
@@ -117,18 +121,66 @@ def resolve_funding(
 
 
 def resolve_proceeds(
-    db: Session, *, account_id: uuid.UUID | None, default_member_id: uuid.UUID
-) -> uuid.UUID:
-    """Where a sale's money landed. Defaults to the seller, because that is where it went.
+    db: Session,
+    *,
+    legs: list[ProceedsLeg] | None,
+    net_proceeds: int,
+    default_member_id: uuid.UUID,
+) -> list[tuple[uuid.UUID, int]]:
+    """Where a sale's money went, as (account, amount) pairs.
 
-    The eBay payout arrives in Patrick's account, not a shared one. Making the form ask at
-    entry time would cost the ten-second sale for a decision that is reversible with a
-    transfer later.
+    Omitted entirely, it goes to the seller, because that is where it went: the eBay payout
+    arrives in Patrick's account, not a shared one. Making the form ask every time would
+    cost the ten-second sale for a decision a later transfer undoes.
+
+    A leg naming a `store` is store credit, and that shop's pot is created on first use -
+    no admin screen, and nobody blocked at 11pm because a shop is missing.
+
+    One destination is the normal case, so a single leg with no amount takes the lot. A
+    split has to add up to the sale's net proceeds, for the same reason funding does.
     """
-    if account_id is not None:
-        _require_account(db, account_id)
-        return account_id
-    return money.account_for_member(db, default_member_id).id
+    if legs is None:
+        return [(money.account_for_member(db, default_member_id).id, net_proceeds)]
+
+    if not legs:
+        return []
+
+    resolved: list[tuple[uuid.UUID, int | None]] = [
+        (
+            money.store_account(db, leg.store).id
+            if leg.store is not None
+            else _require_account(db, leg.account_id).id,
+            leg.amount,
+        )
+        for leg in legs
+    ]
+
+    account_ids = [account_id for account_id, _ in resolved]
+    if len(set(account_ids)) != len(account_ids):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Each destination can only appear once",
+        )
+
+    if len(resolved) == 1 and resolved[0][1] is None:
+        return [(resolved[0][0], net_proceeds)]
+
+    if any(amount is None for _, amount in resolved):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Every destination needs an amount when the money was split",
+        )
+
+    total = sum(amount or 0 for _, amount in resolved)
+    if total != net_proceeds:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"The split adds up to {total / 100:.2f} but the sale netted "
+                f"{net_proceeds / 100:.2f}"
+            ),
+        )
+    return [(account_id, amount or 0) for account_id, amount in resolved]
 
 
 # -------------------------------------------------------------------------- accounts
@@ -141,24 +193,39 @@ def list_accounts(
 ) -> AccountList:
     """Every pot, with what its balance means spelled out.
 
-    `joint_balance` and `total_owed` are returned separately and are never summed. One is
-    money the group has; the other is money it owes its own members. A single "net" figure
-    would hide whichever of the two is the problem.
+    Three figures, never one. Cash the group has, money it owes its own members, and store
+    credit it can only spend at one shop are different facts, and a single netted number
+    would hide whichever of them is the problem.
     """
     money.ensure_accounts(db)
     flows = money.balances(db)
 
+    # Joint, then the partners, then the shops. Ordering by kind alphabetically put
+    # store_credit first, so a group with a dozen shops opened the page to a wall of them
+    # and had to scroll to find the two figures that actually run the business.
+    order = case(
+        (MoneyAccount.kind == ACCOUNT_JOINT, 0),
+        (MoneyAccount.kind == ACCOUNT_MEMBER, 1),
+        else_=2,
+    )
     accounts = db.scalars(
-        select(MoneyAccount).order_by(MoneyAccount.kind.desc(), MoneyAccount.name)
+        select(MoneyAccount).order_by(order, MoneyAccount.name)
     ).all()
 
     items: list[AccountRead] = []
     joint_balance = 0
     total_owed = 0
+    total_credit = 0
+    credit_stores = 0
     for account in accounts:
         balance = money.balance_for(account, flows.get(account.id, 0))
         if account.is_liability:
             total_owed += balance
+        elif account.kind == ACCOUNT_STORE_CREDIT:
+            total_credit += balance
+            # Shops with credit left, not shops ever used: "across 2 stores" should mean
+            # two places you can still spend.
+            credit_stores += 1 if balance != 0 else 0
         else:
             joint_balance += balance
         items.append(
@@ -169,11 +236,17 @@ def list_accounts(
                 member_id=account.member_id,
                 is_active=account.is_active,
                 balance=balance,
-                balance_means="owed" if account.is_liability else "cash",
+                balance_means=account.balance_means,
             )
         )
 
-    return AccountList(items=items, joint_balance=joint_balance, total_owed=total_owed)
+    return AccountList(
+        items=items,
+        joint_balance=joint_balance,
+        total_owed=total_owed,
+        total_credit=total_credit,
+        credit_stores=credit_stores,
+    )
 
 
 # ------------------------------------------------------------------------- movements

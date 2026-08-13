@@ -23,6 +23,7 @@ from src.models.member import Member
 from src.models.money import (
     ACCOUNT_JOINT,
     ACCOUNT_MEMBER,
+    ACCOUNT_STORE_CREDIT,
     JOINT_ACCOUNT_NAME,
     MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
@@ -114,6 +115,36 @@ def account_for_member(db: Session, member_id: uuid.UUID) -> MoneyAccount:
     return db.scalars(select(MoneyAccount).where(MoneyAccount.member_id == member_id)).one()
 
 
+def store_account(db: Session, name: str) -> MoneyAccount:
+    """The credit pot for one shop, created the first time somebody sells to it.
+
+    No admin screen and no managed list: shops behave like marketplaces, typed once and
+    offered as a suggestion afterwards. Matching is case-insensitive so "Card Shop" and
+    "card shop" cannot end up as two half-balances.
+    """
+    cleaned = name.strip()
+    db.execute(
+        pg_insert(MoneyAccount)
+        .values(
+            id=uuid.uuid4(),
+            kind=ACCOUNT_STORE_CREDIT,
+            name=cleaned,
+            is_active=True,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[func.lower(MoneyAccount.name)],
+            index_where=MoneyAccount.kind == ACCOUNT_STORE_CREDIT,
+        )
+    )
+    db.flush()
+    return db.scalars(
+        select(MoneyAccount).where(
+            MoneyAccount.kind == ACCOUNT_STORE_CREDIT,
+            func.lower(MoneyAccount.name) == cleaned.lower(),
+        )
+    ).one()
+
+
 def balances(db: Session) -> dict[uuid.UUID, int]:
     """Signed cash flow per account, over active movements only.
 
@@ -132,9 +163,10 @@ def balances(db: Session) -> dict[uuid.UUID, int]:
 def balance_for(account: MoneyAccount, flow: int) -> int:
     """What this account's balance means, from its raw flow.
 
-    Joint is an asset: its balance is the cash in it. A member account is a liability: its
-    balance is what the business owes that person, which is the negative of the cash that
-    has flowed through their hands on the store's behalf.
+    Joint is an asset: its balance is the cash in it. Store credit is one too - value the
+    group holds and can spend. A member account is a liability: its balance is what the
+    business owes that person, which is the negative of the cash that has flowed through
+    their hands on the store's behalf.
     """
     return -flow if account.is_liability else flow
 
@@ -286,49 +318,61 @@ def sync_proceeds(
     db: Session,
     sale: Sale,
     *,
-    account_id: uuid.UUID | None,
+    proceeds: list[tuple[uuid.UUID, int]] | None,
     member_id: uuid.UUID | None,
 ) -> None:
     """Keep a sale's proceeds record in step with the sale.
 
+    Mirrors `sync_funding` exactly, including the split: a box sold half for cash and half
+    for credit at a shop is two legs, and the same rescale keeps them in proportion when a
+    fee is corrected afterwards.
+
     The amount tracked is **net proceeds** - what actually landed after the platform and
-    payment took their cut, because that is the money someone can spend. A sale whose fees
-    swallow it whole moves no money and gets no record.
+    payment took their cut, because that is what somebody can spend. A sale whose fees
+    swallow it whole moves nothing and gets no record.
     """
     movement = _derived_movement(db, sale_id=sale.id)
     net = sale.net_proceeds_cents
 
-    if account_id is None:
-        # No destination given: follow the amount on whatever is already recorded.
+    if proceeds is None:
+        # No destination given: leave the money where it is and follow the new amount.
         if movement is None:
             return
         if net <= 0:
             void_movement(db, movement, member_id=member_id, reason="sale nets nothing")
             return
         existing = _legs_of(db, movement)
-        for posting in existing:
-            posting.delta_cents = net
+        rescaled = proportional_split([posting.delta_cents for posting in existing], net)
+        for posting, delta in zip(existing, rescaled):
+            posting.delta_cents = delta
         movement.occurred_on = sale.sale_date
         db.flush()
         return
 
-    if net <= 0:
+    # Money arriving in every destination, so each leg is positive.
+    legs = [(account_id, amount) for account_id, amount in proceeds if amount]
+    if not legs or net <= 0:
         if movement is not None:
-            void_movement(db, movement, member_id=member_id, reason="sale nets nothing")
+            void_movement(
+                db,
+                movement,
+                member_id=member_id,
+                reason="sale nets nothing" if net <= 0 else "proceeds removed",
+            )
         return
 
     if movement is None:
         record_movement(
             db,
             kind=MOVEMENT_PROCEEDS,
-            legs=[(account_id, net)],
+            legs=legs,
             occurred_on=sale.sale_date,
             member_id=member_id,
             sale_id=sale.id,
         )
         return
 
-    _replace_legs(db, movement, [(account_id, net)])
+    _replace_legs(db, movement, legs)
     movement.occurred_on = sale.sale_date
     db.flush()
 
