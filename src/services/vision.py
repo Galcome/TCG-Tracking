@@ -36,10 +36,17 @@ logger = logging.getLogger(__name__)
 
 #: Gemini's REST endpoint. The model is the cheapest one that reads images, because this is
 #: an accelerator on a form somebody can always fill in by hand.
-_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent"
-)
+#:
+#: Built per call rather than at import, because the model name is configuration and a
+#: pinned one expires. This shipped hardcoded to `gemini-2.0-flash`; Google retired that
+#: entire generation, and the live API answers `404 NOT_FOUND - no longer available`. Every
+#: photo would have degraded to typing, silently and forever, with the tests all passing -
+#: they mock the call, so no suite on earth would have caught it.
+_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+def _endpoint() -> str:
+    return _ENDPOINT.format(model=settings.gemini_model)
 
 #: Deliberately blunt. A retry loop against a free tier is how the free tier stops being
 #: free, and nothing here is worth that - the fallback is typing, which always works.
@@ -161,7 +168,7 @@ def read_cards(image: bytes, content_type: str) -> list[ReadCard]:
 
     try:
         response = httpx.post(
-            _ENDPOINT,
+            _endpoint(),
             json=body,
             # The key goes in a header rather than the query string, so it cannot end up
             # in anybody's access log.

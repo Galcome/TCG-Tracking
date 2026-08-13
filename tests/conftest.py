@@ -43,6 +43,8 @@ os.environ["ALLOWED_ORIGIN_REGEX"] = ""
 os.environ["SENTRY_DSN"] = ""
 # Blank so no test can reach a real API. The one suite that needs it sets it itself.
 os.environ["GEMINI_API_KEY"] = ""
+# Pinned so an assertion about the request URL does not change when the default does.
+os.environ["GEMINI_MODEL"] = "gemini-flash-lite-latest"
 
 from src.auth import get_current_user  # noqa: E402
 from src.database import engine  # noqa: E402

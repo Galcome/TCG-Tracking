@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     #: button is simply absent and every screen works exactly as it does now.
     gemini_api_key: str = ""
 
+    #: Which model does the reading. Configurable because a pinned model *expires*:
+    #: this shipped hardcoded to gemini-2.0-flash, which Google retired, and every
+    #: photo would have failed with "no longer available" until someone deployed.
+    #: The `-latest` aliases track the current generation, so they do not rot; a
+    #: specific version can still be set here when a rollout misbehaves.
+    gemini_model: str = "gemini-flash-lite-latest"
+
     @field_validator("database_url", "direct_database_url")
     @classmethod
     def ensure_psycopg3_scheme(cls, value: str | None) -> str | None:

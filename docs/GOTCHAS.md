@@ -252,3 +252,35 @@ it was configured then.
 
 **Fix:** The config sets `reuseExistingServer: false` for both servers. If a port is
 already taken the run fails loudly, which is the outcome you want.
+
+## Gemini - A Pinned Model Expires, And The Tests Cannot See It
+
+The photo reader on the rip screen shipped hardcoded to `gemini-2.0-flash`. Google retired
+that entire generation. The live API answers:
+
+```text
+404 NOT_FOUND - This model models/gemini-2.0-flash is no longer available.
+```
+
+So every photo raised `VisionUnavailable` and the screen fell back to typing - which is the
+designed behaviour on failure, and therefore looks like nothing is wrong. The feature would
+have been quietly dead.
+
+**No test could have caught it.** Every test in `tests/test_vision.py` monkeypatches
+`httpx.post`. Mocks assert the shape of the conversation, never that the other end still
+exists. A green suite says the parsing, throttling and fallbacks are correct; it says
+nothing about whether the endpoint is real.
+
+The fix is `GEMINI_MODEL` in config, defaulting to a `-latest` alias, which tracks the
+current generation instead of pinning a version that ages out. A bad rollout is now an env
+var away from being fixed rather than a deploy.
+
+**Check what a key can actually see before trusting a model name:**
+
+```bash
+curl -H "x-goog-api-key: $GEMINI_API_KEY" \
+  https://generativelanguage.googleapis.com/v1beta/models
+```
+
+The general rule: anything that depends on a third party still existing needs one real call
+against it, once, by hand. The suite covers our logic. It does not cover their inventory.

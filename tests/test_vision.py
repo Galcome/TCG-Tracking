@@ -268,6 +268,37 @@ def test_it_is_never_asked_what_anything_is_worth():
         assert forbidden not in without_the_prohibition
 
 
+def test_the_model_is_configuration_and_not_baked_in(client, keyed, monkeypatch):
+    """A pinned model expires, and the mocked suite cannot see it happen.
+
+    This shipped hardcoded to `gemini-2.0-flash`. Google retired that generation and the
+    live API answers `404 - no longer available`, so every photo degraded to typing while
+    every test in this file still passed. They mock the call; the model name was the one
+    thing no mock could check. Now it comes from settings, and a bad rollout is an env
+    var away from being fixed rather than a deploy.
+    """
+    seen: dict = {}
+
+    def capture(url, **kwargs):
+        seen["url"] = url
+        return httpx.Response(
+            200,
+            json=gemini('{"cards": []}'),
+            request=httpx.Request("POST", "https://example.invalid"),
+        )
+
+    monkeypatch.setattr(httpx, "post", capture)
+    monkeypatch.setattr(settings, "gemini_model", "some-other-model")
+    post_photo(client)
+
+    assert "some-other-model:generateContent" in seen["url"]
+
+
+def test_the_default_model_is_not_a_pinned_version(client, keyed):
+    """`-latest` tracks the current generation, so it cannot rot the way 2.0 did."""
+    assert settings.gemini_model.endswith("-latest")
+
+
 def test_the_key_never_reaches_the_query_string(client, keyed, monkeypatch):
     """A key in a URL ends up in access logs. It goes in a header."""
     seen: dict = {}
