@@ -9,6 +9,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { gotoInventory, openProduct, statAmount, uniqueName } from './helpers'
 
+/** An actual box. Left at the dialog default this made a `Single`, which cannot be ripped. */
 async function addBox(page: Page, total: string): Promise<string> {
   const name = uniqueName('Rip Box')
   await gotoInventory(page)
@@ -16,6 +17,7 @@ async function addBox(page: Page, total: string): Promise<string> {
 
   const dialog = page.locator('form')
   await dialog.getByLabel('Name').fill(name)
+  await dialog.getByLabel('Product type').selectOption({ label: 'Booster Box' })
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
   await dialog.getByRole('button', { name: 'Save' }).click()

@@ -18,6 +18,7 @@ import {
   RecordSaleDialog,
   VoidDialog,
 } from '../components/forms'
+import { canCrack, canRip } from '../product-types'
 import { CrackCaseDialog, VoidTransformationDialog } from '../components/crack-forms'
 import { RipDialog } from '../components/rip-forms'
 import { LineageReport } from '../components/rollups'
@@ -278,14 +279,22 @@ export function ProductDetail() {
               <ArrowLeftRight size={15} />
               Move
             </Button>
-            <Button type="button" onClick={() => setDialog('crack')} variant="ghost">
-              <Package size={15} />
-              Crack open
-            </Button>
-            <Button type="button" onClick={() => setDialog('rip')} variant="ghost">
-              <Scissors size={15} />
-              Rip open
-            </Button>
+            {/* Only what this thing can actually become. A card is not a container, and
+                offering to crack one is not a harmless button: it worked, consuming the
+                card and producing "boxes" out of it. The API refuses these too — this
+                just stops anyone being invited to try. */}
+            {canCrack(item.product_type.slug) && (
+              <Button type="button" onClick={() => setDialog('crack')} variant="ghost">
+                <Package size={15} />
+                Crack open
+              </Button>
+            )}
+            {canRip(item.product_type.slug) && (
+              <Button type="button" onClick={() => setDialog('rip')} variant="ghost">
+                <Scissors size={15} />
+                Rip open
+              </Button>
+            )}
             <Button type="button" onClick={() => setDialog('grade')} variant="ghost">
               <Stamp size={15} />
               Send to grading

@@ -10,7 +10,14 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { amount, gotoInventory, openProduct, statAmount, uniqueName } from './helpers'
 
-/** Create a product with an opening purchase and return its name. */
+/**
+ * Create an actual **case** with an opening purchase and return its name.
+ *
+ * The type used to be left at the dialog's default, which is `Single` — so this file
+ * spent its whole life cracking a *card* open and asserting the arithmetic came out
+ * right. It did, because nothing refused. Now that a card cannot be cracked, the helper
+ * has to create the thing it is named after.
+ */
 async function addCase(page: Page, total: string): Promise<string> {
   const name = uniqueName('Crack Case')
   await gotoInventory(page)
@@ -18,6 +25,7 @@ async function addCase(page: Page, total: string): Promise<string> {
 
   const dialog = page.locator('form')
   await dialog.getByLabel('Name').fill(name)
+  await dialog.getByLabel('Product type').selectOption({ label: 'Sealed Case' })
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
   await dialog.getByRole('button', { name: 'Save' }).click()

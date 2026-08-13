@@ -163,6 +163,12 @@ def crack_case(
     if db.get(Product, payload.product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    # The client hides the button, but the client is a convenience and this is the
+    # contract. A tab left open from before the button moved still points here.
+    refusal = transformations.opening_refusal(db, payload.product_id, TRANSFORM_CRACK)
+    if refusal:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=refusal)
+
     available = transformations.available_in_bucket(
         db, payload.product_id, payload.from_bucket
     )
@@ -305,6 +311,10 @@ def rip_open(
     """
     if db.get(Product, payload.product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    refusal = transformations.opening_refusal(db, payload.product_id, TRANSFORM_RIP)
+    if refusal:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=refusal)
 
     available = transformations.available_in_bucket(
         db, payload.product_id, payload.from_bucket
