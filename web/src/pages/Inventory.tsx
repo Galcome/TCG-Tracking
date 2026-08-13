@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { api, BUCKET_LABELS, BUCKETS, type Bucket, type Product } from '../api'
 import { ArrowLeftRight, History, PackageSearch, Pencil, Plus, Receipt } from 'lucide-react'
@@ -34,13 +35,27 @@ function useDebounced<T>(value: T, delayMs: number): T {
  * The stock filter defaults to In stock, so a store that has sold everything used to be
  * told it had no products at all - while the Sales ledger listed what it had sold.
  */
-function emptyMessage(search: string, stock: string): string {
+function emptyMessage(search: string, stock: string, bucket: string): string {
   if (search) {
     return `Nothing matches “${search}”. Search is forgiving about spelling, so it is probably not here yet.`
   }
+  // Bucket first: an empty Store means nothing has been moved there, which is a different
+  // thing from owning nothing, and telling someone to add their first product when they
+  // have forty boxes one tab away is how a filter gets read as a bug.
+  if (bucket === 'store') return 'Nothing in the Store. Move stock here when it goes up for sale.'
+  if (bucket === 'vault') return 'Nothing in the Vault. Move stock here when you are holding it long term.'
+  if (bucket === 'inventory') return 'Nothing left in Inventory — it has all been moved to the Store or the Vault.'
   if (stock === 'in') return 'Nothing in stock right now. Sold-out items are still under Sold out.'
   if (stock === 'out') return 'Nothing is sold out — everything you have bought is still on the shelf.'
   return 'No products yet. Add your first one and record what you paid for it.'
+}
+
+/** What each place means, said once on the page rather than assumed. */
+const BUCKET_BLURB: Record<string, string> = {
+  '': 'Everything you own, wherever it sits.',
+  inventory: 'Bought and held. Not yet lined up to sell.',
+  store: 'Moved here to sell.',
+  vault: 'Held on purpose, long term.',
 }
 
 /**
@@ -56,10 +71,21 @@ function BucketSplit({ by }: { by: Record<Bucket, number> }) {
   if (held.length === 0) return null
 
   return (
-    <span className="mt-0.5 block text-xs font-normal text-(--color-faint)">
+    <span className="mt-0.5 block whitespace-nowrap text-[0.6875rem] font-normal text-(--color-faint)">
       {held.map((bucket) => `${by[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`).join(' · ')}
     </span>
   )
+}
+
+/**
+ * How many units this row contributes to the place being looked at.
+ *
+ * Standing in the Store and reading "4" for a product with 3 boxes there and 1 still in
+ * Inventory is the filter contradicting itself. The count leads with the bucket in view;
+ * BucketSplit underneath still says where the rest of them are.
+ */
+function countFor(by: Record<Bucket, number>, total: number, bucket: string): number {
+  return bucket ? by[bucket as Bucket] : total
 }
 
 /** The three places, as places. A dropdown buried among filters is not a place. */
@@ -76,7 +102,7 @@ function BucketTabs({
 
   return (
     <div className="flex flex-wrap gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
-      {[{ key: '', label: 'Everywhere', count: everywhere }].concat(
+      {[{ key: '', label: 'All stock', count: everywhere }].concat(
         BUCKETS.map((bucket) => ({
           key: bucket,
           label: BUCKET_LABELS[bucket],
@@ -106,9 +132,26 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
   const [moving, setMoving] = useState<Product | null>(null)
   const [search, setSearch] = useState('')
   const [game, setGame] = useState('')
-  const [bucket, setBucket] = useState('')
   const [stock, setStock] = useState('in')
   const debouncedSearch = useDebounced(search, 250)
+
+  // The bucket lives in the URL, not in component state, so the sidebar can link straight
+  // to a place, Back works, and a link to the Vault is shareable. It also means the nav
+  // and the tab strip read the same value and cannot disagree about where you are.
+  const [params, setParams] = useSearchParams()
+  const requested = params.get('bucket') ?? ''
+  // A hand-edited ?bucket=basement would 422 the API. Fall back to showing everything
+  // rather than turning a bad link into an error screen.
+  const bucket = (BUCKETS as readonly string[]).includes(requested) ? requested : ''
+
+  const setBucket = (next: string) => {
+    const updated = new URLSearchParams(params)
+    if (next) updated.set('bucket', next)
+    else updated.delete('bucket')
+    setParams(updated)
+  }
+
+  const title = bucket ? BUCKET_LABELS[bucket as Bucket] : 'All stock'
 
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const products = useQuery({
@@ -126,9 +169,12 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Inventory" onRecordSale={onRecordSale} onAddProduct={onAddProduct} />
+      <PageHeader title={title} onRecordSale={onRecordSale} onAddProduct={onAddProduct} />
 
-      <BucketTabs value={bucket} onChange={setBucket} totals={products.data?.bucket_totals} />
+      <div className="space-y-2">
+        <BucketTabs value={bucket} onChange={setBucket} totals={products.data?.bucket_totals} />
+        <p className="text-xs text-(--color-faint)">{BUCKET_BLURB[bucket]}</p>
+      </div>
 
       {/* Filters wrap instead of scrolling sideways - the old chip strip grew a
           horizontal scrollbar on desktop. */}
@@ -179,7 +225,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
       {products.data && items.length === 0 && (
         <Card>
           <Empty icon={<PackageSearch size={30} strokeWidth={1.5} />}>
-            {emptyMessage(debouncedSearch, stock)}
+            {emptyMessage(debouncedSearch, stock, bucket)}
             {/* Always offered, whichever way the list came up empty. Telling someone to
                 add their first product and giving them nothing to press is how this
                 screen used to end - and on a phone there was no other route at all. */}
@@ -197,19 +243,29 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
 
       {items.length > 0 && (
         <>
-          {/* Desktop: a dense table that actually uses the width. */}
-          <Card className="hidden overflow-x-auto p-0 lg:block">
+          {/* The table needs ~1060px of columns. Below `xl` the content area is narrower
+              than that even with the sidebar, so the row actions ended up off the right
+              edge behind a horizontal scrollbar - invisible in exactly the way Joseph
+              complained about. Cards take over there instead, where every action is on
+              screen. */}
+          <Card className="hidden overflow-x-auto p-0 xl:block">
             <table className="w-full text-sm">
               <thead className="border-b border-(--color-edge) text-left text-xs uppercase tracking-wide text-(--color-muted)">
                 <tr>
                   <th className="px-4 py-3 font-medium">Product</th>
                   <th className="px-4 py-3 font-medium">Game</th>
                   <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 text-right font-medium">In stock</th>
-                  <th className="px-4 py-3 text-right font-medium">Unit cost</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                    {bucket ? `In ${title}` : 'In stock'}
+                  </th>
+                  {/* First column to go when width runs out: it is derived, and the
+                      product page shows it in full. */}
+                  <th className="hidden px-4 py-3 text-right font-medium 2xl:table-cell">
+                    Unit cost
+                  </th>
                   <th className="px-4 py-3 text-right font-medium">Inventory value</th>
                   <th className="px-4 py-3 text-right font-medium">Realized profit</th>
-                  <th className="px-4 py-3" />
+                  <th className="py-3 pl-2 pr-4" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--color-edge)">
@@ -241,10 +297,10 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                         product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
                       }`}
                     >
-                      {product.stats.quantity_on_hand}
+                      {countFor(product.stats.by_bucket, product.stats.quantity_on_hand, bucket)}
                       <BucketSplit by={product.stats.by_bucket} />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-(--color-muted)">
+                    <td className="hidden px-4 py-3 text-right tabular-nums text-(--color-muted) 2xl:table-cell">
                       {money(product.stats.average_unit_cost, '—')}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
@@ -257,7 +313,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     </td>
                     {/* The row itself edits, so these must not also trigger it. */}
                     <td
-                      className="whitespace-nowrap px-4 py-3 text-right"
+                      className="whitespace-nowrap py-3 pl-2 pr-4 text-right"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <span className="flex justify-end gap-2">
@@ -285,8 +341,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
             </table>
           </Card>
 
-          {/* Mobile: stacked cards. */}
-          <ul className="space-y-2 lg:hidden">
+          {/* Phones and narrow desktops: cards, two abreast once there is room. */}
+          <ul className="grid gap-2 sm:grid-cols-2 xl:hidden">
             {items.map((product) => (
               <li key={product.id}>
                 <Card interactive>
@@ -308,7 +364,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                           product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
                         }`}
                       >
-                        {product.stats.quantity_on_hand} in stock
+                        {countFor(product.stats.by_bucket, product.stats.quantity_on_hand, bucket)}{' '}
+                        {bucket ? `in ${title.toLowerCase()}` : 'in stock'}
                       </p>
                       <BucketSplit by={product.stats.by_bucket} />
                       <p className="text-xs tabular-nums text-(--color-muted)">

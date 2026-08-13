@@ -87,7 +87,7 @@ export function ProductDetail() {
           className="inline-flex items-center gap-1.5 text-sm text-(--color-muted) transition-colors hover:text-(--color-accent)"
         >
           <ArrowLeft size={15} />
-          Inventory
+          All stock
         </Link>
         <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
