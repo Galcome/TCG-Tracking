@@ -696,7 +696,16 @@ make per-card ROI meaningless.
 ### Bulk is written off at rip time — Joseph's decision
 
 The unlogged remainder becomes a write-off immediately, so a bad rip looks bad straight
-away. Two consequences, both acceptable and worth stating:
+away.
+
+**Read that together with the proportional split above, not against it.** The split shares
+the box's *whole* cost across the hits, so a rip that logs any hits at all leaves nothing
+over and writes off **$0.00**. That is the intended behaviour, and it is not a bug to be
+fixed: bulk is the all-or-nothing case — you ripped it, nothing was worth keeping, the
+whole cost is gone. Confirmed with Joseph on 13 Aug 2026, after this wording sent an agent
+looking for a contradiction that was never there.
+
+Two consequences, both acceptable and worth stating:
 
 - Selling bulk later shows revenue against **zero cost**. The money still reconciles — the
   write-off already reports separately from trading losses via `cost_written_off` — it is
@@ -1023,8 +1032,9 @@ End to end, per step, on the deployed app:
    itself on 14 August.
 5. Crack a case: 6 boxes, 4 Store / 1 Inventory / 1 Vault, cost split six ways summing back
    to the case exactly, all carrying the case's purchase date.
-6. Rip a box, log three hits at $500 / $50 / $10; cost splits $134 / $13 / $3; the remainder
-   is written off; a later bulk sale shows revenue with no ROI.
+6. Rip a box, log three hits at $500 / $50 / $10; cost splits $134 / $13 / $3, summing to the
+   box exactly, so nothing is written off. Rip another logging no hits at all: the whole box
+   is written off. A later bulk sale shows revenue with no ROI.
 7. Send a card for grading; it shows a day count in its bucket. Return it as PSA 10; cost
    plus fees carries; the name pre-fills.
 8. The Fabled case rolls up across everything it became. Tier comparison shows the average
