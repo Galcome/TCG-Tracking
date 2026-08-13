@@ -41,6 +41,8 @@ os.environ["ALLOWED_MEMBER_EMAILS"] = ""
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000,http://localhost:5173"
 os.environ["ALLOWED_ORIGIN_REGEX"] = ""
 os.environ["SENTRY_DSN"] = ""
+# Blank so no test can reach a real API. The one suite that needs it sets it itself.
+os.environ["GEMINI_API_KEY"] = ""
 
 from src.auth import get_current_user  # noqa: E402
 from src.database import engine  # noqa: E402

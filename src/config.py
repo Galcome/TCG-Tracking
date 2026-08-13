@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Sentry.
     sentry_dsn: str = ""
 
+    #: Reads card names off a photo on the rip screen. Optional: with no key the
+    #: button is simply absent and every screen works exactly as it does now.
+    gemini_api_key: str = ""
+
     @field_validator("database_url", "direct_database_url")
     @classmethod
     def ensure_psycopg3_scheme(cls, value: str | None) -> str | None:

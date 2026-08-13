@@ -21,10 +21,10 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 7. Grading | **Shipped** - branch `feature/grading` |
 | 8. Reporting: tier, lineage, set rollup | **Shipped** - branch `feature/rollups` |
 | 9. Vault valuation and ageing exemption | **Shipped** - branch `feature/vault` |
-| 10. Photo to cards | Next - the only step left |
+| 10. Photo to cards | **Shipped** - branch `feature/photo-to-cards` |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-630 backend tests, 75 e2e, 100% coverage.
+649 backend tests, 76 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -293,6 +293,43 @@ or an excuse.
 The free daily price refresh is **not** wired in. TCGCSV's terms were to be verified before
 depending on it, and that has not happened - so the manual floor is what shipped, and the
 feed can layer on top later without changing anything here.
+
+### Step 10 - what shipped
+
+**Eyes, not judgement.** Point the phone at the hits spread on the table and the names fill
+in. The model fills fields; a person presses save. It never writes to the ledger.
+
+- **Unsure comes back blank, never guessed.** A wrong card name mints a phantom product that
+  splits every report - Fable/Fabled arriving by camera. "Did not catch this one" is the
+  correct output.
+- **The prompt asks for set and variant explicitly**, and the hint under the button says to
+  check them yourself. Any model reads "Mickey Mouse"; telling an Iconic foil from a regular
+  is a tiny set symbol, and that distinction is $560 against about $2.
+- **Batches append.** Several relaxed photos beat one crowded one, and the flow encourages
+  that rather than fighting it.
+- **It degrades to typing, always.** No key, a failed call, a rate limit, prose instead of
+  JSON - the screen works exactly as it did. With no key the button is absent rather than
+  present and failing, and there is an e2e test asserting exactly that.
+- **Throttled** at one photo every three seconds. A retry loop against a free tier is how
+  the free tier stops being free.
+- **The key goes in a header, never the query string**, so it cannot end up in an access
+  log, and failures log the exception *type* only.
+
+**Refused, and staying refused:** AI-estimated values or sell recommendations. That is
+confident guessing dressed as advice, on real money, in an app whose whole discipline is
+refusing to invent financial data. There is a test asserting the word "price" appears in the
+prompt only inside the sentence forbidding it.
+
+**Not verified against the live API.** Every path is tested against a mocked client, and the
+shape of the call follows Gemini's documented REST contract - but nobody has run it with a
+real key. Set `GEMINI_API_KEY` and try one photo before trusting it.
+
+---
+
+## Every step is shipped
+
+All ten. What remains is Joseph's own bug bash, plus the two things he parked: the Collectr
+export and daily price tracking.
 
 ---
 

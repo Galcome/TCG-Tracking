@@ -16,6 +16,7 @@ from src.routes.reports import router as reports_router
 from src.routes.sets import router as sets_router
 from src.routes.taxonomy import games_router, product_types_router
 from src.routes.transformations import router as transformations_router
+from src.routes.vision import router as vision_router
 
 router = APIRouter(prefix="/api/v1")
 
@@ -31,3 +32,4 @@ router.include_router(reports_router, tags=["reports"])
 router.include_router(
     transformations_router, prefix="/transformations", tags=["transformations"]
 )
+router.include_router(vision_router, prefix="/vision", tags=["vision"])
