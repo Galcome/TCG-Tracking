@@ -140,3 +140,32 @@ test.describe('on the narrowest phone', () => {
     await expect(page.getByRole('heading', { name: 'Store' })).toBeVisible()
   })
 })
+
+/**
+ * The second report of the same shape: "how do I open or split a box?"
+ *
+ * Crack open, Rip open and Send to grading all shipped, all worked, and all lived on a
+ * product's own page - whose only entrance from the list was a button labelled "History".
+ * Nobody looking for "open this box" clicks History, so the features were unreachable in
+ * practice while every backend test passed.
+ *
+ * This asserts the *route*, not the dialogs: that a person standing on Inventory can get
+ * to the actions by clicking the thing they would actually click.
+ */
+test('a box can be opened from the inventory list without knowing where to look', async ({
+  page,
+}) => {
+  const box = await addProduct(page, { name: uniqueName('Reachable Box'), quantity: 6, total: '900.00' })
+
+  await page.getByPlaceholder('Search products…').fill(box)
+  const row = page.getByRole('row', { name: rx(box) })
+  await expect(row).toBeVisible({ timeout: 10_000 })
+
+  // The name is the door. It has to be a link, not just text on a row that edits.
+  await row.getByRole('link', { name: box }).click()
+
+  await expect(page.getByRole('heading', { name: box })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('button', { name: 'Crack open' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Rip open' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send to grading' })).toBeVisible()
+})
