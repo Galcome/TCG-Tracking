@@ -21,6 +21,7 @@ import {
   type Transaction,
 } from '../api'
 import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
+import { namedByItsSet, suggestedProductName } from '../product-types'
 import { Advanced, Chip, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
 
 export function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
@@ -58,6 +59,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
 
   const [name, setName] = useState('')
+  const [nameTouched, setNameTouched] = useState(false)
   const [pickedGame, setGame] = useState('')
   const [pickedType, setType] = useState('')
   const [quantity, setQuantity] = useState('1')
@@ -80,12 +82,28 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const gameId = pickedGame || games.data?.[0]?.id || ''
   const typeId = pickedType || types.data?.[0]?.id || ''
 
+  // The name writes itself from the set and the type, because for sealed product that is
+  // literally what it is called - the old placeholder was "Vivid Voltage Booster Box",
+  // which is exactly this, typed out by hand every time.
+  //
+  // `nameTouched` is the whole safety of it: the moment somebody types in the field, the
+  // app stops writing to it for good. Without that, correcting a name and then fixing a
+  // typo in the set would silently throw the correction away - a worse bug than the one
+  // being fixed, because it destroys work the person watched themselves do.
+  const chosenType = types.data?.find((option) => option.id === typeId)
+  const derivedName = suggestedProductName(setLabel, chosenType)
+  const effectiveName = nameTouched ? name : derivedName
+
+  // A card is named after the card, and only the person holding it knows that. Nothing is
+  // derived, so the empty field is the one worth landing in.
+  const nameIsTheirs = !namedByItsSet(chosenType?.slug)
+
   const create = useLedgerMutation(api.createProduct, onClose)
 
   function submit(event: FormEvent) {
     event.preventDefault()
     create.mutate({
-      name: name.trim(),
+      name: effectiveName.trim(),
       game_id: gameId,
       product_type_id: typeId,
       set_name: setLabel.trim() || null,
@@ -113,17 +131,9 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
       busy={create.isPending}
       error={create.error ? (create.error as Error).message : null}
     >
-      <Field label="Name">
-        <input
-          required
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Vivid Voltage Booster Box"
-          className={FIELD_CLASS}
-        />
-      </Field>
-
+      {/* What it is, before what it is called. The name is built from these two and the
+          set, so asking for it first meant asking for the one thing the app could have
+          written itself - and asking for it before it knew enough to help. */}
       <div className="grid grid-cols-2 gap-4">
         <Field label="Game">
           <select
@@ -154,6 +164,34 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
           </select>
         </Field>
       </div>
+
+      <SetField
+        gameSlug={games.data?.find((option) => option.id === gameId)?.slug}
+        value={setLabel}
+        onChange={setSetLabel}
+        autoFocus={!nameIsTheirs}
+      />
+
+      <Field
+        label="Name"
+        hint={
+          !nameTouched && derivedName
+            ? 'Built from the set and type. Change it if it should read differently.'
+            : undefined
+        }
+      >
+        <input
+          required
+          autoFocus={nameIsTheirs}
+          value={effectiveName}
+          onChange={(e) => {
+            setNameTouched(true)
+            setName(e.target.value)
+          }}
+          placeholder={nameIsTheirs ? 'Mickey Mouse — Iconic foil' : 'Pick a set above'}
+          className={FIELD_CLASS}
+        />
+      </Field>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Quantity">
@@ -187,12 +225,6 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
           className={FIELD_CLASS}
         />
       </Field>
-
-        <SetField
-          gameSlug={games.data?.find((option) => option.id === gameId)?.slug}
-          value={setLabel}
-          onChange={setSetLabel}
-        />
 
       <BucketField
         label="Goes to"
@@ -960,11 +992,14 @@ function SetField({
   gameSlug,
   value,
   onChange,
+  autoFocus,
 }: {
   /** Sets belong to a game, so suggestions are scoped to it. */
   gameSlug: string | undefined
   value: string
   onChange: (name: string) => void
+  /** Where a person starts, now that game and type both open on a sensible default. */
+  autoFocus?: boolean
 }) {
   const typed = useDebouncedValue(value, 250)
 
@@ -980,6 +1015,7 @@ function SetField({
   return (
     <Field label="Set">
       <input
+        autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Start typing, or pick one below"
