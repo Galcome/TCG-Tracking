@@ -13,8 +13,8 @@ top section is the running state so a fresh session can pick up without re-deriv
 | --- | --- |
 | 1. Buckets on stock, and a move action | **Shipped** - PRs #17, #18 |
 | 1b. Store and Vault in the navigation | **Shipped** - branch `fix/store-vault-nav` |
-| 2. The money ledger | Next |
-| 3. Store credit | |
+| 2. The money ledger | **Shipped** - branch `feature/money-ledger` |
+| 3. Store credit | Next |
 | 4. Sets, suggestions, seeded calendars | |
 | 5. Transformations: cases and cracking | |
 | 6. The rip screen | |
@@ -24,7 +24,7 @@ top section is the running state so a fresh session can pick up without re-deriv
 | 10. Photo to cards | |
 
 Live at https://tcg-tracking.web.app, API at https://api-production-6ea5.up.railway.app.
-415 backend tests, 34 e2e, 100% coverage.
+474 backend tests, 45 e2e, 100% coverage.
 
 ### Step 1b - what shipped
 
@@ -55,6 +55,39 @@ Cards now take over below `xl`, two abreast, and `Unit cost` is dropped below `2
 table fits a 1280 laptop exactly.
 
 Verified at 375, 1040, 1280 and 1536 in a real browser, not only by a green suite.
+
+### Step 2 - what shipped
+
+**One sign convention, and one flip.** A posting stores signed cash flow *through* an
+account: money in is positive, money out is negative. The joint account is an asset, so its
+balance is the plain sum. A member account is a liability, so its balance is that sum
+**negated** - what the business owes that person. Every event the group described falls out
+of that single rule, including the one that breaks a naive from/to model: paying a partner
+back lowers the joint balance *and* what they are owed, both at once.
+
+- **Accounts appear by themselves.** Joint, plus one per member, provisioned on first use.
+  Nobody sets up bookkeeping before they can record a purchase.
+- **Funding defaults to whoever bought it**, and proceeds to whoever sold it - the same rule
+  and the same reason: it is what physically happened, and the eBay payout really does land
+  in one person's account. One tap changes either, and both stay editable afterwards.
+  **This is the one product assumption worth checking** - the workbook's "Paid From" column
+  is per person, never "joint", which is what it was read from.
+- **A funding split has to add up** to what the purchase actually cost, or it is refused.
+  Correcting the price rescales the split in its original proportions: 150/50 of a $200
+  purchase becomes 225/75 at $300, largest-remainder so it lands exactly.
+- **Proceeds track net, not gross.** What landed after the platform and payment took their
+  cut is the money somebody can actually spend. A sale swallowed whole by fees moves none.
+- **Cash held and money owed are two figures, never one.** A netted number hides whichever
+  of the two is the problem. The Dashboard's "Since day one" now points at Money and says
+  outright that it answers a different question.
+- **Opening balances are adjustments** in the account's own terms - "Jason was already owed
+  $5,000" is +5000 on Jason. That is the workbook's rollover column, and it is why nothing
+  is backfilled: who paid for the existing purchases is not derivable from anything stored.
+- **Funding and proceeds cannot be voided on their own.** They describe a purchase or a
+  sale, so the correction is to that transaction and the money follows.
+
+Verified at 375, 1280 and 1536 in a real browser. The mobile tab bar now carries seven
+items; `Dashboard` shortens to `Home` there, and the overflow check is an e2e assertion.
 
 ---
 

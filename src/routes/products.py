@@ -12,6 +12,7 @@ from src.models.ledger import BUCKETS, Purchase
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
+from src.routes.money import resolve_funding
 from src.schemas.product import (
     EMPTY_STATS,
     ProductCreate,
@@ -22,6 +23,7 @@ from src.schemas.product import (
     ProductUpdate,
 )
 from src.services import history, inventory, ledger
+from src.services import money as money_service
 from src.services.search import escape_like
 
 router = APIRouter()
@@ -208,6 +210,17 @@ def create_product(
         db.add(purchase)
         db.flush()
         ledger.recompute_product(db, product.id)
+        money_service.sync_funding(
+            db,
+            purchase,
+            funding=resolve_funding(
+                db,
+                legs=opening.funding,
+                landed_cost=purchase.landed_cost_cents,
+                default_member_id=purchase.purchased_by_member_id or member.id,
+            ),
+            member_id=member.id,
+        )
         ledger.record_audit(
             db,
             entity_type="purchase",

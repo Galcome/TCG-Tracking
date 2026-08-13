@@ -14,6 +14,7 @@ import {
   BUCKETS,
   MARKETPLACES,
   api,
+  type Account,
   type Bucket,
   type Product,
   type ProductDetail,
@@ -22,7 +23,7 @@ import {
 import { humanise, money, percent, signedMoney, todayIso, toneFor } from '../format'
 import { Advanced, Dialog, Field, FIELD_CLASS, GameDot, gameColour } from './ui'
 
-function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
+export function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: run,
@@ -34,7 +35,7 @@ function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () =>
   })
 }
 
-const MONEY_INPUT = {
+export const MONEY_INPUT = {
   type: 'text' as const,
   inputMode: 'decimal' as const,
   placeholder: '0.00',
@@ -59,6 +60,12 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const [storage, setStorage] = useState('')
   const [source, setSource] = useState('')
   const [bucket, setBucket] = useState<Bucket>('inventory')
+  const [paidFrom, setPaidFrom] = useState('')
+
+  const { accounts, mine } = useMyAccount()
+  // Defaults to whoever is entering it, because that is who usually paid. One tap moves
+  // it to the joint account or to another partner, and it stays editable afterwards.
+  const fundedBy = paidFrom || mine?.id || ''
 
   const gameId = pickedGame || games.data?.[0]?.id || ''
   const typeId = pickedType || types.data?.[0]?.id || ''
@@ -82,6 +89,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
         purchase_date: purchaseDate,
         source: source.trim() || null,
         bucket,
+        funding: fundedBy ? [{ account_id: fundedBy }] : undefined,
       },
     })
   }
@@ -167,6 +175,14 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
         hint="A case bought to sell never has to pass through Inventory first."
       />
 
+      <AccountField
+        label="Paid from"
+        value={fundedBy}
+        onChange={setPaidFrom}
+        accounts={accounts}
+        hint="Paying out of your own pocket means the group owes you for it."
+      />
+
       <Advanced>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Shipping">
@@ -233,6 +249,10 @@ export function AddPurchaseDialog({
   const [shipping, setShipping] = useState('')
   const [source, setSource] = useState('')
   const [bucket, setBucket] = useState<Bucket>('inventory')
+  const [paidFrom, setPaidFrom] = useState('')
+
+  const { accounts, mine } = useMyAccount()
+  const fundedBy = paidFrom || mine?.id || ''
 
   const create = useLedgerMutation(api.createPurchase, onClose)
 
@@ -250,6 +270,7 @@ export function AddPurchaseDialog({
           purchase_date: purchaseDate,
           source: source.trim() || null,
           bucket,
+          funding: fundedBy ? [{ account_id: fundedBy }] : undefined,
         })
       }}
       submitLabel="Save"
@@ -289,6 +310,13 @@ export function AddPurchaseDialog({
         />
       </Field>
       <BucketField label="Goes to" value={bucket} onChange={setBucket} />
+      <AccountField
+        label="Paid from"
+        value={fundedBy}
+        onChange={setPaidFrom}
+        accounts={accounts}
+        hint="Paying out of your own pocket means the group owes you for it."
+      />
       <Advanced>
         <Field label="Shipping">
           <input
@@ -330,7 +358,13 @@ export function RecordSaleDialog({
   const [shippingPaid, setShippingPaid] = useState('')
   const [notes, setNotes] = useState('')
   const [bucket, setBucket] = useState<Bucket | null>(null)
+  const [paidInto, setPaidInto] = useState('')
   const [allowOversell, setAllowOversell] = useState(false)
+
+  const { accounts, mine } = useMyAccount()
+  // The payout lands in the seller's own account, so that is where the money goes unless
+  // somebody says otherwise. Moving it to the joint account is a later, deliberate act.
+  const proceedsTo = paidInto || mine?.id || ''
 
   const create = useLedgerMutation(api.createSale, onClose)
 
@@ -397,6 +431,7 @@ export function RecordSaleDialog({
           sold_by_member_id: soldBy || null,
           marketplace: marketplace || null,
           bucket: soldFrom,
+          proceeds_account_id: proceedsTo || null,
           notes: notes.trim() || null,
           allow_oversell: allowOversell,
         })
@@ -471,6 +506,14 @@ export function RecordSaleDialog({
         value={marketplace}
         onChange={setMarketplace}
         onPickKnown={suggestFees}
+      />
+
+      <AccountField
+        label="Money went to"
+        value={proceedsTo}
+        onChange={setPaidInto}
+        accounts={accounts}
+        hint="Holding it yourself lowers what the group owes you. Move it later if you want."
       />
 
       <div className="grid grid-cols-2 gap-4">
@@ -702,6 +745,58 @@ function BucketField({
       {hint && <span className="mt-1 block text-xs text-(--color-faint)">{hint}</span>}
     </div>
   )
+}
+
+/**
+ * Which pot the money came out of, or went into.
+ *
+ * Chips for the same reason buckets get chips: there are four or five accounts and they
+ * are the vocabulary of the money side. Nothing here is required - both places that use
+ * it arrive with the right answer already selected, so the fast path is to ignore it.
+ */
+function AccountField({
+  label,
+  value,
+  onChange,
+  accounts,
+  hint,
+}: {
+  label: string
+  value: string
+  onChange: (accountId: string) => void
+  accounts: Account[]
+  hint?: string
+}) {
+  return (
+    <div>
+      <span className="text-sm font-medium text-(--color-muted)">{label}</span>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {accounts.map((account) => (
+          <button
+            key={account.id}
+            type="button"
+            onClick={() => onChange(account.id)}
+            className={`rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+              value === account.id
+                ? 'border-(--color-accent) bg-(--color-accent)/12 font-medium text-(--color-accent)'
+                : 'border-(--color-edge) text-(--color-muted) hover:text-(--color-text)'
+            }`}
+          >
+            {account.name}
+          </button>
+        ))}
+      </div>
+      {hint && <span className="mt-1 block text-xs text-(--color-faint)">{hint}</span>}
+    </div>
+  )
+}
+
+/** The account belonging to the signed-in member, which is the default on both forms. */
+function useMyAccount(): { accounts: Account[]; mine: Account | undefined } {
+  const me = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const items = accounts.data?.items ?? []
+  return { accounts: items, mine: items.find((account) => account.member_id === me.data?.id) }
 }
 
 /** The bucket holding the most stock - the one a sale most likely came out of. */

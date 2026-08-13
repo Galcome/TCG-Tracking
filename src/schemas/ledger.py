@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.models.ledger import ADJUSTMENT_REASONS, BUCKET_INVENTORY, BUCKETS
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.schemas.money_ledger import FundingLeg
 from src.schemas.taxonomy import TaxonomyRead
 
 MAX_QUANTITY = 1_000_000
@@ -62,6 +63,9 @@ class PurchaseCreate(BaseModel):
     source: str | None = Field(default=None, max_length=160)
     bucket: str = BucketField
     notes: str | None = None
+    #: Who paid, and how much of it. Omitted, it goes on whoever bought it - the same rule
+    #: as a sale's proceeds. An empty list records no money movement at all.
+    funding: list[FundingLeg] | None = None
 
     @field_validator("source", "notes", mode="after")
     @classmethod
@@ -80,6 +84,9 @@ class PurchaseUpdate(BaseModel):
     source: str | None = Field(default=None, max_length=160)
     notes: str | None = None
     reason: str | None = Field(default=None, max_length=500)
+    #: Sent, this replaces who paid. Left out, existing funding is rescaled in the same
+    #: proportions to whatever the purchase now costs.
+    funding: list[FundingLeg] | None = None
 
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> "PurchaseUpdate":
@@ -124,6 +131,9 @@ class SaleCreate(BaseModel):
     #: Which bucket the stock left from.
     bucket: str = BucketField
     notes: str | None = None
+    #: Where the money landed. Omitted, it follows the seller, because that is where an
+    #: eBay payout actually goes. Moving it to the joint account is a separate, later act.
+    proceeds_account_id: uuid.UUID | None = None
     #: Deliberate override for correcting history. Without it, overselling is a 409.
     allow_oversell: bool = False
 
@@ -144,6 +154,9 @@ class SaleUpdate(BaseModel):
     marketplace: str | None = Field(default=None, max_length=120)
     notes: str | None = None
     reason: str | None = Field(default=None, max_length=500)
+    #: Sent, this moves where the money landed. Left out, an existing proceeds record
+    #: follows the sale's new net amount.
+    proceeds_account_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> "SaleUpdate":

@@ -17,6 +17,7 @@ import {
   Package,
   Plus,
   ScrollText,
+  Wallet,
   Store,
   Vault,
 } from 'lucide-react'
@@ -41,8 +42,10 @@ interface NavItem {
   bucket?: string
   /** Nested under All stock in the sidebar. */
   child?: boolean
-  /** Six is already the ceiling for a bottom tab bar at 375px. */
+  /** Shown on the bottom tab bar, where width is the binding constraint. */
   mobile?: boolean
+  /** Bottom-bar label, when the sidebar's is too wide for a seventh of 375px. */
+  shortLabel?: string
 }
 
 /**
@@ -53,12 +56,13 @@ interface NavItem {
  * not a place.
  */
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', Icon: LayoutDashboard, mobile: true },
+  { to: '/', label: 'Dashboard', Icon: LayoutDashboard, mobile: true, shortLabel: 'Home' },
   { to: '/inventory', label: 'All stock', Icon: Boxes, bucket: '' },
   { to: '/inventory?bucket=inventory', label: 'Inventory', Icon: Package, bucket: 'inventory', child: true, mobile: true },
   { to: '/inventory?bucket=store', label: 'Store', Icon: Store, bucket: 'store', child: true, mobile: true },
   { to: '/inventory?bucket=vault', label: 'Vault', Icon: Vault, bucket: 'vault', child: true, mobile: true },
   { to: '/sales', label: 'Sales', Icon: ScrollText, mobile: true },
+  { to: '/money', label: 'Money', Icon: Wallet, mobile: true },
   { to: '/reports', label: 'Reports', Icon: BarChart3, mobile: true },
 ]
 
@@ -303,8 +307,9 @@ export function AppShell({
         </button>
       </div>
 
-      {/* Six items is the ceiling at 375px, so All stock is the one that gives way - the
-          page it leads to carries the same choice as a tab strip at the top. */}
+      {/* All stock is the one that gives way here - the page it leads to carries the same
+          choice as a tab strip at the top. Everything else has to be reachable: a place you
+          cannot navigate to is not a place, which is the whole point of this bar. */}
       <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-(--color-edge) bg-(--color-ink)/95 backdrop-blur lg:hidden">
         {NAV.filter((item) => item.mobile).map((item) => (
           <NavLink
@@ -315,7 +320,7 @@ export function AppShell({
             }`}
           >
             <item.Icon size={19} strokeWidth={2} />
-            {item.label}
+            {item.shortLabel ?? item.label}
           </NavLink>
         ))}
       </nav>
