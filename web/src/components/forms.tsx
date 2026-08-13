@@ -405,6 +405,8 @@ export function RecordSaleDialog({
   const [soldBy, setSoldBy] = useState('')
   const [marketplace, setMarketplace] = useState('')
   const [platformFees, setPlatformFees] = useState('')
+  const [feesTouched, setFeesTouched] = useState(false)
+  const [feePercent, setFeePercent] = useState(0)
   const [paymentFees, setPaymentFees] = useState('')
   const [shippingPaid, setShippingPaid] = useState('')
   const [notes, setNotes] = useState('')
@@ -420,6 +422,24 @@ export function RecordSaleDialog({
 
   const create = useLedgerMutation(api.createSale, onClose)
 
+  // Suggest the channel's usual cut so the common case needs no arithmetic. It stays
+  // editable, because a promo or a store-credit deal changes it.
+  //
+  // The cut is *remembered* rather than applied once. It used to fire only when a channel
+  // chip was tapped, so entering 500, tapping TCGplayer and then correcting the total to
+  // 800 left the fee sitting at 51.25 — while the summary recomputed gross, cost basis,
+  // profit and ROI around it and presented all of it with complete confidence.
+  //
+  // Same rule as the product name: the suggestion keeps up until the person takes over,
+  // and then it never fights them again.
+  const suggestedFees =
+    feePercent > 0 && amount ? ((Number(amount) * feePercent) / 100).toFixed(2) : ''
+  const effectiveFees = feesTouched ? platformFees : suggestedFees || platformFees
+
+  function rememberChannelCut(_name: string, percent: number) {
+    setFeePercent(percent)
+  }
+
   // Computed by the server running the real FIFO engine. Doing it here would mean
   // re-implementing the engine in TypeScript and doing money arithmetic in floats, both
   // of which this project deliberately avoids.
@@ -429,7 +449,7 @@ export function RecordSaleDialog({
       picked?.id,
       quantity,
       amount,
-      platformFees,
+      effectiveFees,
       paymentFees,
       shippingPaid,
       saleDate,
@@ -440,20 +460,12 @@ export function RecordSaleDialog({
         product_id: picked!.id,
         quantity: Number(quantity),
         amount: amount || '0',
-        platform_fees: platformFees || '0',
+        platform_fees: effectiveFees || '0',
         payment_fees: paymentFees || '0',
         shipping_paid: shippingPaid || '0',
         sale_date: saleDate,
       }),
   })
-
-  // Suggest the channel's usual cut so the common case needs no arithmetic. It stays
-  // editable, because a promo or a store-credit deal changes it.
-  function suggestFees(_name: string, feePercent: number) {
-    if (amount && feePercent > 0) {
-      setPlatformFees(((Number(amount) * feePercent) / 100).toFixed(2))
-    }
-  }
 
   if (!picked) {
     return <ProductPickerDialog onClose={onClose} onPick={setPicked} />
@@ -476,7 +488,7 @@ export function RecordSaleDialog({
           product_id: picked.id,
           quantity: Number(quantity),
           amount,
-          platform_fees: platformFees || undefined,
+          platform_fees: effectiveFees || undefined,
           payment_fees: paymentFees || undefined,
           shipping_paid: shippingPaid || undefined,
           sale_date: saleDate,
@@ -564,7 +576,7 @@ export function RecordSaleDialog({
       <MarketplaceField
         value={marketplace}
         onChange={setMarketplace}
-        onPickKnown={suggestFees}
+        onPickKnown={rememberChannelCut}
       />
 
       <ProceedsField
@@ -605,11 +617,24 @@ export function RecordSaleDialog({
         </Field>
       </div>
 
-      <Field label="Platform fees" hint="Suggested from the channel; edit if it differed">
+      {/* The hint names the rate rather than just claiming a suggestion, so the number
+          carries its own provenance. Joseph, looking at a confident $51.25: "What is this
+          assumed price?" — that he had to ask was the finding. */}
+      <Field
+        label="Platform fees"
+        hint={
+          feePercent > 0 && !feesTouched
+            ? `${marketplace} usually takes ${feePercent}%. Check your payout — this is a rule of thumb, not a quote.`
+            : 'What the channel kept. Check it against what actually landed.'
+        }
+      >
         <input
           {...MONEY_INPUT}
-          value={platformFees}
-          onChange={(e) => setPlatformFees(e.target.value)}
+          value={effectiveFees}
+          onChange={(e) => {
+            setFeesTouched(true)
+            setPlatformFees(e.target.value)
+          }}
           className={FIELD_CLASS}
         />
       </Field>

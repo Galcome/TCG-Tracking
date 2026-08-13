@@ -329,6 +329,22 @@ export interface SalePreview {
  * There is no "Other" entry: the picker offers free text, and a sale filed under a literal
  * "Other" is a sale whose channel nobody can report on later. Anything not here is typed
  * in by name.
+ *
+ * ---
+ *
+ * **These rates are unverified, and they run low.** They were picked during the build and
+ * checked against nothing. They are headline *commission* and omit payment processing —
+ * TCGplayer takes roughly another 2.5% + $0.30, Whatnot roughly 2.9% + $0.30 — so the
+ * suggestion understates the deduction, which overstates realized profit on every sale in
+ * the same direction. An error that never averages out.
+ *
+ * They are a rule of thumb the person is expected to correct, and the field says so.
+ *
+ * **Awaiting Joseph's real figures**, taken from what the group actually gets deducted
+ * including their seller tiers. When those land, replace these and record where each came
+ * from and when it was checked — so the next person reads provenance instead of inventing
+ * their own guess. Do not "improve" them with more research in the meantime: a
+ * better-researched guess is still a guess.
  */
 export const MARKETPLACES = [
   { name: 'eBay', feePercent: 13.25, colour: '#4cc4ff' },

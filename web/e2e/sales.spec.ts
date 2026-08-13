@@ -1,7 +1,7 @@
 /** Correcting a sale from the screen it is looked at on, and selling off-platform. */
 import { expect, test } from '@playwright/test'
 
-import { addProduct, openProduct, recordSale, rx, statAmount } from './helpers'
+import { addProduct, openProduct, recordSale, rx, statAmount, uniqueName } from './helpers'
 
 /** The Sales row for one product, isolated by search so other specs cannot bleed in. */
 async function saleRow(page: import('@playwright/test').Page, name: string) {
@@ -83,3 +83,35 @@ test('unsold stock is listed under how long it has been sitting', async ({ page 
 function stat(page: import('@playwright/test').Page, label: string) {
   return page.getByText(label, { exact: true }).locator('xpath=..').locator('p').nth(1)
 }
+
+/**
+ * Joseph, looking at a confidently-suggested $51.25: "What is this assumed price?"
+ *
+ * It was 10.25% of $500 — and it only ever recalculated when a channel chip was tapped.
+ * Change the total afterwards and the fee stayed put while the summary recomputed profit
+ * and ROI around it, presenting a number that no longer related to the sale.
+ */
+test('the suggested fee follows the total, until you type your own', async ({ page }) => {
+  const box = await addProduct(page, {
+    name: uniqueName('Fee Box'),
+    quantity: 2,
+    total: '200.00',
+  })
+  await openProduct(page, box)
+
+  await page.getByRole('button', { name: 'Record sale' }).first().click()
+  const dialog = page.locator('form')
+
+  await dialog.getByLabel('Total received').fill('500.00')
+  await dialog.getByRole('button', { name: 'TCGplayer', exact: true }).click()
+  await expect(dialog.getByLabel('Platform fees')).toHaveValue('51.25')
+
+  // The whole bug: correcting the total used to leave the fee stranded at 51.25.
+  await dialog.getByLabel('Total received').fill('800.00')
+  await expect(dialog.getByLabel('Platform fees')).toHaveValue('82.00')
+
+  // Once it is yours, the app stops touching it — same rule as the product name.
+  await dialog.getByLabel('Platform fees').fill('60.00')
+  await dialog.getByLabel('Total received').fill('900.00')
+  await expect(dialog.getByLabel('Platform fees')).toHaveValue('60.00')
+})
