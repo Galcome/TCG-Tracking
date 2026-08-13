@@ -66,7 +66,9 @@ export async function addProduct(
     await dialog.getByLabel('Shipping').fill(options.shipping)
   }
 
-  await dialog.getByRole('button', { name: 'Save' }).click()
+  // exact: sets stay on as suggestion chips, and a set called "Saved …" would
+  // otherwise match this by substring and break every spec that adds a product.
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(dialog).toBeHidden()
 
   return name
