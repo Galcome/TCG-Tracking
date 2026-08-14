@@ -195,12 +195,24 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
 /**
  * Return against time held.
  *
- * Axis ticks are static SVG text. Dot labels are absolutely-positioned HTML over the
- * plot: SVG <text> inside a map does not lay out reliably across browsers, and HTML
- * gives ellipsis truncation for free.
+ * **A scatter has to earn its place.** With one or two points its whole language - shape,
+ * clustering, outliers - says nothing, and it degrades badly. The first version floored the
+ * x-axis at 30 days, so same-day sales crushed into the leftmost 3% of an empty plot, and
+ * mapped the best return to `top: 0`, which drew the winning dot half outside the chart.
+ * Below `SCATTER_MIN` points this draws a ranked bar instead, which reads at one row and
+ * says the same thing.
+ *
+ * Dot labels are absolutely-positioned HTML over the plot: SVG <text> inside a map does not
+ * lay out reliably across browsers, and HTML gives ellipsis truncation for free.
  */
+const SCATTER_MIN = 5
+
+/** Keeps the plot clear of its edges, so a dot at an extreme is still drawn whole. */
+const INSET = 8
+
 function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
   const plotted = rows.filter((row) => row.avg_days_held !== null && row.roi !== null)
+
   if (plotted.length === 0) {
     return (
       <Card>
@@ -212,43 +224,161 @@ function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
     )
   }
 
-  const maxDays = Math.max(...plotted.map((row) => row.avg_days_held ?? 0), 30)
-  const rois = plotted.map((row) => row.roi ?? 0)
-  const maxRoi = Math.max(...rois, 0.1)
-  const minRoi = Math.min(...rois, 0)
-  const maxUnits = Math.max(...plotted.map((row) => row.units_sold), 1)
-
-  const x = (days: number) => (days / maxDays) * 100
-  const y = (roi: number) => ((maxRoi - roi) / (maxRoi - minRoi || 1)) * 100
-  // Area scales with units, so a dot twice the size means twice the volume, not twice
-  // the radius.
-  const radius = (units: number) => 6 + Math.sqrt(units / maxUnits) * 16
+  const ranked = [...plotted].sort((a, b) => (b.roi ?? 0) - (a.roi ?? 0))
 
   return (
     <section>
       <div className="mb-2.5">
         <h2 className="font-display text-sm font-semibold">Return vs. time held</h2>
         <p className="text-xs text-(--color-faint)">
-          Each dot is a {noun}. Up is more profitable, left is faster to sell. Dot size is units
-          sold.
+          {plotted.length < SCATTER_MIN
+            ? `Return per ${noun}, best first. With a few more it becomes a scatter of return against how long each took to sell.`
+            : `Each dot is a ${noun}. Up is more profitable, left is faster to sell. Dot size is units sold.`}
         </p>
       </div>
 
-      <Card className="p-4">
-        <div className="relative h-72 w-full">
-          {/* Quadrant tint: fast and high-return is where you want to live. */}
-          <div className="absolute left-0 top-0 h-1/2 w-1/2 rounded-tl bg-(--color-gain)/[0.06]" />
+      {plotted.length < SCATTER_MIN ? (
+        <RankedReturn rows={ranked} />
+      ) : (
+        <ReturnScatter rows={plotted} />
+      )}
+    </section>
+  )
+}
+
+/**
+ * The small-N view: one labelled row per group, sorted by return.
+ *
+ * The label gets its own line, which is the entire point - in the scatter it was a 96px
+ * truncated box fighting every other label for the same pixels.
+ *
+ * A negative return runs left from the centre rather than being clamped to nothing: a loss
+ * has to look like a loss.
+ *
+ * Coloured by outcome rather than by game. `gameColour` takes a game slug, and every
+ * grouping except Game passes it a product, channel or seller name - which fell through to
+ * the grey "other" and said nothing. Green for profit, red for loss, matching the figure
+ * printed beside it.
+ */
+function RankedReturn({ rows }: { rows: GroupRow[] }) {
+  const widest = Math.max(...rows.map((row) => Math.abs(row.roi ?? 0)), 0.01)
+  const anyLoss = rows.some((row) => (row.roi ?? 0) < 0)
+
+  return (
+    <Card className="p-4">
+      <ul className="space-y-3.5">
+        {rows.map((row) => {
+          const roi = row.roi ?? 0
+          const share = (Math.abs(roi) / widest) * 100
+          return (
+            <li key={row.key}>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate">{row.label}</span>
+                <span
+                  className={`shrink-0 tabular-nums ${roi < 0 ? 'text-(--color-loss)' : 'text-(--color-gain)'}`}
+                >
+                  {percent(roi)}
+                </span>
+              </div>
+
+              <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-(--color-ink)/60">
+                {anyLoss && (
+                  <span className="flex h-full w-1/2 justify-end">
+                    {roi < 0 && (
+                      <span
+                        className="h-full rounded-l-full bg-(--color-loss)"
+                        style={{ width: `${share}%` }}
+                      />
+                    )}
+                  </span>
+                )}
+                <span className={`flex h-full ${anyLoss ? 'w-1/2' : 'w-full'}`}>
+                  {roi >= 0 && (
+                    <span
+                      className="h-full rounded-r-full bg-(--color-gain)"
+                      style={{ width: `${share}%` }}
+                    />
+                  )}
+                </span>
+              </div>
+
+              <p className="mt-1 text-[0.6875rem] text-(--color-faint)">
+                {row.units_sold} sold · {row.avg_days_held}d to sell ·{' '}
+                {money(row.realized_profit)}
+              </p>
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
+/** The scatter proper, drawn only once there are enough points to read a shape from. */
+function ReturnScatter({ rows }: { rows: GroupRow[] }) {
+  const days = rows.map((row) => row.avg_days_held ?? 0)
+  const rois = rows.map((row) => row.roi ?? 0)
+
+  // Scaled to the data, never to a hardcoded 30 days. The pad keeps extremes off the edges,
+  // and a zero span - every sale on the same day - still yields a usable range rather than
+  // dividing by nothing.
+  const dayLo = Math.min(...days)
+  const dayHi = Math.max(...days)
+  const daySpan = dayHi - dayLo || Math.max(dayHi, 1)
+  const roiLo = Math.min(...rois, 0)
+  const roiHi = Math.max(...rois)
+  const roiSpan = roiHi - roiLo || Math.abs(roiHi) || 0.1
+
+  const maxUnits = Math.max(...rows.map((row) => row.units_sold), 1)
+
+  const span = 100 - INSET * 2
+  const x = (d: number) => INSET + ((d - dayLo + daySpan * 0.08) / (daySpan * 1.16)) * span
+  const y = (r: number) => INSET + ((roiHi - r + roiSpan * 0.08) / (roiSpan * 1.16)) * span
+  const radius = (units: number) => 6 + Math.sqrt(units / maxUnits) * 14
+
+  // Label the biggest sellers, dropping any whose box would sit on one already placed. A
+  // missing label beats a pile of overlapping ones, and every dot keeps its tooltip.
+  const placed: { x: number; y: number }[] = []
+  const labelled = [...rows]
+    .sort((a, b) => b.units_sold - a.units_sold)
+    .filter((row) => {
+      const at = { x: x(row.avg_days_held ?? 0), y: y(row.roi ?? 0) }
+      if (placed.some((seen) => Math.abs(seen.x - at.x) < 18 && Math.abs(seen.y - at.y) < 12)) {
+        return false
+      }
+      placed.push(at)
+      return true
+    })
+    .slice(0, 8)
+
+  return (
+    <Card className="p-4">
+      {/* Captions sit in the gutters, outside the plot. Inside, the top-left one was exactly
+          where the best performer always lands, so the winner collided with it every time. */}
+      <div className="mb-1 pl-12 text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-gain)">
+        FAST + HIGH RETURN
+      </div>
+
+      <div className="flex gap-2">
+        <div className="flex w-10 shrink-0 flex-col justify-between py-1 text-right text-[0.625rem] tabular-nums text-(--color-faint)">
+          <span>{percent(roiHi)}</span>
+          {roiLo < 0 && <span>0%</span>}
+          <span>{percent(roiLo)}</span>
+        </div>
+
+        <div className="relative h-72 w-full rounded bg-(--color-ink)/30">
           <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-(--color-edge)" />
           <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-(--color-edge)" />
 
-          <span className="absolute left-2 top-2 text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-gain)">
-            FAST + HIGH RETURN
-          </span>
-          <span className="absolute bottom-2 right-2 text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-loss)">
-            SLOW + LOW RETURN
-          </span>
+          {/* Break-even, drawn only when something actually lost money. */}
+          {roiLo < 0 && (
+            <div
+              className="absolute inset-x-0 border-t border-(--color-loss)/40"
+              style={{ top: `${y(0)}%` }}
+            />
+          )}
 
-          {plotted.map((row) => {
+          {rows.map((row) => {
             const size = radius(row.units_sold)
             const colour = gameColour(slugOf(row.label))
             return (
@@ -268,10 +398,10 @@ function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
             )
           })}
 
-          {plotted.slice(0, 6).map((row) => (
+          {labelled.map((row) => (
             <span
               key={`${row.key}-label`}
-              className="pointer-events-none absolute max-w-24 -translate-x-1/2 translate-y-2 truncate text-center text-[0.625rem] text-(--color-muted)"
+              className="pointer-events-none absolute max-w-28 -translate-x-1/2 translate-y-3 truncate text-center text-[0.625rem] text-(--color-muted)"
               style={{
                 left: `${x(row.avg_days_held ?? 0)}%`,
                 top: `${y(row.roi ?? 0)}%`,
@@ -281,14 +411,17 @@ function ReturnVsTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
             </span>
           ))}
         </div>
+      </div>
 
-        <div className="mt-2 flex justify-between text-[0.625rem] text-(--color-faint)">
-          <span>0 days</span>
-          <span>AVERAGE DAYS HELD BEFORE SALE</span>
-          <span>{maxDays}d</span>
-        </div>
-      </Card>
-    </section>
+      <div className="mt-2 flex justify-between pl-12 text-[0.625rem] text-(--color-faint)">
+        <span>{dayLo}d</span>
+        <span>AVERAGE DAYS HELD BEFORE SALE</span>
+        <span>{dayHi}d</span>
+      </div>
+      <p className="mt-1 text-right text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-loss)">
+        SLOW + LOW RETURN
+      </p>
+    </Card>
   )
 }
 
