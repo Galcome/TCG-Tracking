@@ -224,7 +224,20 @@ export interface GroupRow {
   units_by_age: UnitsByAge
 }
 
-export type GroupBy = 'game' | 'product' | 'product-type' | 'marketplace' | 'seller'
+export type GroupBy =
+  | 'game'
+  | 'product'
+  | 'product-type'
+  | 'set-performance'
+  | 'marketplace'
+  | 'seller'
+
+/** Narrows every grouped report to part of the catalogue. Omitted keys mean no narrowing. */
+export interface ReportFilters {
+  set_id?: string
+  game_id?: string
+  product_type_id?: string
+}
 
 /** One purchase lot with units still on the shelf. `days_held` null means no known date. */
 export interface AgingLot {
@@ -896,8 +909,8 @@ export const api = {
 
   dashboard: (period: Period) => request<Dashboard>(`/api/v1/dashboard${query({ period })}`),
 
-  group: (by: GroupBy, period: Period) =>
-    request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period })}`),
+  group: (by: GroupBy, period: Period, filters: ReportFilters = {}) =>
+    request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period, ...filters })}`),
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
