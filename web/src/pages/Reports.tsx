@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Download } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -9,8 +9,10 @@ import {
   type GroupBy,
   type GroupRow,
   type Period,
+  type Product,
   type ReportFilters,
 } from '../api'
+import { downloadCsv, percentCell, UNKNOWN } from '../csv'
 import { PageHeader, type PageActions } from '../components/AppShell'
 import { SetReport, TierReport } from '../components/rollups'
 import { VaultReport } from '../components/vault-report'
@@ -73,6 +75,94 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
 
   const noun = GROUPS.find((g) => g.value === groupBy)?.noun ?? 'group'
 
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  /**
+   * Whatever is on screen, as a file.
+   *
+   * Exports the *filtered* rows deliberately. An export that ignores the controls above it
+   * is a different dataset wearing the same name, and nobody would notice until they built
+   * a decision on it.
+   */
+  function exportGroups() {
+    downloadCsv(
+      `tcg-by-${groupBy}`,
+      [
+        noun, 'units_purchased', 'units_sold', 'units_in_stock',
+        'revenue', 'cost_of_sales', 'realized_profit', 'roi_percent',
+        'inventory_at_cost', 'avg_days_held', 'sell_through_percent', 'profit_per_day',
+        'sales_missing_cost',
+      ],
+      sorted.map((row) => [
+        row.label,
+        row.units_purchased,
+        row.units_sold,
+        row.units_in_stock,
+        row.revenue,
+        row.cost_of_sales,
+        row.realized_profit,
+        percentCell(row.roi),
+        row.inventory_at_cost,
+        row.avg_days_held ?? UNKNOWN,
+        percentCell(row.sell_through),
+        row.profit_per_day ?? UNKNOWN,
+        row.sales_missing_cost,
+      ]),
+    )
+  }
+
+  /**
+   * Every product with stock, paged.
+   *
+   * Paged rather than asked for in one go: the endpoint caps a page at 200, and a request
+   * for more is rejected outright - which produced a file containing nothing but a header
+   * and no hint that anything had gone wrong. A silently truncated export is the same
+   * class of error as a silently truncated total.
+   */
+  async function exportInventory() {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const items: Product[] = []
+      const size = 200
+      for (let offset = 0; ; offset += size) {
+        const page = await api.products({ stock: 'in', limit: size, offset })
+        items.push(...page.items)
+        if (page.items.length < size || items.length >= page.total) break
+      }
+
+      downloadCsv(
+        'tcg-inventory',
+        [
+          'product', 'set', 'game', 'type', 'language',
+          'units', 'inventory', 'store', 'vault',
+          'unit_cost', 'inventory_at_cost', 'realized_profit_to_date',
+        ],
+        items.map((item) => [
+          item.name,
+          item.set_name ?? UNKNOWN,
+          item.game.name,
+          item.product_type.name,
+          item.language ?? UNKNOWN,
+          item.stats.quantity_on_hand,
+          item.stats.by_bucket.inventory,
+          item.stats.by_bucket.store,
+          item.stats.by_bucket.vault,
+          item.stats.average_unit_cost ?? UNKNOWN,
+          item.stats.remaining_cost,
+          item.stats.realized_profit,
+        ]),
+      )
+    } catch (error) {
+      // Said out loud. A failed export that hands over an empty file is worse than one
+      // that refuses, because the file looks like an answer.
+      setExportError((error as Error).message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader title="Reports" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
@@ -94,7 +184,23 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
         </div>
       </PageHeader>
 
-      <ReportFilterBar value={filters} onChange={setFilters} />
+      {exportError && (
+        <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+          {exportError}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ReportFilterBar value={filters} onChange={setFilters} />
+        <div className="flex gap-2">
+          <ExportButton onClick={exportGroups} disabled={sorted.length === 0}>
+            This view
+          </ExportButton>
+          <ExportButton onClick={exportInventory} disabled={exporting}>
+            {exporting ? 'Collecting…' : 'Inventory'}
+          </ExportButton>
+        </div>
+      </div>
 
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -200,6 +306,29 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
 
       {sorted.length > 0 && <FifoNote />}
     </div>
+  )
+}
+
+/** A small outline button, so the exports read as tools rather than page actions. */
+function ExportButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-(--color-edge) px-2.5 py-1.5 text-xs text-(--color-muted) transition-colors hover:border-(--color-edge-strong) hover:text-(--color-text) disabled:opacity-40"
+    >
+      <Download size={13} />
+      {children}
+    </button>
   )
 }
 

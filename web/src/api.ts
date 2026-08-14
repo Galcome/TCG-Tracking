@@ -256,6 +256,9 @@ export interface ProductSummary {
   name: string
   game: Taxonomy
   product_type: Taxonomy
+  /** Carried so an exported sale can be pivoted by set without a second lookup. */
+  set_name: string | null
+  language: string | null
 }
 
 /** A sale in the cross-product ledger. Money is a decimal string; null means unknown. */
@@ -809,6 +812,9 @@ export const api = {
     stock?: string
     bucket?: string
     include_archived?: boolean
+    /** The endpoint has always paged; only the export needs to ask for a big one. */
+    limit?: number
+    offset?: number
   }) => request<ProductPage>(`/api/v1/products${query(params)}`),
 
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),
