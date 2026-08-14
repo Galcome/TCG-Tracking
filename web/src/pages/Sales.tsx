@@ -15,6 +15,7 @@ import {
   Skeleton,
   Stat,
 } from '../components/ui'
+import { downloadCsv, percentCell, UNKNOWN } from '../csv'
 import { money, shortDate, signedMoney, toneFor } from '../format'
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -109,35 +110,47 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   }, [rows])
 
   function exportCsv() {
+    // Set, type and language are here because set is the unit the group buys and sells in
+    // - an export without it forces the reader to rebuild that mapping by hand. Days held
+    // and ROI are here because they are the two numbers the app computes that a
+    // spreadsheet cannot recover from the rest of the row.
     const header = [
-      'date', 'product', 'game', 'marketplace', 'sold_by', 'quantity',
-      'gross', 'fees', 'net', 'cost_basis', 'profit', 'status',
+      'date', 'product', 'set', 'game', 'type', 'language',
+      'marketplace', 'sold_by', 'quantity',
+      'gross', 'platform_fees', 'payment_fees', 'shipping_paid', 'net',
+      'cost_basis', 'unit_cost', 'profit', 'roi_percent', 'days_held', 'status',
     ]
-    const body = rows.map((row) => [
-      row.sale_date ?? '',
-      row.product.name,
-      row.product.game.name,
-      row.marketplace ?? '',
-      row.sold_by_member_id ? (memberName[row.sold_by_member_id] ?? '') : '',
-      row.quantity,
-      row.amount,
-      channelFees(row).toFixed(2),
-      row.net_proceeds,
-      // Empty, not 0 - an unknown cost must not become a number in a spreadsheet.
-      row.cost_basis ?? '',
-      row.realized_profit ?? '',
-      row.status,
-    ])
-    const csv = [header, ...body]
-      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n')
 
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `tcg-sales-${new Date().toISOString().slice(0, 10)}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
+    const body = rows.map((row) => {
+      const cost = row.cost_basis === null ? null : Number(row.cost_basis)
+      const profit = row.realized_profit === null ? null : Number(row.realized_profit)
+      return [
+        row.sale_date ?? UNKNOWN,
+        row.product.name,
+        row.product.set_name ?? UNKNOWN,
+        row.product.game.name,
+        row.product.product_type.name,
+        row.product.language ?? UNKNOWN,
+        row.marketplace ?? UNKNOWN,
+        row.sold_by_member_id ? (memberName[row.sold_by_member_id] ?? UNKNOWN) : UNKNOWN,
+        row.quantity,
+        row.amount,
+        row.platform_fees,
+        row.payment_fees,
+        row.shipping_paid,
+        row.net_proceeds,
+        // Unknown stays empty. A zero here becomes "it was free" the moment somebody
+        // sums the column.
+        row.cost_basis ?? UNKNOWN,
+        cost === null || row.quantity === 0 ? UNKNOWN : (cost / row.quantity).toFixed(2),
+        row.realized_profit ?? UNKNOWN,
+        percentCell(cost && profit !== null ? profit / cost : null),
+        row.days_held_weighted ?? UNKNOWN,
+        row.status,
+      ]
+    })
+
+    downloadCsv('tcg-sales', header, body)
   }
 
   return (

@@ -180,6 +180,11 @@ class ProductSummary(BaseModel):
     name: str
     game: TaxonomyRead
     product_type: TaxonomyRead
+    #: Carried so an exported sale can be pivoted by set without a second lookup. Set is
+    #: the unit the group buys and sells in, and a sales export without it forces the
+    #: reader to rebuild the mapping by hand in the spreadsheet.
+    set_name: str | None = None
+    language: str | None = None
 
 
 class SaleRead(BaseModel):
