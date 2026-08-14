@@ -5,7 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api, BUCKET_LABELS, BUCKETS, type Bucket, type Product } from '../api'
 import {
   ArrowLeftRight,
-  PackageOpen,
+  FileText,
   PackageSearch,
   Pencil,
   Plus,
@@ -347,8 +347,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                           Edit
                         </RowAction>
                         <RowLink to={`/products/${product.id}`}>
-                          <PackageOpen size={13} />
-                          Open
+                          <FileText size={13} />
+                          Details
                         </RowLink>
                       </span>
                     </td>
@@ -404,8 +404,8 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       Edit
                     </RowAction>
                     <RowLink to={`/products/${product.id}`}>
-                      <PackageOpen size={13} />
-                      Open
+                      <FileText size={13} />
+                      Details
                     </RowLink>
                   </div>
                 </Card>
@@ -417,7 +417,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
             <FifoNote />
             {products.data && (
               <p className="text-xs text-(--color-muted)">
-                Open a product to crack, rip or grade it · {items.length} shown
+                Pick a product to sell, move, crack or rip it · {items.length} shown
               </p>
             )}
           </div>

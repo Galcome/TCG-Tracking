@@ -58,13 +58,17 @@ test('a case becomes its boxes, and the cost goes with them', async ({ page }) =
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
   await expect(dialog).toBeHidden()
 
-  // The case is gone and its money is not.
-  await expect(statAmount(page, 'In stock')).resolves.toBe(0)
-  await expect(statAmount(page, 'Inventory at cost')).resolves.toBe(0)
-
-  await openProduct(page, boxName)
+  // You land on the boxes, because that is where the money now is.
+  await expect(page.getByRole('heading', { name: boxName })).toBeVisible({ timeout: 10_000 })
   await expect(statAmount(page, 'In stock')).resolves.toBe(6)
   await expect(statAmount(page, 'Inventory at cost')).resolves.toBe(900)
+
+  // And the case is gone, with its money moved rather than lost. Back rather than a
+  // search: an emptied case has zero stock, so the default In-stock list hides it.
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: caseName })).toBeVisible({ timeout: 10_000 })
+  await expect(statAmount(page, 'In stock')).resolves.toBe(0)
+  await expect(statAmount(page, 'Inventory at cost')).resolves.toBe(0)
 })
 
 test('opening a case is not spending money again', async ({ page }) => {
@@ -153,8 +157,12 @@ test('what came out of what is on the page, and can be undone', async ({ page })
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
   await expect(dialog).toBeHidden()
 
-  // The chain, on the case's own page. Scoped to the row that can be undone: the
-  // all-in lineage summary above it lists the same box and has no Undo of its own.
+  // The chain, on the case's own page - the crack now lands on the boxes, so come back.
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: caseName })).toBeVisible({ timeout: 10_000 })
+
+  // Scoped to the row that can be undone: the all-in lineage summary above it lists the
+  // same box and has no Undo of its own.
   const row = page
     .getByRole('listitem')
     .filter({ hasText: boxName })
@@ -258,4 +266,30 @@ test('a Japanese case suggests twenty boxes, not six', async ({ page }) => {
   await page.getByRole('button', { name: 'Crack open' }).click()
 
   await expect(page.locator('form').getByLabel('Boxes per case')).toHaveValue('20')
+})
+
+/**
+ * Joseph, after cracking a box into packs: "why am I still at Booster box? it makes me
+ * think I haven't actually opened it."
+ *
+ * The dialog closed, the data refreshed silently, and every bit of evidence that anything
+ * happened sat below the fold. Worse, the source is now at zero, so you were left looking
+ * at a page for something you no longer have.
+ */
+test('cracking lands you on what you just made', async ({ page }) => {
+  const kase = await addCase(page, '900.00')
+  const boxName = uniqueName('Landed Box')
+
+  await openProduct(page, kase)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  const dialog = page.locator('form')
+  await dialog.getByLabel('Boxes per case').fill('6')
+  await dialog.getByLabel('Name').fill(boxName)
+  await dialog.getByRole('button', { name: 'Crack it open' }).click()
+  await expect(dialog).toBeHidden()
+
+  // The boxes, not the case that no longer exists.
+  await expect(page.getByRole('heading', { name: boxName })).toBeVisible({ timeout: 10_000 })
+  await expect(statAmount(page, 'In stock')).resolves.toBe(6)
 })

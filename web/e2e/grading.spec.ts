@@ -68,12 +68,17 @@ test('it comes back as a graded card carrying the fees', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Record it' }).click()
   await expect(dialog).toBeHidden()
 
-  // The raw card is gone.
-  await expect(statAmount(page, 'In stock')).resolves.toBe(0)
-
-  // And the graded one carries $560 + $30.
-  await openProduct(page, `${name} — PSA 10`)
+  // You land on the slab, which is what now exists - and it carries $560 + $30.
+  await expect(page.getByRole('heading', { name: `${name} — PSA 10` })).toBeVisible({
+    timeout: 10_000,
+  })
   await expect(statAmount(page, 'Inventory at cost')).resolves.toBe(590)
+
+  // The raw card is gone. Back rather than a search, because at zero stock the default
+  // In-stock list no longer lists it.
+  await page.goBack()
+  await expect(page.getByRole('heading', { name })).toBeVisible({ timeout: 10_000 })
+  await expect(statAmount(page, 'In stock')).resolves.toBe(0)
 })
 
 /**

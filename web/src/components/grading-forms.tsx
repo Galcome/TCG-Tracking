@@ -12,7 +12,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { BUCKET_LABELS, BUCKETS, api, type Bucket, type ProductDetail } from '../api'
 import { todayIso } from '../format'
@@ -219,6 +220,12 @@ export function ReturnFromGradingDialog({
   const [gradedValue, setGradedValue] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // The raw card is consumed and the slab takes its place, so this page is about to be
+  // about something that no longer exists. Land on the graded card instead. A ref rather
+  // than state: the callback below is built during this render and would read a stale null.
+  const navigate = useNavigate()
+  const gradedId = useRef<string | null>(null)
+
   // Pre-filled and editable, rebuilt as the grade is typed until somebody overrides it.
   const suggested = gradedName(product.name, gradingCompany, grade)
   const finalName = name || suggested
@@ -250,7 +257,10 @@ export function ReturnFromGradingDialog({
       }
       return returned
     },
-    onClose,
+    () => {
+      onClose()
+      if (gradedId.current) navigate(`/products/${gradedId.current}`)
+    },
   )
 
   async function submit(event: React.FormEvent) {
@@ -271,6 +281,7 @@ export function ReturnFromGradingDialog({
         '',
       set_name: product.set_name ?? null,
     })
+    gradedId.current = created.id
     run.mutate(created.id)
   }
 

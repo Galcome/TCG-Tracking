@@ -20,7 +20,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import {
   BUCKET_LABELS,
@@ -70,6 +71,7 @@ export function CrackCaseDialog({
   onClose: () => void
 }) {
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
+  const navigate = useNavigate()
 
   // The dialog serves two jobs - a case into boxes, a box into packs - so every word and
   // every default has to come from what is actually being opened. It used to say "How many
@@ -138,6 +140,16 @@ export function CrackCaseDialog({
   const untouched = allocated === 0
   const available = held[fromBucket] ?? 0
 
+  // Cracking leaves the source at zero, so staying here means staring at a page for
+  // something you no longer have and wondering whether it worked. Everything that proves
+  // it did is below the fold. Land on what came out instead: it is where the value went
+  // and where the next action is - moving it to the Store or the Vault.
+  //
+    // A ref, not state: the success callback is created during this render, so a state
+    // value set moments before `mutate` would still read as null inside it. A ref is read
+    // when the callback actually runs.
+  const madeId = useRef<string | null>(null)
+
   const run = useLedgerMutation(
     async (input: {
       productId: string
@@ -150,7 +162,10 @@ export function CrackCaseDialog({
         outputs: input.outputs,
         occurred_on: occurredOn,
       }),
-    onClose,
+    () => {
+      onClose()
+      if (madeId.current) navigate(`/products/${madeId.current}`)
+    },
   )
 
   async function submit(event: React.FormEvent) {
@@ -191,6 +206,7 @@ export function CrackCaseDialog({
           bucket,
         }))
 
+    madeId.current = productId
     run.mutate({ productId, outputs })
   }
 

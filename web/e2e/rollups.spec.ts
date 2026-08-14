@@ -93,6 +93,10 @@ test('a case shows what it returned all-in', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
   await expect(dialog).toBeHidden()
 
+  // Cracking lands on the boxes, so come back to the case whose rollup this is.
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: caseName })).toBeVisible({ timeout: 10_000 })
+
   // The chain, and what went in against what has come back.
   await expect(page.getByText('WENT IN')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('$600.00').first()).toBeVisible()
