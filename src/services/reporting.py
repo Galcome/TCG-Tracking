@@ -704,6 +704,81 @@ def by_set(
     )
 
 
+@dataclass
+class MonthRow:
+    """One calendar month of trading."""
+
+    #: ISO first-of-month, so the client sorts and labels without parsing anything.
+    month: str
+    spent_cents: int = 0
+    realized_profit_cents: int = 0
+    revenue_cents: int = 0
+    units_sold: int = 0
+    units_bought: int = 0
+
+
+#: A year is enough to see a direction and short enough to stay readable. A chart nobody
+#: can read is the problem being fixed here, not a feature.
+MONTHS_SHOWN = 12
+
+
+def by_month(db: Session, today: date | None = None) -> list[MonthRow]:
+    """Spend, profit and volume per calendar month, oldest first.
+
+    Purchases are bucketed by **purchase date** and sales by **sale date**, so a month
+    shows what was actually committed and earned in it rather than when a row was typed.
+
+    Months with no activity at all are omitted rather than emitted as zeros: a flat line
+    across a month nobody traded in reads as a bad month, when it was no month at all.
+    """
+    reference = today or date.today()
+    earliest = date(reference.year - 1, reference.month, 1)
+
+    months: dict[str, MonthRow] = {}
+
+    def row_for(when: date) -> MonthRow:
+        key = date(when.year, when.month, 1).isoformat()
+        return months.setdefault(key, MonthRow(month=key))
+
+    spent = (
+        Purchase.gross_amount_cents
+        + Purchase.shipping_cents
+        + Purchase.tax_cents
+        + Purchase.fees_cents
+    )
+    purchases = select(Purchase.purchase_date, spent, Purchase.quantity).where(
+        Purchase.status == STATUS_ACTIVE,
+        Purchase.purchase_date.is_not(None),
+        Purchase.purchase_date >= earliest,
+        # Cost carried across a transformation is not money spent again.
+        Purchase.is_derived.is_(False),
+    )
+    for when, amount, quantity in db.execute(purchases):
+        row = row_for(when)
+        row.spent_cents += int(amount or 0)
+        row.units_bought += int(quantity)
+
+    sales = select(
+        Sale.sale_date,
+        _NET_KNOWN,
+        func.coalesce(Sale.cost_basis_cents, 0),
+        Sale.gross_amount_cents,
+        Sale.quantity,
+    ).where(
+        Sale.status == STATUS_ACTIVE,
+        Sale.sale_date.is_not(None),
+        Sale.sale_date >= earliest,
+    )
+    for when, net_known, cost, gross, quantity in db.execute(sales):
+        row = row_for(when)
+        row.realized_profit_cents += int(net_known or 0) - int(cost or 0)
+        row.revenue_cents += int(gross or 0)
+        row.units_sold += int(quantity)
+
+    ordered = sorted(months.values(), key=lambda row: row.month)
+    return ordered[-MONTHS_SHOWN:]
+
+
 def by_marketplace(
     db: Session,
     period: str = PERIOD_ALL,

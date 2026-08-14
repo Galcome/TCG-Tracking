@@ -246,6 +246,8 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
 
       <CapitalAndConcentration rows={sorted} />
 
+      <MonthByMonth />
+
       <section>
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
           Was the strategy right?
@@ -311,6 +313,94 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
   )
 }
 
+
+
+/**
+ * Spend against profit, month by month.
+ *
+ * The period control answers "how are we doing" and never "compared to when". This is the
+ * only view on the page that answers the second one.
+ *
+ * Paired bars rather than lines: two lines crossing invite the eye to read a relationship
+ * between spend and profit in the same month, and there usually is not one - stock bought
+ * in March sells in June. Bars sit side by side and claim nothing.
+ */
+function MonthByMonth() {
+  const months = useQuery({ queryKey: ['byMonth'], queryFn: api.byMonth })
+
+  if (months.isLoading) return <Skeleton className="h-48 w-full" />
+  if (!months.data?.length) return null
+
+  const rows = months.data
+  const biggest = Math.max(
+    ...rows.map((row) => Math.max(Number(row.spent), Math.abs(Number(row.realized_profit)))),
+    1,
+  )
+
+  return (
+    <section>
+      <div className="mb-2.5">
+        <h2 className="font-display text-sm font-semibold">Month by month</h2>
+        <p className="text-xs text-(--color-faint)">
+          What went out against what came back. Stock bought in one month often sells in
+          another, so read the trend rather than any single pair.
+        </p>
+      </div>
+
+      <Card className="overflow-x-auto p-4">
+        <div className="flex min-w-fit items-end gap-3">
+          {rows.map((row) => {
+            const spent = Number(row.spent)
+            const profit = Number(row.realized_profit)
+            return (
+              <div key={row.month} className="flex w-14 shrink-0 flex-col items-center gap-1.5">
+                <div className="flex h-32 w-full items-end justify-center gap-1">
+                  <span
+                    title={`Spent ${money(row.spent)}`}
+                    className="w-4 rounded-t bg-(--color-muted)/50"
+                    style={{ height: `${Math.max((spent / biggest) * 100, spent > 0 ? 2 : 0)}%` }}
+                  />
+                  <span
+                    title={`Profit ${money(row.realized_profit)}`}
+                    className={`w-4 rounded-t ${profit < 0 ? 'bg-(--color-loss)' : 'bg-(--color-gain)'}`}
+                    style={{
+                      height: `${Math.max((Math.abs(profit) / biggest) * 100, profit !== 0 ? 2 : 0)}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-[0.625rem] text-(--color-faint)">
+                  {monthLabel(row.month)}
+                </span>
+                <span className="text-[0.625rem] tabular-nums text-(--color-muted)">
+                  {row.units_sold}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-4 text-[0.6875rem] text-(--color-faint)">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-sm bg-(--color-muted)/50" /> spent
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-sm bg-(--color-gain)" /> realized profit
+          </span>
+          <span>the number under each month is units sold</span>
+        </div>
+      </Card>
+    </section>
+  )
+}
+
+/** "2026-08-01" -> "Aug". The year only where it changes, so it reads as a run. */
+function monthLabel(iso: string): string {
+  const when = new Date(`${iso}T00:00:00`)
+  return when.toLocaleDateString(undefined, {
+    month: 'short',
+    ...(when.getMonth() === 0 ? { year: '2-digit' } : {}),
+  })
+}
 
 /**
  * What the money is doing, and how much of it is riding on one bet.
