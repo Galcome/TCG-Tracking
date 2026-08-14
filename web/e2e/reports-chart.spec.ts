@@ -151,3 +151,50 @@ test('a filter narrows the numbers rather than hiding rows', async ({ page }) =>
   await page.getByRole('button', { name: 'Clear' }).click()
   await expect(page.getByText(/has anything to report/)).toBeHidden({ timeout: 10_000 })
 })
+
+/**
+ * The investor view: how much is committed, how much came back, how exposed is one bet.
+ *
+ * The reports answered "what did we make?" and never answered either of those. For three
+ * people's pooled money, concentration is the single most useful risk sentence the app can
+ * produce — and it needed no new data, only the rows already on the page.
+ */
+test('capital committed, returned and still at risk are all stated', async ({ page }) => {
+  const name = await addProduct(page, {
+    name: uniqueName('Capital Box'),
+    quantity: 4,
+    total: '400.00',
+  })
+  await openProduct(page, name)
+  await recordSale(page, { quantity: 2, total: '500.00', platformFees: '0' })
+
+  await page.goto('/reports')
+  const card = page.locator('section').filter({ hasText: 'Where the capital is' })
+  await expect(card).toBeVisible({ timeout: 10_000 })
+
+  // exact: the card's own blurb and the "% of committed" note both contain these words.
+  await expect(card.getByText('Committed', { exact: true })).toBeVisible()
+  await expect(card.getByText('Returned', { exact: true })).toBeVisible()
+  await expect(card.getByText('Still at risk', { exact: true })).toBeVisible()
+
+  // Returned is stated against what was committed, not in isolation: profit alone says
+  // nothing about how much had to be tied up to get it.
+  await expect(card.getByText(/of committed/)).toBeVisible()
+})
+
+test('concentration is measured against what is still at risk', async ({ page }) => {
+  const name = await addProduct(page, {
+    name: uniqueName('Concentrated Box'),
+    quantity: 2,
+    total: '200.00',
+  })
+  await openProduct(page, name)
+
+  await page.goto('/reports')
+  const card = page.locator('section').filter({ hasText: 'Where the capital is' })
+  await expect(card.getByText('Concentration', { exact: true })).toBeVisible({ timeout: 10_000 })
+
+  // Money already returned is not exposed to anything, so it is excluded on purpose and
+  // the card says so rather than leaving the reader to assume.
+  await expect(card.getByText(/still at risk/).first()).toBeVisible()
+})
