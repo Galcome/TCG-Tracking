@@ -419,6 +419,19 @@ export function caseSize(gameSlug: string, language?: string | null): number | u
  * Same rules as case size: language matters, and anything unconfirmed is simply absent
  * rather than guessed.
  */
+/**
+ * The two languages the size tables distinguish.
+ *
+ * English is the default because it is nearly everything the group buys. Japanese exists
+ * because it changes both suggestions substantially - 20 boxes a case against six, 30
+ * packs a box against 36 - and getting that wrong on a case is a five-figure-quantity
+ * error in the split.
+ *
+ * Deliberately not a full language list: nothing else changes a number, and a longer
+ * dropdown is friction on the screen that has to stay fastest.
+ */
+export const LANGUAGES = ['English', 'Japanese'] as const
+
 export const BOX_SIZES: { game: string; japanese?: boolean; packs: number }[] = [
   { game: 'pokemon', packs: 36 },
   { game: 'pokemon', japanese: true, packs: 30 },
@@ -665,6 +678,8 @@ export interface NewProduct {
   game_id: string
   product_type_id: string
   set_name?: string | null
+  /** Drives the case and box size suggestions: a Japanese case is 20 boxes, not six. */
+  language?: string | null
   storage_location?: string | null
   notes?: string | null
   initial_purchase?: {

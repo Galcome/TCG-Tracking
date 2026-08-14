@@ -210,3 +210,52 @@ test('opening a case still talks about cases and boxes', async ({ page }) => {
   await expect(dialog.getByText('How many cases')).toBeVisible()
   await expect(dialog.getByLabel('Boxes per case')).toHaveValue('6')
 })
+
+/**
+ * Language changes both suggestions, and until it could be set it never changed anything.
+ *
+ * `language` was on the model, accepted by the API and read by both size lookups — but no
+ * screen ever set it, so it was always null and both tables' Japanese rows were dead. A
+ * Japanese case quietly suggested six boxes, which is the English answer and looks
+ * perfectly reasonable.
+ */
+test('a Japanese box suggests Japanese sizes', async ({ page }) => {
+  await gotoInventory(page)
+  await page.getByRole('button', { name: 'Add product' }).first().click()
+
+  const add = page.locator('form')
+  const name = uniqueName('JP Box')
+  await add.getByLabel('Name').fill(name)
+  await add.getByLabel('Product type').selectOption({ label: 'Booster Box' })
+  await add.getByLabel('Language').selectOption({ label: 'Japanese' })
+  await add.getByLabel('Quantity').fill('1')
+  await add.getByLabel('Total paid').fill('400.00')
+  await add.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(add).toBeHidden()
+
+  await openProduct(page, name)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  // 30 packs in a Japanese box, against 36 in an English one.
+  await expect(page.locator('form').getByLabel('Packs per box')).toHaveValue('30')
+})
+
+test('a Japanese case suggests twenty boxes, not six', async ({ page }) => {
+  await gotoInventory(page)
+  await page.getByRole('button', { name: 'Add product' }).first().click()
+
+  const add = page.locator('form')
+  const name = uniqueName('JP Case')
+  await add.getByLabel('Name').fill(name)
+  await add.getByLabel('Product type').selectOption({ label: 'Sealed Case' })
+  await add.getByLabel('Language').selectOption({ label: 'Japanese' })
+  await add.getByLabel('Quantity').fill('1')
+  await add.getByLabel('Total paid').fill('4000.00')
+  await add.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(add).toBeHidden()
+
+  await openProduct(page, name)
+  await page.getByRole('button', { name: 'Crack open' }).click()
+
+  await expect(page.locator('form').getByLabel('Boxes per case')).toHaveValue('20')
+})

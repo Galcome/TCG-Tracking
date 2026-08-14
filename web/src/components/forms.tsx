@@ -12,6 +12,7 @@ import {
   ADJUSTMENT_REASONS,
   BUCKET_LABELS,
   BUCKETS,
+  LANGUAGES,
   MARKETPLACES,
   api,
   type Account,
@@ -69,6 +70,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const [tax, setTax] = useState('')
   const [fees, setFees] = useState('')
   const [setLabel, setSetLabel] = useState('')
+  const [language, setLanguage] = useState<string>('English')
   const [storage, setStorage] = useState('')
   const [source, setSource] = useState('')
   const [bucket, setBucket] = useState<Bucket>('inventory')
@@ -107,6 +109,7 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
       game_id: gameId,
       product_type_id: typeId,
       set_name: setLabel.trim() || null,
+      language,
       storage_location: storage.trim() || null,
       initial_purchase: {
         quantity: Number(quantity),
@@ -164,6 +167,26 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
           </select>
         </Field>
       </div>
+
+      {/* English unless somebody says otherwise, which is nearly everything the group
+          buys. It earns its place by changing the opening suggestions substantially: a
+          Japanese case holds 20 boxes against six, and a Japanese box 30 packs against 36.
+          Until this existed the tables' Japanese rows could never fire, so a Japanese case
+          quietly suggested six. */}
+      <Field label="Language" hint="Changes the case and box sizes suggested when you open it.">
+        <select
+          aria-label="Language"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          className={FIELD_CLASS}
+        >
+          {LANGUAGES.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <SetField
         gameSlug={games.data?.find((option) => option.id === gameId)?.slug}
@@ -1316,6 +1339,9 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
   const [gameId, setGame] = useState(item.game.id)
   const [typeId, setType] = useState(item.product_type.id)
   const [setLabel, setSetLabel] = useState(item.set_name ?? '')
+  // Editable here as well, so a product added before the field existed can be corrected
+  // rather than deleted and re-entered.
+  const [language, setLanguage] = useState(item.language ?? 'English')
   const [storage, setStorage] = useState(item.storage_location ?? '')
 
   const purchases = item.history.filter(
@@ -1341,6 +1367,7 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
     if (gameId !== item.game.id) productChanges.game_id = gameId
     if (typeId !== item.product_type.id) productChanges.product_type_id = typeId
     if (setLabel.trim() !== (item.set_name ?? '')) productChanges.set_name = setLabel.trim() || null
+    if (language !== (item.language ?? 'English')) productChanges.language = language
     if (storage.trim() !== (item.storage_location ?? '')) {
       productChanges.storage_location = storage.trim() || null
     }
@@ -1487,6 +1514,20 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
           value={setLabel}
           onChange={setSetLabel}
         />
+        <Field label="Language" hint="Drives the sizes suggested when this is opened.">
+          <select
+            aria-label="Language"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className={FIELD_CLASS}
+          >
+            {LANGUAGES.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Storage location">
           <input
             value={storage}
