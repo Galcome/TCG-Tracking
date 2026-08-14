@@ -211,6 +211,32 @@ def read_by_set_performance(
     return reporting.by_set(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
+class MonthRead(BaseModel):
+    """One calendar month of trading."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    month: str
+    spent: MoneyOut = Field(validation_alias="spent_cents")
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    revenue: MoneyOut = Field(validation_alias="revenue_cents")
+    units_sold: int
+    units_bought: int
+
+
+@router.get("/reports/by-month", response_model=list[MonthRead])
+def read_by_month(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    """The last twelve months of trading, oldest first.
+
+    No period parameter: the point of this one is the trend, and a period filter over a
+    trend chart would just be a shorter trend.
+    """
+    return reporting.by_month(db)
+
+
 @router.get("/reports/aging", response_model=list[AgingLotRead])
 def read_aging(
     _: Member = Depends(get_current_member),

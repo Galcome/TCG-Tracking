@@ -198,3 +198,27 @@ test('concentration is measured against what is still at risk', async ({ page })
   // the card says so rather than leaving the reader to assume.
   await expect(card.getByText(/still at risk/).first()).toBeVisible()
 })
+
+/**
+ * "Are we getting better?" — the one question the period toggle could never answer.
+ */
+test('months are shown side by side, with what was spent against what came back', async ({
+  page,
+}) => {
+  const name = await addProduct(page, {
+    name: uniqueName('Trend Box'),
+    quantity: 2,
+    total: '200.00',
+  })
+  await openProduct(page, name)
+  await recordSale(page, { quantity: 1, total: '350.00', platformFees: '0' })
+
+  await page.goto('/reports')
+  const trend = page.locator('section').filter({ hasText: 'Month by month' })
+  await expect(trend).toBeVisible({ timeout: 10_000 })
+
+  // The legend has to say which bar is which; two grey bars would be a puzzle.
+  await expect(trend.getByText('spent', { exact: true })).toBeVisible()
+  await expect(trend.getByText('realized profit', { exact: true })).toBeVisible()
+  await expect(trend.getByText(/units sold/)).toBeVisible()
+})

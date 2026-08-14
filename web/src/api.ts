@@ -224,6 +224,16 @@ export interface GroupRow {
   units_by_age: UnitsByAge
 }
 
+/** One calendar month of trading. `month` is an ISO first-of-month. */
+export interface MonthRow {
+  month: string
+  spent: string
+  realized_profit: string
+  revenue: string
+  units_sold: number
+  units_bought: number
+}
+
 export type GroupBy =
   | 'game'
   | 'product'
@@ -917,6 +927,8 @@ export const api = {
 
   group: (by: GroupBy, period: Period, filters: ReportFilters = {}) =>
     request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period, ...filters })}`),
+  /** The last twelve months, oldest first. No period: the point of it is the trend. */
+  byMonth: () => request<MonthRow[]>('/api/v1/reports/by-month'),
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
