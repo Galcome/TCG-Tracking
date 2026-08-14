@@ -107,6 +107,20 @@ class AgingLotRead(BaseModel):
     days_held: int | None
 
 
+SetQuery = Query(default=None, description="Narrow to one set.")
+GameQuery = Query(default=None, description="Narrow to one game.")
+TypeQuery = Query(default=None, description="Narrow to one product type.")
+
+
+def _filters(
+    set_id: uuid.UUID | None, game_id: uuid.UUID | None, product_type_id: uuid.UUID | None
+) -> reporting.Filters:
+    """The same three narrowings on every grouped report, so one control drives them all."""
+    return reporting.Filters(
+        set_id=set_id, game_id=game_id, product_type_id=product_type_id
+    )
+
+
 PeriodQuery = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$")
 
 
@@ -122,47 +136,79 @@ def read_dashboard(
 @router.get("/reports/by-game", response_model=list[GroupRead])
 def read_by_game(
     period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
-    return reporting.by_game(db, period)
+    return reporting.by_game(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/by-product", response_model=list[GroupRead])
 def read_by_product(
     period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
-    return reporting.by_product(db, period)
+    return reporting.by_product(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/by-product-type", response_model=list[GroupRead])
 def read_by_product_type(
     period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
-    return reporting.by_product_type(db, period)
+    return reporting.by_product_type(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/by-marketplace", response_model=list[GroupRead])
 def read_by_marketplace(
     period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
     """Where things sold. Sales with no marketplace collapse into "Unspecified"."""
-    return reporting.by_marketplace(db, period)
+    return reporting.by_marketplace(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/by-seller", response_model=list[GroupRead])
 def read_by_seller(
     period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session),
 ):
-    return reporting.by_seller(db, period)
+    return reporting.by_seller(db, period, filters=_filters(set_id, game_id, product_type_id))
+
+
+@router.get("/reports/by-set-performance", response_model=list[GroupRead])
+def read_by_set_performance(
+    period: str = PeriodQuery,
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+):
+    """Sets compared against each other, so the group can see which ones actually paid.
+
+    Named apart from `/reports/by-set`, which is the three-figure rollup for reading one
+    set honestly. Two different questions, two different shapes.
+    """
+    return reporting.by_set(db, period, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/aging", response_model=list[AgingLotRead])

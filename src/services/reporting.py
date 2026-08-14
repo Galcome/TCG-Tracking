@@ -18,6 +18,7 @@ from datetime import date
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from src.models.card_set import CardSet
 from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.member import Member
 from src.models.money import (
@@ -320,6 +321,46 @@ class _Grouping:
     keep_unsold: bool = False
 
 
+@dataclass(frozen=True)
+class Filters:
+    """Narrows a report to part of the catalogue.
+
+    Every field is a property of the *product*, deliberately. That means one set of
+    matching product ids narrows the sales aggregate and the stock attribution together,
+    so a filtered report cannot show sales from one slice against inventory from another.
+
+    Bucket is **not** here. A bucket belongs to stock, not to a product, so "filter by
+    Store" has two different meanings - stock sitting in the Store now, or sales that came
+    out of it - and a filter that silently picks one of them is worse than no filter.
+    """
+
+    set_id: uuid.UUID | None = None
+    game_id: uuid.UUID | None = None
+    product_type_id: uuid.UUID | None = None
+
+    @property
+    def active(self) -> bool:
+        return any((self.set_id, self.game_id, self.product_type_id))
+
+
+def matching_products(db: Session, filters: Filters | None) -> set[uuid.UUID] | None:
+    """Product ids the filters allow, or `None` when nothing is being filtered.
+
+    `None` rather than "every id" so the unfiltered path adds no work and no query.
+    """
+    if filters is None or not filters.active:
+        return None
+
+    stmt = select(Product.id)
+    if filters.set_id is not None:
+        stmt = stmt.where(Product.set_id == filters.set_id)
+    if filters.game_id is not None:
+        stmt = stmt.where(Product.game_id == filters.game_id)
+    if filters.product_type_id is not None:
+        stmt = stmt.where(Product.product_type_id == filters.product_type_id)
+    return {row[0] for row in db.execute(stmt)}
+
+
 def _weighted_days(pairs: list[tuple[int, int | None]]) -> int | None:
     """Quantity-weighted mean of (quantity, days) pairs, ignoring unknown hold times."""
     known = [(quantity, days) for quantity, days in pairs if days is not None]
@@ -329,8 +370,15 @@ def _weighted_days(pairs: list[tuple[int, int | None]]) -> int | None:
     return round(sum(quantity * days for quantity, days in known) / total)
 
 
-def _grouped(db: Session, grouping: _Grouping, period: str, today: date | None) -> list[GroupRow]:
+def _grouped(
+    db: Session,
+    grouping: _Grouping,
+    period: str,
+    today: date | None,
+    filters: Filters | None = None,
+) -> list[GroupRow]:
     start = period_start(period, today)
+    allowed = matching_products(db, filters)
     rows: dict[object, GroupRow] = {
         key: GroupRow(key=str(key), label=label) for key, label in grouping.labels.items()
     }
@@ -343,19 +391,27 @@ def _grouped(db: Session, grouping: _Grouping, period: str, today: date | None) 
             return stmt
         return stmt.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
 
-    sales = in_period(
-        select(
-            grouping.sale_key,
-            func.coalesce(func.sum(_NET_KNOWN), 0),
-            func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
-            func.coalesce(func.sum(Sale.gross_amount_cents), 0),
-            func.count(),
-            func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
-            func.coalesce(func.sum(Sale.quantity), 0),
+    def in_scope(stmt):
+        """Narrow to the filtered catalogue. Both sale queries already join Product."""
+        if allowed is None:
+            return stmt
+        return stmt.where(Product.id.in_(allowed))
+
+    sales = in_scope(
+        in_period(
+            select(
+                grouping.sale_key,
+                func.coalesce(func.sum(_NET_KNOWN), 0),
+                func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
+                func.coalesce(func.sum(Sale.gross_amount_cents), 0),
+                func.count(),
+                func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
+                func.coalesce(func.sum(Sale.quantity), 0),
+            )
+            .join(Product, Product.id == Sale.product_id)
+            .where(Sale.status == STATUS_ACTIVE)
+            .group_by(grouping.sale_key)
         )
-        .join(Product, Product.id == Sale.product_id)
-        .where(Sale.status == STATUS_ACTIVE)
-        .group_by(grouping.sale_key)
     )
 
     for key, net_known, cost, gross, count, unknown, units in db.execute(sales):
@@ -369,10 +425,12 @@ def _grouped(db: Session, grouping: _Grouping, period: str, today: date | None) 
 
     # Hold time is already weighted per sale, so it cannot be averaged in the same
     # aggregate as the money without under-weighting large sales.
-    hold = in_period(
-        select(grouping.sale_key, Sale.quantity, Sale.days_held_weighted)
-        .join(Product, Product.id == Sale.product_id)
-        .where(Sale.status == STATUS_ACTIVE)
+    hold = in_scope(
+        in_period(
+            select(grouping.sale_key, Sale.quantity, Sale.days_held_weighted)
+            .join(Product, Product.id == Sale.product_id)
+            .where(Sale.status == STATUS_ACTIVE)
+        )
     )
     per_group: dict[object, list[tuple[int, int | None]]] = {}
     for key, quantity, days in db.execute(hold):
@@ -381,7 +439,12 @@ def _grouped(db: Session, grouping: _Grouping, period: str, today: date | None) 
         row_for(key).avg_days_held = _weighted_days(pairs)
 
     if grouping.product_key is not None:
-        _attach_stock(db, grouping.product_key, row_for, today)
+        scoped = (
+            grouping.product_key
+            if allowed is None
+            else {pid: key for pid, key in grouping.product_key.items() if pid in allowed}
+        )
+        _attach_stock(db, scoped, row_for, today)
 
     ranked = [
         row
@@ -546,7 +609,12 @@ def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
     return rows
 
 
-def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
+def by_game(
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
+) -> list[GroupRow]:
     """Performance grouped by game, best first."""
     return _grouped(
         db,
@@ -558,10 +626,16 @@ def by_game(db: Session, period: str = PERIOD_ALL, today: date | None = None) ->
         ),
         period,
         today,
+        filters,
     )
 
 
-def by_product(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
+def by_product(
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
+) -> list[GroupRow]:
     """Performance grouped by individual product."""
     return _grouped(
         db,
@@ -573,11 +647,15 @@ def by_product(db: Session, period: str = PERIOD_ALL, today: date | None = None)
         ),
         period,
         today,
+        filters,
     )
 
 
 def by_product_type(
-    db: Session, period: str = PERIOD_ALL, today: date | None = None
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
 ) -> list[GroupRow]:
     """Performance grouped by product type - sealed against singles against slabs."""
     return _grouped(
@@ -590,11 +668,47 @@ def by_product_type(
         ),
         period,
         today,
+        filters,
+    )
+
+
+def by_set(
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
+) -> list[GroupRow]:
+    """Performance grouped by set - the unit the group actually buys and sells in.
+
+    Products with no set fall under "Unspecified" rather than being dropped, the same way
+    `by_marketplace` handles a sale with no channel. A row silently excluded is how a total
+    stops reconciling with the dashboard.
+
+    Distinct from `rollups.by_set`, which stays: that one reads a single set honestly as
+    three figures that are never blended (sold / still trying / held on purpose). This one
+    compares sets against each other. They answer different questions and must not merge.
+    """
+    labels = dict(db.execute(select(CardSet.id, CardSet.name)).all())
+    labels[None] = "Unspecified"
+    return _grouped(
+        db,
+        _Grouping(
+            sale_key=Product.set_id,
+            labels=labels,
+            product_key=dict(db.execute(select(Product.id, Product.set_id)).all()),
+            keep_unsold=True,
+        ),
+        period,
+        today,
+        filters,
     )
 
 
 def by_marketplace(
-    db: Session, period: str = PERIOD_ALL, today: date | None = None
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
 ) -> list[GroupRow]:
     """Where things actually sold.
 
@@ -611,10 +725,16 @@ def by_marketplace(
         ),
         period,
         today,
+        filters,
     )
 
 
-def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) -> list[GroupRow]:
+def by_seller(
+    db: Session,
+    period: str = PERIOD_ALL,
+    today: date | None = None,
+    filters: Filters | None = None,
+) -> list[GroupRow]:
     """Per-member sales performance.
 
     These are performance figures, not ownership. Every unit belongs to the store; this
@@ -629,6 +749,7 @@ def by_seller(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
         ),
         period,
         today,
+        filters,
     )
 
 

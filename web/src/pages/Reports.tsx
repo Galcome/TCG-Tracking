@@ -3,7 +3,14 @@ import { ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { api, type AgingLot, type GroupBy, type GroupRow, type Period } from '../api'
+import {
+  api,
+  type AgingLot,
+  type GroupBy,
+  type GroupRow,
+  type Period,
+  type ReportFilters,
+} from '../api'
 import { PageHeader, type PageActions } from '../components/AppShell'
 import { SetReport, TierReport } from '../components/rollups'
 import { VaultReport } from '../components/vault-report'
@@ -21,6 +28,7 @@ const GROUPS: { value: GroupBy; label: string; noun: string }[] = [
   { value: 'game', label: 'Game', noun: 'game' },
   { value: 'product', label: 'Product', noun: 'product' },
   { value: 'product-type', label: 'Type', noun: 'product type' },
+  { value: 'set-performance', label: 'Set', noun: 'set' },
   { value: 'marketplace', label: 'Channel', noun: 'channel' },
   { value: 'seller', label: 'Seller', noun: 'seller' },
 ]
@@ -42,10 +50,11 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
   const [period, setPeriod] = useState<Period>('all')
   const [groupBy, setGroupBy] = useState<GroupBy>('game')
   const [sort, setSort] = useState<SortKey>('profit')
+  const [filters, setFilters] = useState<ReportFilters>({})
 
   const rows = useQuery({
-    queryKey: ['group', groupBy, period],
-    queryFn: () => api.group(groupBy, period),
+    queryKey: ['group', groupBy, period, filters],
+    queryFn: () => api.group(groupBy, period, filters),
   })
 
   const sorted = useMemo(() => {
@@ -84,6 +93,8 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
           ))}
         </div>
       </PageHeader>
+
+      <ReportFilterBar value={filters} onChange={setFilters} />
 
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -191,6 +202,105 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
     </div>
   )
 }
+
+/**
+ * Narrows every section on the page at once.
+ *
+ * One control rather than one per card, because a page where the table is filtered and the
+ * chart beside it is not shows two different datasets under one heading. The filter goes
+ * to the server, so the numbers are recomputed rather than hidden - a row filtered out in
+ * the browser would still be inside the totals.
+ *
+ * Bucket is deliberately absent: a bucket belongs to stock rather than to a product, so
+ * "filter by Store" could mean stock sitting there now or sales that came out of it, and
+ * silently picking one is worse than not offering it.
+ */
+function ReportFilterBar({
+  value,
+  onChange,
+}: {
+  value: ReportFilters
+  onChange: (next: ReportFilters) => void
+}) {
+  const games = useQuery({ queryKey: ['games'], queryFn: api.games })
+  const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
+
+  // Sets belong to a game, so the set list waits for one. That is not a limitation to
+  // work around - a flat list of every set across six games is unusable, and picking the
+  // game first is the step that makes the second dropdown short.
+  const gameSlug = games.data?.find((option) => option.id === value.game_id)?.slug
+  const sets = useQuery({
+    queryKey: ['sets', gameSlug],
+    enabled: Boolean(gameSlug),
+    queryFn: () => api.sets({ game: gameSlug! }),
+  })
+
+  const active = Object.values(value).filter(Boolean).length
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs uppercase tracking-wide text-(--color-faint)">Filter</span>
+
+      <select
+        aria-label="Filter by game"
+        value={value.game_id ?? ''}
+        // Clearing the game clears the set too: a set belongs to a game, and leaving a
+        // Lorcana set selected under Pokemon would return nothing and look broken.
+        onChange={(e) => onChange({ ...value, game_id: e.target.value || undefined, set_id: undefined })}
+        className={FILTER_CLASS}
+      >
+        <option value="">All games</option>
+        {games.data?.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+
+      <select
+        aria-label="Filter by set"
+        value={value.set_id ?? ''}
+        disabled={!gameSlug}
+        onChange={(e) => onChange({ ...value, set_id: e.target.value || undefined })}
+        className={`${FILTER_CLASS} disabled:opacity-40`}
+      >
+        <option value="">{gameSlug ? 'All sets' : 'All sets — pick a game'}</option>
+        {(sets.data?.items ?? []).map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+
+      <select
+        aria-label="Filter by product type"
+        value={value.product_type_id ?? ''}
+        onChange={(e) => onChange({ ...value, product_type_id: e.target.value || undefined })}
+        className={FILTER_CLASS}
+      >
+        <option value="">All types</option>
+        {types.data?.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+
+      {active > 0 && (
+        <button
+          type="button"
+          onClick={() => onChange({})}
+          className="text-xs text-(--color-accent) hover:underline"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
+const FILTER_CLASS =
+  'rounded-lg border border-(--color-edge) bg-(--color-surface)/70 px-2.5 py-1.5 text-[0.8125rem] text-(--color-text) outline-none transition-colors hover:border-(--color-edge-strong) focus:border-(--color-accent)'
 
 /**
  * Return against time held.

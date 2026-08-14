@@ -83,3 +83,71 @@ test('the reports page does not scroll sideways on a phone', async ({ page }) =>
   )
   expect(overflow).toBeLessThanOrEqual(1)
 })
+
+/**
+ * Sets as an axis, and a filter that narrows the whole page.
+ *
+ * Joseph: "You also can't really filter by sets." Group-by offered game, product, type,
+ * channel and seller — every axis except the one the group actually buys and sells in.
+ */
+test('sets can be compared as an axis of their own', async ({ page }) => {
+  const setName = uniqueName('Axis Set')
+  const name = await addProduct(page, {
+    name: uniqueName('Axis Box'),
+    quantity: 2,
+    total: '200.00',
+  })
+
+  // Give it a set, then sell one so it has a return to report.
+  await openProduct(page, name)
+  await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+  const edit = page.locator('form')
+  await edit.getByText('Advanced').click()
+  await edit.getByPlaceholder('Start typing, or pick one below').fill(setName)
+  await edit.getByRole('button', { name: 'Save changes' }).click()
+  await expect(edit).toBeHidden()
+
+  await recordSale(page, { quantity: 1, total: '400.00', platformFees: '0' })
+
+  await page.goto('/reports')
+  await page.getByRole('button', { name: 'Set', exact: true }).click()
+
+  await expect(page.getByText(setName).first()).toBeVisible({ timeout: 10_000 })
+})
+
+test('the set filter waits for a game, then narrows the page', async ({ page }) => {
+  await page.goto('/reports')
+
+  // A flat list of every set across six games is unusable; picking the game first is the
+  // step that makes the second dropdown short.
+  await expect(page.getByLabel('Filter by set')).toBeDisabled()
+
+  await page.getByLabel('Filter by game').selectOption({ label: 'Pokémon' })
+  await expect(page.getByLabel('Filter by set')).toBeEnabled()
+
+  // Clearing the game clears the set with it: a set belongs to a game, and a Lorcana set
+  // left selected under Pokémon would return nothing and look broken.
+  await page.getByLabel('Filter by game').selectOption({ label: 'All games' })
+  await expect(page.getByLabel('Filter by set')).toBeDisabled()
+})
+
+test('a filter narrows the numbers rather than hiding rows', async ({ page }) => {
+  const name = await addProduct(page, {
+    name: uniqueName('Narrowed Box'),
+    quantity: 1,
+    total: '100.00',
+  })
+  await openProduct(page, name)
+  await recordSale(page, { quantity: 1, total: '250.00', platformFees: '0' })
+
+  await page.goto('/reports')
+
+  // Filtering to a type nothing was sold under empties the report, and clearing brings it
+  // back. That round trip is the proof the filter reaches the server rather than hiding
+  // rows in the browser - a row hidden client-side would still be inside the totals.
+  await page.getByLabel('Filter by product type').selectOption({ label: 'Binder' })
+  await expect(page.getByText(/has anything to report/)).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Clear' }).click()
+  await expect(page.getByText(/has anything to report/)).toBeHidden({ timeout: 10_000 })
+})
