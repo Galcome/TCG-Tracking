@@ -244,6 +244,8 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
         </div>
       </div>
 
+      <CapitalAndConcentration rows={sorted} />
+
       <section>
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
           Was the strategy right?
@@ -305,6 +307,132 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
       <MoneyAsleep />
 
       {sorted.length > 0 && <FifoNote />}
+    </div>
+  )
+}
+
+
+/**
+ * What the money is doing, and how much of it is riding on one bet.
+ *
+ * The reports answered "what did we make?" well and never answered the two questions a
+ * person putting money in actually asks: how much is committed, and how exposed are we.
+ *
+ * Everything here is already computed - `total_invested`, `net_proceeds`,
+ * `inventory_at_cost` and `cost_written_off` all come off the dashboard aggregate, and the
+ * concentration is the grouped rows the page already has. No new query.
+ *
+ * Deliberately **not** here: IRR, XIRR, or anything annualised. Those look authoritative
+ * and mean nothing across a few months and a few dozen trades - the same class of error as
+ * quoting a fee rate nobody checked.
+ */
+function CapitalAndConcentration({ rows }: { rows: GroupRow[] }) {
+  const dashboard = useQuery({
+    queryKey: ['dashboard', 'all'],
+    queryFn: () => api.dashboard('all'),
+  })
+
+  if (!dashboard.data) return <Skeleton className="h-40 w-full" />
+
+  const committed = Number(dashboard.data.total_invested)
+  const returned = Number(dashboard.data.net_proceeds)
+  const atRisk = Number(dashboard.data.inventory_at_cost)
+  const writtenOff = Number(dashboard.data.cost_written_off)
+
+  // Of what has been committed, how much has come back. The honest headline for a pooled
+  // fund: not profit, which says nothing about how much had to be tied up to get it.
+  const recovered = committed > 0 ? returned / committed : null
+
+  // Concentration, largest first. Share of what is *still at risk*, because capital
+  // already returned is not exposed to anything.
+  const exposure = rows
+    .map((row) => ({ label: row.label, cost: Number(row.inventory_at_cost) }))
+    .filter((row) => row.cost > 0)
+    .sort((a, b) => b.cost - a.cost)
+  const exposed = exposure.reduce((sum, row) => sum + row.cost, 0)
+  const top = exposure[0]
+
+  return (
+    <section>
+      <div className="mb-2.5">
+        <h2 className="font-display text-sm font-semibold">Where the capital is</h2>
+        <p className="text-xs text-(--color-faint)">
+          What the group has committed, what has come back, and what is still on the shelf.
+        </p>
+      </div>
+
+      <Card className="p-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Figure label="Committed" value={money(committed.toFixed(2))} />
+          <Figure
+            label="Returned"
+            value={money(returned.toFixed(2))}
+            note={recovered === null ? undefined : `${percent(recovered)} of committed`}
+            tone="text-(--color-gain)"
+          />
+          <Figure label="Still at risk" value={money(atRisk.toFixed(2))} />
+          <Figure
+            label="Written off"
+            value={money(writtenOff.toFixed(2))}
+            tone={writtenOff > 0 ? 'text-(--color-loss)' : undefined}
+          />
+        </div>
+
+        {exposure.length > 0 && (
+          <div className="mt-5 border-t border-(--color-edge) pt-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs uppercase tracking-wide text-(--color-faint)">
+                Concentration
+              </span>
+              {top && (
+                <span className="text-xs text-(--color-muted)">
+                  {percent(top.cost / exposed)} in {top.label}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full bg-(--color-ink)/60">
+              {exposure.slice(0, 6).map((row, index) => (
+                <span
+                  key={row.label}
+                  title={`${row.label}: ${money(row.cost.toFixed(2))}`}
+                  style={{
+                    width: `${(row.cost / exposed) * 100}%`,
+                    backgroundColor: gameColour(slugOf(row.label)),
+                    opacity: 1 - index * 0.13,
+                  }}
+                />
+              ))}
+            </div>
+
+            <p className="mt-2 text-xs text-(--color-faint)">
+              Share of what is still at risk. Money already returned is not exposed to
+              anything, so it is left out of this bar deliberately.
+            </p>
+          </div>
+        )}
+      </Card>
+    </section>
+  )
+}
+
+/** One figure with its label, and an optional line of context under it. */
+function Figure({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string
+  value: string
+  note?: string
+  tone?: string
+}) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-(--color-faint)">{label}</p>
+      <p className={`mt-1 font-display text-xl tabular-nums ${tone ?? ''}`}>{value}</p>
+      {note && <p className="mt-0.5 text-xs text-(--color-muted)">{note}</p>}
     </div>
   )
 }
