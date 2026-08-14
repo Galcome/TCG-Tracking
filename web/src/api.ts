@@ -332,25 +332,40 @@ export interface SalePreview {
  *
  * ---
  *
- * **These rates are unverified, and they run low.** They were picked during the build and
- * checked against nothing. They are headline *commission* and omit payment processing —
- * TCGplayer takes roughly another 2.5% + $0.30, Whatnot roughly 2.9% + $0.30 — so the
- * suggestion understates the deduction, which overstates realized profit on every sale in
- * the same direction. An error that never averages out.
+ * **These are all-in rates: commission *and* payment processing.** The earlier numbers were
+ * headline commission only, which understated every deduction and so overstated realized
+ * profit on every sale, always in the same direction - an error that never averages out.
  *
- * They are a rule of thumb the person is expected to correct, and the field says so.
+ * Because they are all-in, leave **Payment fees** under Advanced at zero for these
+ * channels, or the processing gets counted twice.
  *
- * **Awaiting Joseph's real figures**, taken from what the group actually gets deducted
- * including their seller tiers. When those land, replace these and record where each came
- * from and when it was checked — so the next person reads provenance instead of inventing
- * their own guess. Do not "improve" them with more research in the meantime: a
- * better-researched guess is still a guess.
+ * Each rate ignores the small fixed per-order charge (eBay $0.40, TCGplayer and Whatnot
+ * $0.30, Facebook a $0.80 minimum). Those matter on a $5 bundle and are noise on a $500
+ * box; the figure is editable either way.
+ *
+ * **Checked 14 Aug 2026** against each platform's published schedule:
+ *
+ * - **eBay 13.25%** - final value fee for trading cards, which is inclusive of payment
+ *   processing under managed payments. Charged on item + shipping + tax, so a shipped
+ *   order costs slightly more than 13.25% of the item alone. Singles over $1,000 get half
+ *   off, which is worth correcting by hand when it happens.
+ * - **TCGplayer 13.25%** - 10.75% commission plus 2.5% processing. The commission rose
+ *   from 10.25% on 10 Feb 2026, so anything recorded before then used a lower rate. Pro
+ *   and Sync accounts pay 9.25% + 2.5% instead; if the group upgrades, this drops.
+ * - **Whatnot 10.9%** - 8% commission plus 2.9% processing.
+ * - **Facebook 10%** - shipped orders only, inclusive of processing. **Local pickup is
+ *   free**, so zero this out when somebody hands over a bundle in person, which is how
+ *   most bulk actually moves.
+ * - **In person 0%** - no platform, no cut.
+ *
+ * When these change, update the rate *and* this note. A number with no provenance is how
+ * the last set survived unquestioned for months.
  */
 export const MARKETPLACES = [
   { name: 'eBay', feePercent: 13.25, colour: '#4cc4ff' },
-  { name: 'TCGplayer', feePercent: 10.25, colour: '#a55eea' },
-  { name: 'Whatnot', feePercent: 8, colour: '#ffb454' },
-  { name: 'Facebook', feePercent: 5, colour: '#3ddc97' },
+  { name: 'TCGplayer', feePercent: 13.25, colour: '#a55eea' },
+  { name: 'Whatnot', feePercent: 10.9, colour: '#ffb454' },
+  { name: 'Facebook', feePercent: 10, colour: '#3ddc97' },
   { name: 'In person', feePercent: 0, colour: '#ffcb05' },
 ] as const
 

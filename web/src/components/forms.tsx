@@ -647,7 +647,7 @@ export function RecordSaleDialog({
         label="Platform fees"
         hint={
           feePercent > 0 && !feesTouched
-            ? `${marketplace} usually takes ${feePercent}%. Check your payout — this is a rule of thumb, not a quote.`
+            ? `${marketplace} usually takes ${feePercent}% all in, commission and processing. Check it against your payout.`
             : 'What the channel kept. Check it against what actually landed.'
         }
       >
@@ -711,7 +711,9 @@ export function RecordSaleDialog({
 
       <Advanced>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Payment fees">
+          {/* The channel suggestions above are all-in, so this stays zero for them.
+              It exists for a channel with no suggestion, or a processor billed separately. */}
+          <Field label="Payment fees" hint="Leave at zero when the channel fee above is all-in.">
             <input
               {...MONEY_INPUT}
               value={paymentFees}
@@ -1825,7 +1827,9 @@ export function EditTransactionDialog({
                     className={FIELD_CLASS}
                   />
                 </Field>
-                <Field label="Payment fees">
+                {/* The channel suggestions above are all-in, so this stays zero for them.
+              It exists for a channel with no suggestion, or a processor billed separately. */}
+          <Field label="Payment fees" hint="Leave at zero when the channel fee above is all-in.">
                   <input
                     {...MONEY_INPUT}
                     value={paymentFees}

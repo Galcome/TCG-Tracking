@@ -104,11 +104,11 @@ test('the suggested fee follows the total, until you type your own', async ({ pa
 
   await dialog.getByLabel('Total received').fill('500.00')
   await dialog.getByRole('button', { name: 'TCGplayer', exact: true }).click()
-  await expect(dialog.getByLabel('Platform fees')).toHaveValue('51.25')
+  await expect(dialog.getByLabel('Platform fees')).toHaveValue('66.25')
 
-  // The whole bug: correcting the total used to leave the fee stranded at 51.25.
+  // The whole bug: correcting the total used to leave the fee stranded at the old figure.
   await dialog.getByLabel('Total received').fill('800.00')
-  await expect(dialog.getByLabel('Platform fees')).toHaveValue('82.00')
+  await expect(dialog.getByLabel('Platform fees')).toHaveValue('106.00')
 
   // Once it is yours, the app stops touching it — same rule as the product name.
   await dialog.getByLabel('Platform fees').fill('60.00')
