@@ -339,9 +339,13 @@ export interface SalePreview {
  * Because they are all-in, leave **Payment fees** under Advanced at zero for these
  * channels, or the processing gets counted twice.
  *
+ * And a rate has to match the *flow the group actually uses*, not the one a fee page
+ * documents most prominently. Facebook sat at 10% here for exactly that reason: the number
+ * was real, and it described shipping through Facebook checkout, which nobody here does.
+ *
  * Each rate ignores the small fixed per-order charge (eBay $0.40, TCGplayer and Whatnot
- * $0.30, Facebook a $0.80 minimum). Those matter on a $5 bundle and are noise on a $500
- * box; the figure is editable either way.
+ * $0.30). Those matter on a $5 bundle and are noise on a $500 box; the figure is editable
+ * either way.
  *
  * **Checked 14 Aug 2026** against each platform's published schedule:
  *
@@ -353,9 +357,11 @@ export interface SalePreview {
  *   from 10.25% on 10 Feb 2026, so anything recorded before then used a lower rate. Pro
  *   and Sync accounts pay 9.25% + 2.5% instead; if the group upgrades, this drops.
  * - **Whatnot 10.9%** - 8% commission plus 2.9% processing.
- * - **Facebook 10%** - shipped orders only, inclusive of processing. **Local pickup is
- *   free**, so zero this out when somebody hands over a bundle in person, which is how
- *   most bulk actually moves.
+ * - **Facebook 0%** - Marketplace local sales are free. Facebook charges nothing for a
+ *   listing that ends in somebody handing over cash, and that is how this group sells: a
+ *   bundle of leftovers, locally, for ten bucks. There *is* a 10% fee on orders shipped
+ *   through Facebook's own checkout, but that is a different flow and not one they use -
+ *   putting its rate here made the app deduct a fee that was never charged.
  * - **In person 0%** - no platform, no cut.
  *
  * When these change, update the rate *and* this note. A number with no provenance is how
@@ -365,7 +371,7 @@ export const MARKETPLACES = [
   { name: 'eBay', feePercent: 13.25, colour: '#4cc4ff' },
   { name: 'TCGplayer', feePercent: 13.25, colour: '#a55eea' },
   { name: 'Whatnot', feePercent: 10.9, colour: '#ffb454' },
-  { name: 'Facebook', feePercent: 10, colour: '#3ddc97' },
+  { name: 'Facebook', feePercent: 0, colour: '#3ddc97' },
   { name: 'In person', feePercent: 0, colour: '#ffcb05' },
 ] as const
 
