@@ -167,10 +167,25 @@ That reads the top entry, which is the live deployment. `true` means it is genui
 `serviceManifest.deploy` in the same record is the resolved config; `fileServiceManifest.deploy`
 is only what the file asked for. When they disagree, the service manifest wins.
 
-Do not diagnose this by latency alone. A first request after a long idle already takes about a
-second because **Neon** is resuming its own compute, which looks like a container wake and is
-not one. The tell is `curl -w %{time_connect}`: a sleeping container cannot complete TCP and TLS
-in 70ms.
+Do not diagnose this by latency alone, and **do not use connect time as the tell**. Railway's
+edge terminates TLS and queues the request while the container starts, so `%{time_connect}` was
+73ms whether the container was asleep or awake - measured both ways on this service.
+
+Time to first byte is the honest signal, and only against a known warm baseline:
+
+| State | connect | ttfb |
+| --- | --- | --- |
+| Warm container | 0.073s | 0.94s |
+| Slept container waking | 0.073s | 4.38s |
+
+The warm case is not free either: about a second of that is **Neon** resuming its own compute,
+which reads like a container wake and is not one. Only the ~3.4s difference is Railway.
+
+The unambiguous check is the log, not the stopwatch - a wake always emits `Starting Container`:
+
+```bash
+railway logs -d --lines 200 | grep -E "Starting Container|Stopping Container"
+```
 
 ---
 
