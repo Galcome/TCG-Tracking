@@ -140,6 +140,40 @@ Bump it whenever the local uv used to regenerate `uv.lock` changes.
 
 ---
 
+## Railway - The Serverless Toggle Is Erased By The Next Deploy
+
+**Symptom:** "Enable Serverless" is on in the service settings, but the container never sleeps.
+Deploy logs show a single `Starting Container` spanning days, straight through idle gaps of
+sixteen hours, and you keep paying for an always-on service.
+
+**Cause:** `railway.json` is config-as-code, and its `deploy` block is authoritative for the
+deployment built from it. `sleepApplication` was not in the file, so every code deploy resolved
+it to `false` and silently overwrote whatever the dashboard said. Flipping the toggle creates a
+deployment with sleeping on; the next push to `main` replaces it with one that has sleeping off.
+We lost it in 83 seconds this way.
+
+**Fix:** `railway.json` now sets `"sleepApplication": true`. Set it in the file, not the
+dashboard - the dashboard value does not survive a deploy. This applies to *any* deploy setting:
+if it is not in `railway.json`, a deploy resets it.
+
+**Verify the running deployment rather than the toggle.** The settings page shows intent; the
+deployment manifest shows what is actually running:
+
+```bash
+railway deployment list --json | grep -m1 sleepApplication
+```
+
+That reads the top entry, which is the live deployment. `true` means it is genuinely armed.
+`serviceManifest.deploy` in the same record is the resolved config; `fileServiceManifest.deploy`
+is only what the file asked for. When they disagree, the service manifest wins.
+
+Do not diagnose this by latency alone. A first request after a long idle already takes about a
+second because **Neon** is resuming its own compute, which looks like a container wake and is
+not one. The tell is `curl -w %{time_connect}`: a sleeping container cannot complete TCP and TLS
+in 70ms.
+
+---
+
 ## Secret Artifacts - Browser Sessions And Variable Dumps
 
 **Symptom:** Git search shows cookies, auth tokens, Railway variable dumps, local sessions, or
