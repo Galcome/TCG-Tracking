@@ -16,7 +16,12 @@ from src.database import check_connection
 from src.routes.api_v1 import router as api_v1_router
 
 logger = logging.getLogger(__name__)
-SLOW_REQUEST_THRESHOLD_MS = 750.0
+# Railway sleeps this service after roughly ten minutes idle and Neon suspends its compute
+# alongside it, so the first request after a quiet spell spends about a second waiting on the
+# database to come back. At 750ms every request in the first dashboard load tripped this and
+# ten warnings arrived saying nothing except "nobody has used the app for a while". Three
+# seconds is above a cold Neon resume and still below anything genuinely pathological.
+SLOW_REQUEST_THRESHOLD_MS = 3000.0
 REQUEST_ID_HEADER = "X-Request-ID"
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 

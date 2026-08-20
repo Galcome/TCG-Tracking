@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.main import app, create_app
+from src.main import SLOW_REQUEST_THRESHOLD_MS, app, create_app
 
 client = TestClient(app)
 
@@ -63,7 +63,9 @@ def test_production_responses_include_hsts():
 def test_slow_requests_are_logged():
     with (
         patch("src.main.check_connection", return_value=True),
-        patch("src.main.perf_counter", side_effect=[0.0, 1.0]),
+        # Derived from the threshold rather than hardcoded, so raising the threshold
+        # cannot leave this test silently asserting nothing.
+        patch("src.main.perf_counter", side_effect=[0.0, SLOW_REQUEST_THRESHOLD_MS / 1000 + 1]),
         patch("src.main.logger.warning") as warning,
     ):
         response = client.get("/health")
