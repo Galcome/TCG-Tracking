@@ -91,7 +91,13 @@ export function initials(name: string): string {
   return (parts[0] ?? '?').slice(0, 2).toUpperCase()
 }
 
-function Wordmark({ size = 30 }: { size?: number }) {
+/**
+ * Three cards fanned out of a hand: two behind, one face-on and lit.
+ *
+ * Exported because the sign-in screen needs the same mark - the first thing anyone
+ * sees of this app should be the thing they see on every page afterwards.
+ */
+export function Wordmark({ size = 30 }: { size?: number }) {
   const card = { height: size * 0.7, width: size * 0.53, borderRadius: 3 }
   return (
     <span
@@ -99,19 +105,35 @@ function Wordmark({ size = 30 }: { size?: number }) {
       className="relative inline-flex items-center justify-center"
       style={{ height: size, width: size }}
     >
+      {/* Fanned, not stacked. Rotation alone left the two back cards hidden behind the
+          front one at every size the mark is actually used at, so the mark read as a
+          single blue rectangle; the sideways shift is what makes it a hand of cards. */}
       <span
         className="absolute"
-        style={{ ...card, background: 'rgba(255,203,5,0.8)', transform: 'rotate(-14deg)' }}
-      />
-      <span
-        className="absolute"
-        style={{ ...card, background: 'rgba(165,94,234,0.8)', transform: 'rotate(14deg)' }}
+        style={{
+          ...card,
+          background: 'rgba(255,203,5,0.85)',
+          transform: 'translateX(-32%) rotate(-16deg)',
+        }}
       />
       <span
         className="absolute"
         style={{
           ...card,
-          background: 'linear-gradient(180deg, #4cc4ff, #1d7fd4)',
+          background: 'rgba(165,94,234,0.85)',
+          transform: 'translateX(32%) rotate(16deg)',
+        }}
+      />
+      {/* The front card is the only one that catches light: a diagonal foil highlight
+          over the blue, so at 24px it still reads as a shiny card rather than a
+          rounded rectangle. */}
+      <span
+        className="absolute"
+        style={{
+          ...card,
+          background:
+            'linear-gradient(145deg, rgba(255,255,255,0.45) 0%, transparent 38%), ' +
+            'linear-gradient(180deg, #4cc4ff, #1d7fd4)',
           boxShadow: '0 2px 8px rgba(76,196,255,0.45)',
         }}
       />

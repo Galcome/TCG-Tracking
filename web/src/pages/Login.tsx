@@ -6,6 +6,8 @@ import {
 } from 'firebase/auth'
 import { useState, type FormEvent } from 'react'
 
+import { Wordmark } from '../components/AppShell'
+import { FIELD_CLASS } from '../components/ui'
 import { auth } from '../firebase'
 
 const GOOGLE_ERRORS: Record<string, string> = {
@@ -66,18 +68,65 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">TCG Card Investments</h1>
-          <p className="mt-1 text-sm text-(--color-muted)">Store ledger</p>
+    /* The sign-in screen is the one place with no data to show, so it is the one place
+       the card-back backdrop can be turned up: lattice over a pool of light, with the
+       panel sitting on top of it like a card on a playmat. */
+    <div className="lattice relative flex min-h-full items-center justify-center overflow-hidden p-6">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(45rem 28rem at 50% -15%, rgba(76,196,255,0.16), transparent 62%), ' +
+            'radial-gradient(35rem 22rem at 50% 115%, rgba(255,203,5,0.14), transparent 60%)',
+        }}
+      />
+
+      {/* The watermark. Line art at 7% on a near-black page is about as loud as a
+          letterpress blind emboss - you register it before you consciously see it,
+          and it never gets between the eye and the two fields that matter. Sized in
+          vmin so it stays a backdrop on a phone instead of becoming the screen. */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="pointer-events-none absolute h-[75vmin] w-[75vmin] text-(--color-game-pokemon) opacity-[0.07]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="0.5"
+      >
+        <circle cx="12" cy="12" r="11" />
+        <path d="M1 12h22" />
+        <circle cx="12" cy="12" r="4.2" />
+        <circle cx="12" cy="12" r="2.3" />
+      </svg>
+
+      <form
+        onSubmit={onSubmit}
+        className="holo-panel foil relative w-full max-w-sm space-y-5 overflow-hidden rounded-2xl p-7 shadow-2xl"
+      >
+        <div className="flex items-center gap-3">
+          <Wordmark size={42} />
+          <div className="min-w-0">
+            <h1 className="font-display truncate text-xl font-bold tracking-tight">
+              TCG Investments
+            </h1>
+            <p className="text-[0.6875rem] font-semibold tracking-[0.14em] text-(--color-faint)">
+              STORE LEDGER
+            </p>
+          </div>
         </div>
+
+        {/* There is no sign-up, and saying so here saves the one question every new
+            member would otherwise have to ask. */}
+        <p className="text-sm leading-relaxed text-(--color-muted)">
+          Members only. Sign in with the address that was added to the store.
+        </p>
 
         <button
           type="button"
           onClick={onGoogle}
           disabled={busy}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border border-(--color-edge) bg-white px-4 py-3 font-medium text-slate-800 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-3 rounded-lg border border-(--color-edge) bg-white px-4 py-3 font-medium text-slate-800 transition-all duration-150 hover:brightness-95 disabled:opacity-50"
         >
           <svg viewBox="0 0 18 18" aria-hidden="true" className="h-5 w-5">
             <path
@@ -102,12 +151,14 @@ export function Login() {
 
         <div className="flex items-center gap-3">
           <span className="h-px flex-1 bg-(--color-edge)" />
-          <span className="text-xs text-(--color-muted)">or</span>
+          <span className="text-[0.625rem] font-semibold tracking-[0.12em] text-(--color-faint)">
+            OR
+          </span>
           <span className="h-px flex-1 bg-(--color-edge)" />
         </div>
 
         <label className="block">
-          <span className="text-sm text-(--color-muted)">Email</span>
+          <span className="text-sm font-medium text-(--color-muted)">Email</span>
           <input
             type="email"
             required
@@ -115,28 +166,32 @@ export function Login() {
             inputMode="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-(--color-edge) bg-(--color-surface) px-3 py-3 text-base outline-none focus:border-(--color-accent)"
+            className={FIELD_CLASS}
           />
         </label>
 
         <label className="block">
-          <span className="text-sm text-(--color-muted)">Password</span>
+          <span className="text-sm font-medium text-(--color-muted)">Password</span>
           <input
             type="password"
             required
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-(--color-edge) bg-(--color-surface) px-3 py-3 text-base outline-none focus:border-(--color-accent)"
+            className={FIELD_CLASS}
           />
         </label>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && (
+          <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+            {error}
+          </p>
+        )}
 
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-lg bg-(--color-accent) px-4 py-3 font-medium text-(--color-ink) disabled:opacity-50"
+          className="w-full rounded-lg bg-linear-to-b from-(--color-accent) to-(--color-accent-deep) px-4 py-3 font-semibold text-(--color-ink) shadow-sm transition-all duration-150 hover:brightness-110 disabled:opacity-50 disabled:hover:brightness-100"
         >
           {busy ? 'Signing in…' : 'Sign in'}
         </button>

@@ -79,7 +79,7 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
       )}
 
       {summary.isLoading && (
-        <div className="grid gap-3 lg:grid-cols-[1.6fr_1fr_1fr]">
+        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[1.6fr_1fr_1fr]">
           <Skeleton className="h-44" />
           <Skeleton className="h-44" />
           <Skeleton className="h-44" />
@@ -90,7 +90,7 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
         <>
           {/* Hierarchy: profit dominates, ROI and inventory support it, everything else
               is a strip below. The old flat 9-tile grid gave them all equal weight. */}
-          <div className="grid gap-3 lg:grid-cols-[1.6fr_1fr_1fr]">
+          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[1.6fr_1fr_1fr]">
             <HeroProfit data={data} />
             <RoiDonut roi={data.roi} costOfSales={data.cost_of_sales} revenue={data.total_sales} />
             <InventoryPanel data={data} />
@@ -233,12 +233,12 @@ export function Dashboard({ onRecordSale, onAddProduct }: PageActions) {
 
 function HeroProfit({ data }: { data: NonNullable<Awaited<ReturnType<typeof api.dashboard>>> }) {
   return (
-    <section className="foil relative overflow-hidden rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
+    <section className="@container holo-edge foil relative overflow-hidden rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
       <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-(--color-faint)">
         Realized profit
       </p>
       <p
-        className={`font-display mt-2 text-[2.5rem] font-bold leading-none tabular-nums lg:text-[3rem] ${toneFor(data.realized_profit)}`}
+        className={`font-display mt-2 text-[clamp(1.75rem,13cqw,3rem)] font-bold leading-none tabular-nums ${toneFor(data.realized_profit)}`}
       >
         {signedMoney(data.realized_profit)}
       </p>
@@ -281,7 +281,7 @@ function RoiDonut({
   const stroke = roi === null || roi >= 0 ? 'var(--color-gain)' : 'var(--color-loss)'
 
   return (
-    <section className="rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
+    <section className="holo-edge rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
       <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-(--color-faint)">
         Return on investment
       </p>
@@ -332,7 +332,7 @@ function InventoryPanel({
   const sealedShare = total > 0 ? (sealed / total) * 100 : 0
 
   return (
-    <section className="rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
+    <section className="holo-edge rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
       <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-(--color-faint)">
         Inventory at cost
       </p>
@@ -374,7 +374,7 @@ function RunningTotal({ data }: { data: NonNullable<Awaited<ReturnType<typeof ap
   const balance = Number(data.cash_balance)
 
   return (
-    <section className="rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
+    <section className="holo-edge rounded-xl border border-(--color-edge) bg-(--color-surface) p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="font-display text-sm font-semibold">Since day one</h2>
         <p className="text-xs text-(--color-faint)">
@@ -452,7 +452,7 @@ function Figure({
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-xl border border-(--color-edge) bg-(--color-surface) px-4 py-3">
+    <div className="holo-edge rounded-xl border border-(--color-edge) bg-(--color-surface) px-4 py-3">
       <p className="text-[0.625rem] font-medium uppercase tracking-[0.08em] text-(--color-faint)">
         {label}
       </p>
