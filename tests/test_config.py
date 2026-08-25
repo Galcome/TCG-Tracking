@@ -73,6 +73,12 @@ def test_an_unrecognised_app_env_refuses_to_boot(raw: str):
         make_settings(app_env=raw, allowed_origins="*")
 
 
+def test_a_non_string_app_env_is_rejected_rather_than_crashing():
+    """The normalizer hands anything it cannot lowercase straight to the Literal."""
+    with pytest.raises(ValueError):
+        make_settings(app_env=1)
+
+
 def test_is_production_is_false_for_the_other_environments():
     assert make_settings(app_env="development").is_production is False
     assert make_settings(app_env="test").is_production is False
