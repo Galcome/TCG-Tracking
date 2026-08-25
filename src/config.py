@@ -1,7 +1,16 @@
 """Application settings loaded and validated automatically from .env."""
 
+from typing import Literal
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: The environments this app knows how to be. A closed set on purpose: every
+#: production protection below keys off `is_production`, so an unrecognised value
+#: like "prod" or "Prodution" would otherwise start a production service with
+#: development defaults - wildcard CORS, no member allowlist, docs served, no HSTS.
+#: Refusing to boot is the loud failure; silently running unprotected is not.
+AppEnvironment = Literal["development", "test", "production"]
 
 
 class Settings(BaseSettings):
@@ -12,7 +21,7 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    app_env: str = "development"
+    app_env: AppEnvironment = "development"
     app_role: str = "api"
     debug: bool = False
 
@@ -79,6 +88,14 @@ class Settings(BaseSettings):
                 return True
         return value
 
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, value: object) -> object:
+        """Tolerate casing and stray whitespace; anything else is rejected by the Literal."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @field_validator("app_role")
     @classmethod
     def validate_app_role(cls, value: str) -> str:
@@ -90,19 +107,24 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_prod_cors(self) -> "Settings":
         origins = {origin.strip() for origin in self.allowed_origins.split(",")}
-        if self.app_env == "production" and "*" in origins:
+        if self.is_production and "*" in origins:
             raise ValueError("ALLOWED_ORIGINS cannot include '*' in production.")
         return self
 
     @model_validator(mode="after")
     def validate_prod_member_allowlist(self) -> "Settings":
-        if self.app_env == "production" and not self.member_email_allowlist:
+        if self.is_production and not self.member_email_allowlist:
             raise ValueError(
                 "ALLOWED_MEMBER_EMAILS must list the store's members in production. "
                 "Google sign-in is enabled, so without it any Google account could "
                 "sign in and provision itself as a member."
             )
         return self
+
+    @property
+    def is_production(self) -> bool:
+        """The single place production is decided. Never compare app_env by hand."""
+        return self.app_env == "production"
 
     @property
     def member_email_allowlist(self) -> set[str]:
@@ -128,7 +150,7 @@ class Settings(BaseSettings):
 
     @property
     def docs_enabled(self) -> bool:
-        return self.app_env != "production"
+        return not self.is_production
 
 
 settings = Settings()

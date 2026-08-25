@@ -16,6 +16,26 @@ router = APIRouter()
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 
+#: Read the upload in pieces so an oversized body is refused while it is still
+#: arriving. `await photo.read()` would materialise the whole thing first, which
+#: lets any signed-in member spend the process's memory before the size check runs.
+CHUNK_BYTES = 64 * 1024
+
+
+async def _read_within_limit(photo: UploadFile) -> bytes:
+    """The photo's bytes, or a 413 as soon as it is one byte past the ceiling."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await photo.read(CHUNK_BYTES):
+        total += len(chunk)
+        if total > vision.MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="That photo is too large. Try a smaller one.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 class ReadCardOut(BaseModel):
     """One card. Empty strings mean the model would not say, which is the honest answer."""
@@ -58,8 +78,10 @@ async def read_cards(
             detail="That is not an image this can read.",
         )
 
+    image = await _read_within_limit(photo)
+
     try:
-        found = vision.read_cards(await photo.read(), photo.content_type)
+        found = vision.read_cards(image, photo.content_type)
     except vision.VisionUnavailable as unavailable:
         # 503 rather than 500: nothing is broken, the accelerator is just not there, and
         # the client falls back to typing.

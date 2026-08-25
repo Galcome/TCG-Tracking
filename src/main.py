@@ -87,7 +87,7 @@ def create_app() -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-        if settings.app_env == "production":
+        if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
         if duration_ms >= SLOW_REQUEST_THRESHOLD_MS:
