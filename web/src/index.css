@@ -34,6 +34,14 @@
   --color-game-digimon: #45aaf2;
   --color-game-other: #778ca3;
 
+  /* Foil. The three angles a holo card throws back when you tilt it: cyan, violet,
+     and the warm gold that every trading-card border has used since 1996. Kept as
+     tokens because the card edges and the sign-in panel sweep the same three, and
+     they have to stay in step. */
+  --color-holo-a: #4cc4ff;
+  --color-holo-b: #a55eea;
+  --color-holo-c: #ffcb05;
+
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   /* Numbers carry this app. A geometric face with real character makes the
      scoreboard feel deliberate rather than like a default dashboard. */
@@ -48,11 +56,18 @@ body,
 
 body {
   background-color: var(--color-ink);
-  /* Two soft pools of light so a large dark screen has some depth instead of
-     reading as a flat sheet. */
+  /* Pools of light so a large dark screen has some depth instead of reading as a
+     flat sheet, over a rhombus lattice borrowed from the back of a card sleeve.
+     The lattice is deliberately at the edge of visibility - about 2% alpha. It is
+     texture, not pattern: you should feel the surface without ever being able to
+     read a shape out of it, and it must never compete with a column of numbers.
+     Original geometry, not anybody's card back. */
   background-image:
     radial-gradient(70rem 40rem at 15% -10%, rgba(76, 196, 255, 0.07), transparent 60%),
-    radial-gradient(60rem 35rem at 100% 0%, rgba(165, 94, 234, 0.06), transparent 55%);
+    radial-gradient(60rem 35rem at 100% 0%, rgba(165, 94, 234, 0.06), transparent 55%),
+    radial-gradient(55rem 30rem at 50% 108%, rgba(255, 203, 5, 0.04), transparent 60%),
+    repeating-linear-gradient(60deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-60deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 22px);
   background-attachment: fixed;
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -140,6 +155,57 @@ body {
   transform: translateX(-100%);
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
   animation: shimmer 1.4s infinite;
+}
+
+/* A foil card catches the light along one edge before anywhere else. A single
+   pixel of gradient across the top of a panel says "card" without costing any
+   contrast, and it is inset from the corners so it never fights the border
+   radius. */
+.holo-edge {
+  position: relative;
+}
+
+.holo-edge::before {
+  content: '';
+  position: absolute;
+  inset: 0 1.25rem auto 1.25rem;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-holo-a),
+    var(--color-holo-b),
+    var(--color-holo-c),
+    transparent
+  );
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* A foil border, done with two backgrounds rather than a pseudo-element, so it
+   cannot land in front of the panel's own content or fight a stacking context.
+   The inner layer paints the surface up to the padding box; the outer layer is
+   only ever visible in the 1px the transparent border leaves behind. */
+.holo-panel {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
+    linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--color-holo-a) 55%, transparent),
+        color-mix(in srgb, var(--color-holo-b) 45%, transparent) 45%,
+        color-mix(in srgb, var(--color-holo-c) 50%, transparent)
+      )
+      border-box;
+}
+
+/* The same sleeve lattice as the page, at a strength that reads as a deliberate
+   backdrop rather than texture. For panels that want to feel like the back of a
+   card - the sign-in screen - not for anything with numbers on it. */
+.lattice {
+  background-image:
+    repeating-linear-gradient(60deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 18px),
+    repeating-linear-gradient(-60deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 18px);
 }
 
 /* Motion is decoration here; none of it carries meaning, so it all goes away
