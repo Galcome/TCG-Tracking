@@ -239,13 +239,30 @@ def test_something_that_is_not_an_image_is_refused(client, keyed):
     assert response.status_code == 422
 
 
-def test_an_enormous_photo_is_refused_before_it_is_sent(client, keyed):
+def test_an_enormous_photo_is_refused_before_it_is_buffered(client, keyed):
+    """413, and the route stops reading rather than holding the whole body in memory."""
     response = client.post(
         "/api/v1/vision/cards",
         files={"photo": ("huge.jpg", b"0" * (vision.MAX_IMAGE_BYTES + 1), "image/jpeg")},
     )
-    assert response.status_code == 503
+    assert response.status_code == 413
     assert "too large" in response.json()["detail"]
+
+
+def test_a_photo_exactly_at_the_ceiling_is_still_read(client, keyed, monkeypatch):
+    """The limit is inclusive: MAX_IMAGE_BYTES is fine, one more is not."""
+    monkeypatch.setattr(vision, "read_cards", lambda image, content_type: [])
+    response = client.post(
+        "/api/v1/vision/cards",
+        files={"photo": ("big.jpg", b"0" * vision.MAX_IMAGE_BYTES, "image/jpeg")},
+    )
+    assert response.status_code == 200
+
+
+def test_the_service_refuses_an_oversized_image_when_called_directly(keyed):
+    """Defence in depth: the route guards the HTTP path, this guards every caller."""
+    with pytest.raises(vision.VisionUnavailable, match="too large"):
+        vision.read_cards(b"0" * (vision.MAX_IMAGE_BYTES + 1), "image/jpeg")
 
 
 # --------------------------------------------------------------------- discipline

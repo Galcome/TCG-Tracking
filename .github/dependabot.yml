@@ -1,0 +1,29 @@
+# Pinned SHAs in ci.yml only stay safe if something proposes the upgrades. Without
+# this file the pins would simply rot in place, which is worse than a mutable tag.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

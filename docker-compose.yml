@@ -12,9 +12,11 @@ services:
       timeout: 5s
       retries: 5
     ports:
+      # Bound to loopback, not 0.0.0.0: trust auth above means anyone who can reach
+      # this port is superuser, and the default bind publishes it to the whole LAN.
       # Override POSTGRES_HOST_PORT in .env when a native PostgreSQL service already
       # owns 5432 (common on Windows). Beats stopping the machine's own database.
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

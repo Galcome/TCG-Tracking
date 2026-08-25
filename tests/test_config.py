@@ -55,6 +55,29 @@ def test_settings_accepts_known_app_role_case_insensitively():
     assert make_settings(app_role="  WORKER ").app_role == "worker"
 
 
+@pytest.mark.parametrize("raw", ["  PRODUCTION ", "Production", "production"])
+def test_app_env_tolerates_casing_and_whitespace(raw: str):
+    settings = make_settings(
+        app_env=raw,
+        allowed_origins="https://app.example.com",
+        allowed_member_emails="a@example.com",
+    )
+    assert settings.app_env == "production"
+    assert settings.is_production is True
+
+
+@pytest.mark.parametrize("raw", ["prod", "Prodution", "staging", "", "  ", "live"])
+def test_an_unrecognised_app_env_refuses_to_boot(raw: str):
+    """The whole point: a typo must not quietly start production with dev defaults."""
+    with pytest.raises(ValueError):
+        make_settings(app_env=raw, allowed_origins="*")
+
+
+def test_is_production_is_false_for_the_other_environments():
+    assert make_settings(app_env="development").is_production is False
+    assert make_settings(app_env="test").is_production is False
+
+
 def test_settings_rejects_wildcard_cors_in_production():
     with pytest.raises(ValueError):
         make_settings(
