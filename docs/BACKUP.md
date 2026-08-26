@@ -30,6 +30,27 @@ Each run writes three objects to R2:
 half-finished run. Runs older than `BACKUP_RETENTION_DAYS` (default 30) are
 pruned at the end of each run.
 
+## The spend ceiling
+
+R2 has **no hard spend cap** - Cloudflare offers usage alerts but nothing that
+stops the service at a threshold. So the ceiling lives in the script.
+
+`BACKUP_MAX_DUMP_MB` (default 100) fails the run if a dump exceeds it, *before
+anything is uploaded*. At the default 30-day retention that bounds the bucket at
+roughly 3 GB against a 10 GB free tier.
+
+For scale: a dump of the ledger is currently about **63 KB**. Thirty of those is
+under 2 MB. Tripping a 100 MB ceiling would mean something changed that nobody
+intended - a table that stopped being pruned, an import gone wrong, binary data
+landing in a column that used to hold text.
+
+The trade is deliberate: a trip means **no new backup until someone looks**. A
+loud gap you will notice beats a quiet bill you will not. If the growth is
+legitimate, raise the ceiling on purpose rather than removing the check.
+
+Worth pairing with a Cloudflare billing alert as a second tripwire - it will not
+stop anything, but you will know.
+
 **The manifest is the part that matters.** A dump that restores without error
 proves nothing - it can be missing rows and still load cleanly. A dump whose row
 counts and cent totals match what the source held at capture time proves the

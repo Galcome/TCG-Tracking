@@ -27,6 +27,7 @@ set -euo pipefail
 
 PREFIX="${BACKUP_PREFIX:-tcg-tracking}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
+MAX_DUMP_MB="${BACKUP_MAX_DUMP_MB:-100}"
 STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -107,6 +108,26 @@ pg_dump "$BACKUP_DATABASE_URL" --format=custom --no-owner --no-privileges --snap
 printf 'COMMIT;\n' >&"${HOLD[1]}"
 printf '\q\n' >&"${HOLD[1]}"
 wait "$HOLD_PID" 2>/dev/null || true
+
+# R2 has no hard spend cap - only alerts - so the ceiling has to live here. At the
+# default 30-day retention this bounds the bucket at 30 x MAX_DUMP_MB, which is
+# 3 GB against a 10 GB free tier. The ledger is orders of magnitude smaller than
+# that, so tripping this means something changed that nobody intended: a table
+# that stopped being pruned, an import gone wrong, binary data landing in a
+# column that used to hold text.
+#
+# It fails *before* uploading, so the runaway is never stored and the previous
+# good run stays current. That does mean no new backup until someone looks -
+# which is the trade: a loud gap you will notice beats a quiet bill you will not.
+dump_bytes="$(wc -c < "$WORK/dump.pgcustom")"
+max_bytes="$(( MAX_DUMP_MB * 1024 * 1024 ))"
+if [ "$dump_bytes" -gt "$max_bytes" ]; then
+  echo "REFUSING: dump is $(( dump_bytes / 1024 ))KB, over the ${MAX_DUMP_MB}MB ceiling." >&2
+  echo "Nothing was uploaded and the previous backup is still current." >&2
+  echo "Work out why it grew, then raise BACKUP_MAX_DUMP_MB deliberately." >&2
+  exit 1
+fi
+echo "    dump is $(( dump_bytes / 1024 ))KB, ceiling ${MAX_DUMP_MB}MB"
 
 echo "==> Encrypting"
 # Symmetric AES256. The passphrase lives in the secret store, never on the runner
