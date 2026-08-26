@@ -22,6 +22,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Is this worth trying again?
+ *
+ * A restart on Railway, a container waking from sleep, or a flaky moment on the
+ * train all surface as a fetch that never completes - `Failed to fetch`, with no
+ * status, because nothing answered. Those heal by themselves.
+ *
+ * A 4xx does not. "You are not a member of this store" is the same answer however
+ * many times you ask, and retrying it three times only delays telling the person.
+ * So: retry when nobody answered or the server broke, never when it answered and
+ * said no.
+ */
+export function isWorthRetrying(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status >= 500
+  }
+  // No status at all means the request never got an answer.
+  return true
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const user = auth.currentUser
   if (!user) {

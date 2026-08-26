@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { api, type Product } from './api'
+import { api, isWorthRetrying, type Product } from './api'
 import { AppShell } from './components/AppShell'
 import { AddProductDialog, RecordSaleDialog } from './components/forms'
 import { Dashboard } from './pages/Dashboard'
@@ -24,7 +24,16 @@ export function App() {
   const [addingProduct, setAddingProduct] = useState(false)
 
   // The first authenticated call provisions the member row server-side.
-  const me = useQuery({ queryKey: ['me'], queryFn: api.me, enabled: Boolean(user), retry: false })
+  //
+  // This used to be `retry: false`, which was right about 403 and wrong about
+  // everything else: one restart mid-request left the whole app on an error screen
+  // whose only offer was Sign out, which does not help. Retry what might heal.
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: api.me,
+    enabled: Boolean(user),
+    retry: (failureCount, error) => failureCount < 2 && isWorthRetrying(error),
+  })
 
   if (loading) {
     return <p className="p-6 text-sm text-(--color-muted)">Loading…</p>
@@ -35,13 +44,25 @@ export function App() {
   }
 
   if (me.isError) {
-    // Most likely this account is not on the store's member allowlist.
+    // Either this account is not on the store's member allowlist, or something
+    // transient outlasted the retries. The screen cannot tell which, so it offers
+    // both ways out rather than assuming the permanent one.
     return (
       <div className="mx-auto max-w-md p-6">
         <p className="text-sm text-red-400">{(me.error as Error).message}</p>
-        <button type="button" onClick={signOut} className="mt-4 text-sm text-(--color-accent)">
-          Sign out
-        </button>
+        <div className="mt-4 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => me.refetch()}
+            disabled={me.isFetching}
+            className="text-sm text-(--color-accent) disabled:opacity-50"
+          >
+            {me.isFetching ? 'Trying…' : 'Try again'}
+          </button>
+          <button type="button" onClick={signOut} className="text-sm text-(--color-muted)">
+            Sign out
+          </button>
+        </div>
       </div>
     )
   }
