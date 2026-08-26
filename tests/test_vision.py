@@ -17,6 +17,7 @@ screen still works, it just has nothing to prefill.
 import httpx
 import pytest
 
+from src import main
 from src.config import settings
 from src.services import vision
 
@@ -257,6 +258,57 @@ def test_a_photo_exactly_at_the_ceiling_is_still_read(client, keyed, monkeypatch
         files={"photo": ("big.jpg", b"0" * vision.MAX_IMAGE_BYTES, "image/jpeg")},
     )
     assert response.status_code == 200
+
+
+def test_an_oversized_upload_is_refused_before_the_route_reads_it(client, keyed, monkeypatch):
+    """The middleware is the ingress guard; the route's check is the exact one.
+
+    By the time the route runs, FastAPI has already parsed the multipart body and
+    spooled the file. So this asserts the request never reaches the route at all -
+    if it did, the limit would be capping memory rather than ingress, which is the
+    thing the middleware exists to fix.
+    """
+    reached = False
+
+    def should_not_run(image, content_type):  # pragma: no cover - the point is it does not
+        nonlocal reached
+        reached = True
+        return []
+
+    monkeypatch.setattr(vision, "read_cards", should_not_run)
+
+    response = client.post(
+        "/api/v1/vision/cards",
+        files={"photo": ("huge.jpg", b"0" * (main.MAX_UPLOAD_BYTES + 1), "image/jpeg")},
+    )
+
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"]
+    assert reached is False
+
+
+def test_a_photo_within_the_multipart_slack_still_reaches_the_route(client, keyed, monkeypatch):
+    """Multipart framing makes the request bigger than the photo.
+
+    Without slack, an honest 6 MiB photo would be refused at the door for boundary
+    bytes it did not choose to send.
+    """
+    monkeypatch.setattr(vision, "read_cards", lambda image, content_type: [])
+    response = client.post(
+        "/api/v1/vision/cards",
+        files={"photo": ("big.jpg", b"0" * vision.MAX_IMAGE_BYTES, "image/jpeg")},
+    )
+    assert response.status_code == 200
+
+
+def test_the_ingress_limit_leaves_other_routes_alone(client):
+    """Only the upload route is size-capped; a large JSON body is a different problem."""
+    response = client.post(
+        "/api/v1/products",
+        json={"name": "x" * 1000},
+        headers={"content-length": str(main.MAX_UPLOAD_BYTES + 1)},
+    )
+    assert response.status_code != 413
 
 
 def test_the_service_refuses_an_oversized_image_when_called_directly(keyed):
