@@ -25,12 +25,32 @@ trap 'rm -rf "$WORK"' EXIT
 
 s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
 
-# Refuse to point this at anything that looks like the live database. The whole
-# script is destructive to its target, and the cost of being wrong here is the
-# thing the backup exists to protect.
-if [ "${RESTORE_TARGET_URL}" = "${BACKUP_DATABASE_URL:-}" ]; then
-  echo "REFUSING: RESTORE_TARGET_URL is the same database the backup came from." >&2
+# Refuse to point this at the live database by accident. The next thing this
+# script does is DROP SCHEMA ... CASCADE, so being wrong here destroys the exact
+# thing the backups exist to protect.
+#
+# Comparing the two URLs as strings was not enough: the same database reached as
+# `postgresql://` and `postgres://`, or with a different sslmode, or via a pooler
+# hostname, is textually different and would have sailed straight through. And
+# with BACKUP_DATABASE_URL simply unset the comparison could never match at all,
+# which turned the guard off silently rather than loudly. Either is how you lose
+# a ledger.
+#
+# So: compare where the databases actually live, and fail closed when we cannot.
+if [ -z "${BACKUP_DATABASE_URL:-}" ] && [ "${RESTORE_ALLOW_SAME_DATABASE:-}" != "i-know" ]; then
+  echo "REFUSING: BACKUP_DATABASE_URL is unset, so the safety check cannot run." >&2
+  echo "Set it, or set RESTORE_ALLOW_SAME_DATABASE=i-know to restore anyway." >&2
   exit 1
+fi
+
+if [ -n "${BACKUP_DATABASE_URL:-}" ]; then
+  same="$(python3 "$(dirname "$0")/_same_database.py" "$RESTORE_TARGET_URL" "$BACKUP_DATABASE_URL")"
+  if [ "$same" = "same" ] && [ "${RESTORE_ALLOW_SAME_DATABASE:-}" != "i-know" ]; then
+    echo "REFUSING: RESTORE_TARGET_URL is the database the backup came from." >&2
+    echo "That is a real recovery, not a drill. Re-run with" >&2
+    echo "RESTORE_ALLOW_SAME_DATABASE=i-know if that is genuinely what you want." >&2
+    exit 1
+  fi
 fi
 
 STAMP="${1:-}"
@@ -56,7 +76,7 @@ pg_restore --dbname "$RESTORE_TARGET_URL" --no-owner --no-privileges \
            --exit-on-error "$WORK/dump.pgcustom"
 
 echo "==> Verifying against the manifest"
-psql "$RESTORE_TARGET_URL" -v ON_ERROR_STOP=1 -tAX -o "$WORK/restored.json" <<'SQL'
+psql "$RESTORE_TARGET_URL" -v ON_ERROR_STOP=1 -qtAX -o "$WORK/restored.json" <<'SQL'
 SELECT jsonb_pretty(jsonb_build_object(
   'alembic_version', (SELECT version_num FROM alembic_version LIMIT 1),
   'table_counts', (

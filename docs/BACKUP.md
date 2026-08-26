@@ -36,6 +36,11 @@ counts and cent totals match what the source held at capture time proves the
 round trip. Money is integer cents, so those totals are exact and any drift shows
 up as an inequality rather than a rounding argument.
 
+The manifest and the dump read from **one exported repeatable-read snapshot**.
+Measuring them separately would let an ordinary write land between the two, and
+the drill would then report corruption that never happened - which is worse than
+no check at all, because it teaches you to ignore the one that matters.
+
 ## Secrets to set
 
 Repository secrets, all required:
@@ -72,8 +77,17 @@ RESTORE_TARGET_URL=postgresql://... \
 With no stamp it takes whatever `latest.txt` points at.
 
 `RESTORE_TARGET_URL` must be a database you are willing to lose - the script
-drops and recreates its `public` schema. It refuses outright if the target
-matches `BACKUP_DATABASE_URL`.
+drops and recreates its `public` schema.
+
+It refuses if the target is the database the backup came from. That check
+compares host, port and database name rather than the URL text, because the same
+database reached as `postgresql://` or `postgres://`, with a different sslmode,
+or through a pooler hostname is textually different but is still the database you
+must not destroy. It also refuses when `BACKUP_DATABASE_URL` is unset, because a
+check that cannot run must not pass silently.
+
+Restoring **into** production is a real recovery and sometimes exactly right. It
+needs `RESTORE_ALLOW_SAME_DATABASE=i-know`, deliberately typed.
 
 On success it prints the tables, rows and migration head it verified. On any
 mismatch it lists exactly what differed and exits non-zero.

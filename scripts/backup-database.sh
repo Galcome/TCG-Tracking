@@ -34,10 +34,33 @@ trap 'rm -rf "$WORK"' EXIT
 s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
 s3api() { aws s3api --endpoint-url "$R2_ENDPOINT" "$@"; }
 
+# The manifest and the dump have to see the same instant. Taken separately, one
+# ordinary write landing between them makes their counts disagree, and the restore
+# drill then reports corruption that never happened - the worst kind of false
+# alarm, because it teaches you to ignore the one check that matters.
+#
+# So one session opens a repeatable-read transaction and exports its snapshot. The
+# manifest query and pg_dump both join that snapshot, and the exporting session is
+# held open until both are done, because the snapshot dies with it.
+echo "==> Opening a snapshot"
+coproc HOLD { psql "$BACKUP_DATABASE_URL" -v ON_ERROR_STOP=1 -qAtX 2>&1; }
+printf 'BEGIN ISOLATION LEVEL REPEATABLE READ;\n' >&"${HOLD[1]}"
+printf 'SELECT pg_export_snapshot();\n' >&"${HOLD[1]}"
+read -r SNAPSHOT <&"${HOLD[0]}"
+case "${SNAPSHOT:-}" in
+  # Snapshot ids look like 00000003-0000001C-1. Anything else means psql answered
+  # with an error, and a backup nobody can verify is not worth writing.
+  [0-9A-Fa-f]*-[0-9A-Fa-f]*-*) ;;
+  *) echo "Could not export a snapshot: ${SNAPSHOT:-<no answer>}" >&2; exit 1 ;;
+esac
+echo "    snapshot $SNAPSHOT"
+
 echo "==> Capturing manifest"
 # Exact counts, not pg_stat_user_tables' estimates - an estimate cannot verify a
 # restore. query_to_xml is the standard idiom for counting every table in one pass.
-psql "$BACKUP_DATABASE_URL" -v ON_ERROR_STOP=1 -tAX -o "$WORK/manifest.json" <<'SQL'
+psql "$BACKUP_DATABASE_URL" -v ON_ERROR_STOP=1 -qtAX -o "$WORK/manifest.json" <<SQL
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SET TRANSACTION SNAPSHOT '$SNAPSHOT';
 SELECT jsonb_pretty(jsonb_build_object(
   'captured_at', now(),
   'alembic_version', (SELECT version_num FROM alembic_version LIMIT 1),
@@ -66,6 +89,7 @@ SELECT jsonb_pretty(jsonb_build_object(
     'cost_allocations_cost_cents', (SELECT coalesce(sum(cost_cents), 0) FROM cost_allocations)
   )
 ));
+COMMIT;
 SQL
 
 # ON_ERROR_STOP above turns a bad query into a non-zero exit, but an empty or
@@ -75,9 +99,14 @@ python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['table_cou
 
 echo "==> Dumping"
 # Custom format: compressed, and pg_restore can go selectively into a scratch
-# database during a drill without replaying the whole thing.
-pg_dump "$BACKUP_DATABASE_URL" --format=custom --no-owner --no-privileges \
-  --file "$WORK/dump.pgcustom"
+# database during a drill without replaying the whole thing. --snapshot ties this
+# to the same instant the manifest measured.
+pg_dump "$BACKUP_DATABASE_URL" --format=custom --no-owner --no-privileges --snapshot "$SNAPSHOT" --file "$WORK/dump.pgcustom"
+
+# Both readers are done with it, so the holding session can end.
+printf 'COMMIT;\n' >&"${HOLD[1]}"
+printf '\q\n' >&"${HOLD[1]}"
+wait "$HOLD_PID" 2>/dev/null || true
 
 echo "==> Encrypting"
 # Symmetric AES256. The passphrase lives in the secret store, never on the runner
