@@ -30,6 +30,21 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
 
+  // Playwright's default is 5s, which is the wrong budget for this app. A dialog
+  // does not close until its write has come back, and the writes that matter here
+  // are not single inserts - recording a card back from grading creates a
+  // transformation and reallocates FIFO cost basis across the chain. On a loaded
+  // runner that can outrun 5s, and `await expect(dialog).toBeHidden()` then fails
+  // an assertion that was only ever going to be true a moment later.
+  //
+  // Raising it costs nothing on a green run: web-first assertions resolve the
+  // instant the condition holds. It only spends the extra seconds when something
+  // is genuinely broken, which is the right place to spend them. Individual
+  // assertions that need longer still say so themselves.
+  expect: {
+    timeout: 10_000,
+  },
+
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
