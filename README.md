@@ -30,6 +30,7 @@ Phase 1 (purchases, sales, FIFO cost basis) is next. See
 - [Release guards](docs/RELEASE_GUARDS.md): release checks and mobile distribution rules.
 - [Observability](docs/OBSERVABILITY.md): Sentry, Firebase, Railway log triage.
 - [Gotchas](docs/GOTCHAS.md): known deployment mistakes and fixes.
+- [Backups](docs/BACKUP.md): nightly encrypted dumps, and how to restore one.
 - [Agent worktree guide](docs/AGENT_WORKTREE_GUIDE.md): per-agent worktrees and branch
   isolation for Codex, Claude, Gemini, and Antigravity.
 
