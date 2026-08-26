@@ -58,7 +58,11 @@ jobs:
           major="$(psql "$BACKUP_DATABASE_URL" -tAc "SELECT current_setting('server_version_num')::int / 10000")"
           echo "Source server is PostgreSQL $major"
           sudo apt-get install -y --no-install-recommends "postgresql-client-$major"
-          pg_dump --version
+          # /usr/bin/pg_dump is pg_wrapper, which picks a version of its own accord and
+          # picked the runner's preinstalled 16 even with 18 installed alongside. Put the
+          # versioned directory first so the client we just chose is the one that runs.
+          echo "/usr/lib/postgresql/$major/bin" >> "$GITHUB_PATH"
+          "/usr/lib/postgresql/$major/bin/pg_dump" --version
 
       - name: Back up
         run: ./scripts/backup-database.sh
@@ -112,6 +116,9 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends postgresql-client-18
+          # Same wrapper problem as the backup job: name the directory explicitly.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          "/usr/lib/postgresql/18/bin/pg_restore" --version
 
       - name: Restore and verify
         run: ./scripts/restore-backup.sh
