@@ -14,11 +14,22 @@ from fastapi.responses import JSONResponse
 from src.config import settings
 from src.database import check_connection
 from src.routes.api_v1 import router as api_v1_router
+from src.services.vision import MAX_IMAGE_BYTES
 
 logger = logging.getLogger(__name__)
 SLOW_REQUEST_THRESHOLD_MS = 750.0
 REQUEST_ID_HEADER = "X-Request-ID"
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
+
+#: The one route that accepts a file. Everything else posts small JSON.
+UPLOAD_PATH = "/api/v1/vision/cards"
+
+#: Multipart wraps the file in boundaries and headers, so the request is always a
+#: little larger than the photo. The slack keeps an honest 6 MiB upload from being
+#: refused here; the exact per-file limit stays in the route, where the file itself
+#: can be measured.
+MULTIPART_OVERHEAD_BYTES = 64 * 1024
+MAX_UPLOAD_BYTES = MAX_IMAGE_BYTES + MULTIPART_OVERHEAD_BYTES
 
 if settings.sentry_dsn:  # pragma: no cover
     sentry_sdk.init(
@@ -53,6 +64,30 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
+
+    @app.middleware("http")
+    async def limit_upload_size(request: Request, call_next):
+        """Refuse an oversized upload before anything reads it.
+
+        The route measures the photo exactly, but by the time it runs FastAPI has
+        already parsed the multipart body and spooled the file to disk - so a
+        check there caps memory, not ingress. Content-Length is the only thing
+        available before that happens, and it is enough for the honest client the
+        app actually has.
+
+        A client that lies about the length, or streams chunked with no length at
+        all, still gets through to the route's exact check. Stopping *that* costs
+        a body-size limit at the proxy, which is not something the app can do to
+        itself.
+        """
+        declared = request.headers.get("content-length", "")
+        if request.url.path == UPLOAD_PATH and declared.isdigit():
+            if int(declared) > MAX_UPLOAD_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "That photo is too large. Try a smaller one."},
+                )
+        return await call_next(request)
 
     app.add_middleware(
         CORSMiddleware,
