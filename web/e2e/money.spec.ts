@@ -109,8 +109,8 @@ test('drawing from the joint account settles part of what you are owed', async (
   await dialog.getByRole('button', { name: 'Move it' }).click()
   await expect(dialog).toBeHidden()
 
-  expect(await balance(page, mine)).toBeCloseTo(owedBefore - 3000, 2)
-  expect(await balance(page, 'Joint account')).toBeCloseTo(jointBefore - 3000, 2)
+  await expect.poll(() => balance(page, mine)).toBeCloseTo(owedBefore - 3000, 2)
+  await expect.poll(() => balance(page, 'Joint account')).toBeCloseTo(jointBefore - 3000, 2)
 })
 
 test('keeping the cash from a sale lowers what you are owed', async ({ page }) => {
@@ -173,24 +173,38 @@ test('voiding a transfer puts both balances back', async ({ page }) => {
   const mine = await myAccountName(page)
   const before = await balance(page, mine)
 
+  // Every transfer row reads "Transfer", so filtering on that and taking .first()
+  // picked whichever transfer happened to be at the top - an earlier spec's, or
+  // this test's own previous attempt on a retry. It then voided that one and left
+  // this transfer standing, which is why the balance came back 750 too high. The
+  // note is rendered on the row, so it gives this transfer a name of its own.
+  const note = uniqueName('Void drill')
+
   await page.getByRole('button', { name: 'Move money' }).first().click()
   const dialog = page.locator('form')
   await dialog.getByLabel('Out of').selectOption({ label: mine })
   await dialog.getByLabel('Into').selectOption({ label: 'Joint account' })
   await dialog.getByLabel('How much').fill('750.00')
+  // Note lives behind the Advanced disclosure, which is a <details> - the input is
+  // genuinely not visible until it is opened.
+  await dialog.locator('summary').filter({ hasText: 'Advanced' }).click()
+  await dialog.getByLabel('Note').fill(note)
   await dialog.getByRole('button', { name: 'Move it' }).click()
   await expect(dialog).toBeHidden()
 
-  expect(await balance(page, mine)).toBeCloseTo(before + 750, 2)
+  // The balance is refetched after the write, so assert against what the page
+  // settles on rather than whatever it happened to be showing on the first read.
+  await expect.poll(() => balance(page, mine)).toBeCloseTo(before + 750, 2)
 
-  const row = page.getByRole('row').filter({ hasText: 'Transfer' }).first()
+  const row = page.getByRole('row').filter({ hasText: note })
+  await expect(row).toBeVisible({ timeout: 10_000 })
   await row.getByRole('button', { name: 'Void' }).click()
   const voidDialog = page.locator('form')
   await voidDialog.getByLabel('Reason').fill('wrong way round')
   await voidDialog.getByRole('button', { name: 'Void it' }).click()
   await expect(voidDialog).toBeHidden()
 
-  expect(await balance(page, mine)).toBeCloseTo(before, 2)
+  await expect.poll(() => balance(page, mine)).toBeCloseTo(before, 2)
 })
 
 test('correcting what a purchase cost moves the money with it', async ({ page }) => {
