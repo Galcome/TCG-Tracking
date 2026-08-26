@@ -145,6 +145,14 @@ and the scratch service is that same major.
 When restoring into a real database, use a client major that matches the
 **target**.
 
+One trap worth knowing: on Ubuntu, `/usr/bin/pg_dump` is `pg_wrapper`, which
+chooses a version itself. Installing `postgresql-client-18` is not enough - the
+wrapper still ran the runner's preinstalled 16 and the dump failed on a version
+mismatch. The workflow puts `/usr/lib/postgresql/<major>/bin` on PATH so the
+client it just chose is the one that actually runs.
+
+Neon is currently on **PostgreSQL 18.6**.
+
 ## If a backup fails
 
 Scheduled workflow failures email the repository owner by default - check that
