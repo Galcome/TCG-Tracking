@@ -11,15 +11,17 @@ import json
 import logging
 import re
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, DecimalException, InvalidOperation
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.models.catalog import CATALOG_PROVIDER_TCGCSV, MAPPING_CONFIRMED, CatalogMapping
@@ -43,6 +45,13 @@ USER_AGENT = "TCG-Tracking/0.1"
 FX_LOOKBACK_DAYS = 7
 TCGCSV_REQUEST_DELAY_SECONDS = 0.1
 MARKET_QUOTE_STALE_DAYS = 3
+MAX_PROVIDER_MARKET_PRICE = Decimal("1000000")
+MAX_EXCHANGE_RATE = Decimal("10")
+MAX_REFRESH_MAPPINGS = 100
+MAX_REFRESH_GROUPS = 25
+# Stable application-wide PostgreSQL advisory lock key. Transaction-scoped locking means
+# the request's normal commit/rollback releases it even if a provider call fails.
+PRICING_REFRESH_LOCK_KEY = 1951704321
 
 # A generic `single` is allowed because older records use it for raw cards. Graded cards
 # still fail the independent grading-field check below, even if someone misclassified them.
@@ -57,6 +66,14 @@ class PricingError(RuntimeError):
 
 class QuoteUnavailable(PricingError):
     """The provider has the product but no usable market quote for it."""
+
+
+class PricingRefreshBusy(PricingError):
+    """Another refresh owns the transaction-scoped refresh lock."""
+
+
+class PricingRefreshLimitExceeded(PricingError):
+    """A refresh would exceed the deliberately bounded work set."""
 
 
 def _http_get(url: str, *, accept: str = "application/json") -> bytes:
@@ -103,9 +120,23 @@ def _positive_decimal(value: object, *, message: str) -> Decimal:
     return parsed
 
 
+def _bounded_positive_decimal(value: object, *, maximum: Decimal, message: str) -> Decimal:
+    parsed = _positive_decimal(value, message=message)
+    if parsed > maximum:
+        raise PricingError(message)
+    return parsed
+
+
 def _cents(value: Decimal) -> int:
     """Round one decimal-currency amount to integer cents, never binary floats."""
-    return int((value * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    try:
+        rounded = (value * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        cents = int(rounded)
+    except (DecimalException, OverflowError, ValueError) as error:
+        raise PricingError("provider currency value was invalid or out of range") from error
+    if cents < 0:
+        raise PricingError("provider currency value was invalid or out of range")
+    return cents
 
 
 def _normalise_subtype(value: object) -> str:
@@ -149,6 +180,7 @@ class TCGCSVProvider:
         self._get_bytes = get_bytes or _http_get
         self._pause = pause or time.sleep
         self._prices_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self._price_errors: dict[tuple[str, str], PricingError] = {}
 
     def latest_update(self) -> FeedRevision:
         try:
@@ -164,19 +196,36 @@ class TCGCSVProvider:
         if not category_id.isdigit() or not group_id.isdigit():
             raise PricingError("TCGCSV mapping has invalid category or group")
         key = (category_id, group_id)
+        cached_error = self._price_errors.get(key)
+        if cached_error is not None:
+            raise PricingError(str(cached_error)) from cached_error
         if key not in self._prices_cache:
-            # TCGCSV explicitly asks backend importers to leave 100 ms between files.
-            # Refresh is a synchronous, member-triggered maintenance operation running in
-            # FastAPI's threadpool, so this courtesy delay does not block the event loop.
-            self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
-            url = f"{TCGCSV_BASE_URL}/tcgplayer/{category_id}/{group_id}/prices"
-            payload = _json(self._get_bytes(url))
-            if payload.get("success") is not True or not isinstance(payload.get("results"), list):
-                raise PricingError("TCGCSV price response was invalid")
-            self._prices_cache[key] = [
-                item for item in payload["results"] if isinstance(item, dict)
-            ]
+            try:
+                # TCGCSV explicitly asks backend importers to leave 100 ms between files.
+                # Refresh is a synchronous, member-triggered maintenance operation running in
+                # FastAPI's threadpool, so this courtesy delay does not block the event loop.
+                self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
+                url = f"{TCGCSV_BASE_URL}/tcgplayer/{category_id}/{group_id}/prices"
+                payload = _json(self._get_bytes(url))
+                if payload.get("success") is not True or not isinstance(
+                    payload.get("results"), list
+                ):
+                    raise PricingError("TCGCSV price response was invalid")
+                self._prices_cache[key] = [
+                    item for item in payload["results"] if isinstance(item, dict)
+                ]
+            except PricingError as error:
+                # Several local products can point at one group. Remember a bad response for
+                # this refresh so they share one bounded network attempt too.
+                self._price_errors[key] = error
+                raise
         return self._prices_cache[key]
+
+    def release_group(self, category_id: str, group_id: str) -> None:
+        """Release one group's potentially large payload after its mappings are processed."""
+        key = (category_id, group_id)
+        self._prices_cache.pop(key, None)
+        self._price_errors.pop(key, None)
 
     def quote_for(self, mapping: CatalogMapping, revision: FeedRevision) -> ProviderQuote:
         category_id = (mapping.external_category_id or "").strip()
@@ -192,7 +241,11 @@ class TCGCSVProvider:
             if raw_price is None:
                 raise QuoteUnavailable("TCGCSV has no market price for this printing")
             return ProviderQuote(
-                original_value=_decimal(raw_price, message="TCGCSV returned an invalid price"),
+                original_value=_bounded_positive_decimal(
+                    raw_price,
+                    maximum=MAX_PROVIDER_MARKET_PRICE,
+                    message="TCGCSV returned an invalid price",
+                ),
                 currency="USD",
                 source_revision=revision,
             )
@@ -237,8 +290,10 @@ class BankOfCanadaProvider:
             if start <= observed_date <= on_or_before:
                 found.append(
                     ExchangeRate(
-                        rate=_positive_decimal(
-                            raw_rate, message="Bank of Canada returned an invalid rate"
+                        rate=_bounded_positive_decimal(
+                            raw_rate,
+                            maximum=MAX_EXCHANGE_RATE,
+                            message="Bank of Canada returned an invalid rate",
                         ),
                         as_of=observed_date,
                     )
@@ -268,6 +323,36 @@ class RefreshSummary:
     unavailable: int
     source_revision: str | None
     errors: tuple[str, ...]
+
+
+def _acquire_refresh_lock(db: Session) -> None:
+    """Serialize refreshes across web workers using a transaction-scoped PG lock."""
+    get_bind = getattr(db, "get_bind", None)
+    if get_bind is None:
+        # Small unit-test doubles do not expose a SQLAlchemy bind. Real application sessions
+        # always do, and production is deliberately PostgreSQL-only.
+        return
+    bind = get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if dialect_name != "postgresql":
+        raise PricingError("Pricing refresh requires a PostgreSQL database")
+    try:
+        locked = db.execute(
+            select(func.pg_try_advisory_xact_lock(PRICING_REFRESH_LOCK_KEY))
+        ).scalar_one()
+    except SQLAlchemyError as error:
+        raise PricingError("Could not acquire the pricing refresh lock") from error
+    if locked is not True:
+        raise PricingRefreshBusy(
+            "Another pricing refresh is already running; wait for it to finish and retry."
+        )
+
+
+def _refresh_group_key(mapping: CatalogMapping) -> tuple[str, str]:
+    return (
+        (mapping.external_category_id or "").strip(),
+        (mapping.external_group_id or "").strip(),
+    )
 
 
 def is_pricing_eligible(product: Product) -> bool:
@@ -364,6 +449,7 @@ def refresh(
     fx: BankOfCanadaProvider | None = None,
 ) -> RefreshSummary:
     """Refresh confirmed mappings once for the provider's current daily revision."""
+    _acquire_refresh_lock(db)
     reference = today or date.today()
     attempted_at = now or datetime.now(UTC)
     mappings = list(
@@ -371,19 +457,25 @@ def refresh(
             select(CatalogMapping)
             .where(CatalogMapping.match_status == MAPPING_CONFIRMED)
             .order_by(CatalogMapping.id)
+            .limit(MAX_REFRESH_MAPPINGS + 1)
         )
     )
     if not mappings:
         return RefreshSummary(0, 0, 0, 0, 0, None, ())
+    if len(mappings) > MAX_REFRESH_MAPPINGS:
+        raise PricingRefreshLimitExceeded(
+            f"Pricing refresh is limited to {MAX_REFRESH_MAPPINGS} confirmed mappings per run; "
+            "disable unused mappings before retrying."
+        )
 
     provider = provider or TCGCSVProvider()
     fx = fx or BankOfCanadaProvider()
     current_by_mapping = {
         quote.mapping_id: quote
         for quote in db.scalars(
-            select(CurrentMarketQuote).where(
-                CurrentMarketQuote.mapping_id.in_([mapping.id for mapping in mappings])
-            )
+            select(CurrentMarketQuote)
+            .where(CurrentMarketQuote.mapping_id.in_([mapping.id for mapping in mappings]))
+            .with_for_update()
         )
     }
     revisions: FeedRevision | None = None
@@ -421,6 +513,15 @@ def refresh(
     if not pending:
         return RefreshSummary(len(mappings), 0, skipped, 0, 0, revisions.value, ())
 
+    pending_by_group: dict[tuple[str, str], list[CatalogMapping]] = defaultdict(list)
+    for mapping in pending:
+        pending_by_group[_refresh_group_key(mapping)].append(mapping)
+    if len(pending_by_group) > MAX_REFRESH_GROUPS:
+        raise PricingRefreshLimitExceeded(
+            f"Pricing refresh is limited to {MAX_REFRESH_GROUPS} TCGCSV groups per run; "
+            "disable or batch mappings before retrying."
+        )
+
     try:
         exchange = fx.usd_cad(reference)
     except PricingError as error:
@@ -446,89 +547,97 @@ def refresh(
         # Rows arrive newest-first. Do not overwrite the first one with older history.
         history_by_mapping.setdefault(snapshot.mapping_id, snapshot)
     refreshed = stale = unavailable = 0
-    for mapping in pending:
-        current = current_by_mapping.get(mapping.id)
-        if not is_pricing_eligible(mapping.product):
-            message = eligibility_error(mapping.product)
-            _, had_value = _record_failure(db, mapping, current, attempted_at, message)
-            stale += int(had_value)
-            unavailable += int(not had_value)
-            errors.append(message)
-            continue
+    for group_key, group_mappings in pending_by_group.items():
         try:
-            quote = provider.quote_for(mapping, revisions)
-            original_cents = _cents(quote.original_value)
-            cad_cents = _cents(quote.original_value * exchange.rate)
-        except QuoteUnavailable as error:
-            message = str(error)
-            _, had_value = _record_failure(db, mapping, current, attempted_at, message)
-            stale += int(had_value)
-            unavailable += int(not had_value)
-            errors.append(message)
-            continue
-        except PricingError as error:
-            message = str(error)
-            _, had_value = _record_failure(db, mapping, current, attempted_at, message)
-            stale += int(had_value)
-            unavailable += int(not had_value)
-            errors.append(message)
-            continue
+            for mapping in group_mappings:
+                current = current_by_mapping.get(mapping.id)
+                if not is_pricing_eligible(mapping.product):
+                    message = eligibility_error(mapping.product)
+                    _, had_value = _record_failure(db, mapping, current, attempted_at, message)
+                    stale += int(had_value)
+                    unavailable += int(not had_value)
+                    errors.append(message)
+                    continue
+                try:
+                    quote = provider.quote_for(mapping, revisions)
+                    original_cents = _cents(quote.original_value)
+                    cad_cents = _cents(quote.original_value * exchange.rate)
+                except QuoteUnavailable as error:
+                    message = str(error)
+                    _, had_value = _record_failure(db, mapping, current, attempted_at, message)
+                    stale += int(had_value)
+                    unavailable += int(not had_value)
+                    errors.append(message)
+                    continue
+                except PricingError as error:
+                    message = str(error)
+                    _, had_value = _record_failure(db, mapping, current, attempted_at, message)
+                    stale += int(had_value)
+                    unavailable += int(not had_value)
+                    errors.append(message)
+                    continue
 
-        if current is None:
-            current = CurrentMarketQuote(mapping_id=mapping.id, product_id=mapping.product_id)
-            db.add(current)
-            current_by_mapping[mapping.id] = current
-        current.status = QUOTE_FRESH
-        current.original_currency = quote.currency
-        current.original_value_cents = original_cents
-        current.cad_value_cents = cad_cents
-        current.fx_rate = exchange.rate
-        current.fx_as_of = exchange.as_of
-        current.source_revision = revisions.value
-        current.source_as_of = revisions.as_of
-        current.last_attempted_at = attempted_at
-        current.last_successful_at = attempted_at
-        current.error_message = None
+                if current is None:
+                    current = CurrentMarketQuote(
+                        mapping_id=mapping.id, product_id=mapping.product_id
+                    )
+                    db.add(current)
+                    current_by_mapping[mapping.id] = current
+                current.status = QUOTE_FRESH
+                current.original_currency = quote.currency
+                current.original_value_cents = original_cents
+                current.cad_value_cents = cad_cents
+                current.fx_rate = exchange.rate
+                current.fx_as_of = exchange.as_of
+                current.source_revision = revisions.value
+                current.source_as_of = revisions.as_of
+                current.last_attempted_at = attempted_at
+                current.last_successful_at = attempted_at
+                current.error_message = None
 
-        previous = history_by_mapping.get(mapping.id)
-        monthly_checkpoint_due = previous is not None and (
-            previous.captured_on.year,
-            previous.captured_on.month,
-        ) != (reference.year, reference.month)
-        provider_price_changed = (
-            previous is not None and previous.original_value_cents != original_cents
-        )
-        identity_changed = previous is not None and (
-            previous.external_product_id != mapping.external_product_id
-            or previous.subtype_name.casefold() != mapping.subtype_name.casefold()
-            or previous.condition != mapping.condition
-        )
-        if (
-            previous is None
-            or provider_price_changed
-            or identity_changed
-            or monthly_checkpoint_due
-        ):
-            db.add(
-                MarketPriceSnapshot(
-                    mapping_id=mapping.id,
-                    product_id=mapping.product_id,
-                    provider=mapping.provider,
-                    external_product_id=mapping.external_product_id,
-                    subtype_name=mapping.subtype_name,
-                    condition=mapping.condition,
-                    original_currency=quote.currency,
-                    original_value_cents=original_cents,
-                    cad_value_cents=cad_cents,
-                    fx_rate=exchange.rate,
-                    fx_as_of=exchange.as_of,
-                    source_revision=revisions.value,
-                    source_as_of=revisions.as_of,
-                    captured_on=reference,
-                    fetched_at=attempted_at,
+                previous = history_by_mapping.get(mapping.id)
+                monthly_checkpoint_due = previous is not None and (
+                    previous.captured_on.year,
+                    previous.captured_on.month,
+                ) != (reference.year, reference.month)
+                provider_price_changed = (
+                    previous is not None and previous.original_value_cents != original_cents
                 )
-            )
-        refreshed += 1
+                identity_changed = previous is not None and (
+                    previous.external_product_id != mapping.external_product_id
+                    or previous.subtype_name.casefold() != mapping.subtype_name.casefold()
+                    or previous.condition != mapping.condition
+                )
+                if (
+                    previous is None
+                    or provider_price_changed
+                    or identity_changed
+                    or monthly_checkpoint_due
+                ):
+                    db.add(
+                        MarketPriceSnapshot(
+                            mapping_id=mapping.id,
+                            product_id=mapping.product_id,
+                            provider=mapping.provider,
+                            external_product_id=mapping.external_product_id,
+                            subtype_name=mapping.subtype_name,
+                            condition=mapping.condition,
+                            original_currency=quote.currency,
+                            original_value_cents=original_cents,
+                            cad_value_cents=cad_cents,
+                            fx_rate=exchange.rate,
+                            fx_as_of=exchange.as_of,
+                            source_revision=revisions.value,
+                            source_as_of=revisions.as_of,
+                            captured_on=reference,
+                            fetched_at=attempted_at,
+                        )
+                    )
+                refreshed += 1
+        finally:
+            release_group = getattr(provider, "release_group", None)
+            if callable(release_group):
+                release_group(*group_key)
 
     db.flush()
     return RefreshSummary(
@@ -543,9 +652,16 @@ __all__ = [
     "ExchangeRate",
     "FeedRevision",
     "HTTP_TIMEOUT_SECONDS",
+    "MAX_EXCHANGE_RATE",
+    "MAX_PROVIDER_MARKET_PRICE",
+    "MAX_REFRESH_GROUPS",
+    "MAX_REFRESH_MAPPINGS",
     "MARKET_QUOTE_STALE_DAYS",
     "MarketEstimate",
     "PricingError",
+    "PricingRefreshBusy",
+    "PricingRefreshLimitExceeded",
+    "PRICING_REFRESH_LOCK_KEY",
     "ProviderQuote",
     "QuoteUnavailable",
     "RefreshSummary",

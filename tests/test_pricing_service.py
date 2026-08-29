@@ -185,15 +185,42 @@ def test_tcgcsv_provider_rejects_bad_marker_group_payload_and_missing_quote():
 
 
 def test_tcgcsv_provider_rejects_invalid_price():
-    provider = pricing.TCGCSVProvider(
-        lambda *_args, **_kwargs: json.dumps(
-            {"success": True, "results": [{"productId": "42", "marketPrice": "NaN"}]}
-        ).encode()
-    )
+    for raw_price in ("NaN", "0", "-1", "1000001"):
+        provider = pricing.TCGCSVProvider(
+            lambda *_args, raw_price=raw_price, **_kwargs: json.dumps(
+                {
+                    "success": True,
+                    "results": [{"productId": "42", "marketPrice": raw_price}],
+                }
+            ).encode()
+        )
+        expect_pricing_error(
+            lambda: provider.quote_for(mapping(), pricing.FeedRevision("r", TODAY)),
+            "invalid price",
+        )
+
+
+def test_tcgcsv_provider_memoizes_group_failures_and_releases_payload():
+    calls = []
+    url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/1/7/prices"
+
+    def get_bytes(requested_url, **_kwargs):
+        calls.append(requested_url)
+        return b'{"success": false, "results": []}'
+
+    provider = pricing.TCGCSVProvider(get_bytes, pause=lambda _seconds: None)
+    revision = pricing.FeedRevision("r", TODAY)
+    for _ in range(2):
+        expect_pricing_error(
+            lambda: provider.quote_for(mapping(), revision), "price response was invalid"
+        )
+    assert calls == [url]
+
+    provider.release_group("1", "7")
     expect_pricing_error(
-        lambda: provider.quote_for(mapping(), pricing.FeedRevision("r", TODAY)),
-        "invalid price",
+        lambda: provider.quote_for(mapping(), revision), "price response was invalid"
     )
+    assert calls == [url, url]
 
 
 def test_bank_of_canada_chooses_latest_valid_observation_and_validates_rate():
@@ -290,6 +317,28 @@ class FakeDB:
         return []
 
 
+class ScalarOne:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one(self):
+        return self.value
+
+
+class LockedFakeDB(FakeDB):
+    def __init__(self, locked, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.locked = locked
+        self.lock_calls = 0
+
+    def get_bind(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    def execute(self, _statement):
+        self.lock_calls += 1
+        return ScalarOne(self.locked)
+
+
 class FakeProvider:
     def __init__(self, revision=None, quotes=None, marker_error=None):
         self.revision = revision or pricing.FeedRevision("r", TODAY)
@@ -321,6 +370,33 @@ class FakeFX:
         if self.error:
             raise self.error
         return pricing.ExchangeRate(self.rate, on_or_before)
+
+
+def test_refresh_uses_transaction_lock_and_rejects_concurrent_run():
+    db = LockedFakeDB(False)
+    with pytest.raises(pricing.PricingRefreshBusy, match="already running"):
+        pricing.refresh(db, today=TODAY, now=NOW, provider=FakeProvider(), fx=FakeFX())
+    assert db.lock_calls == 1
+
+
+def test_refresh_rejects_mapping_limit_before_provider_work():
+    db = FakeDB([mapping() for _ in range(pricing.MAX_REFRESH_MAPPINGS + 1)])
+    provider = FakeProvider()
+    with pytest.raises(pricing.PricingRefreshLimitExceeded, match="confirmed mappings"):
+        pricing.refresh(db, today=TODAY, now=NOW, provider=provider, fx=FakeFX())
+    assert provider.quote_calls == []
+
+
+def test_refresh_rejects_group_limit_before_fx_work():
+    mappings = [
+        mapping(external_group_id=str(group_id))
+        for group_id in range(pricing.MAX_REFRESH_GROUPS + 1)
+    ]
+    db = FakeDB(mappings)
+    fx = FakeFX()
+    with pytest.raises(pricing.PricingRefreshLimitExceeded, match="TCGCSV groups"):
+        pricing.refresh(db, today=TODAY, now=NOW, provider=FakeProvider(), fx=fx)
+    assert fx.calls == []
 
 
 def test_current_estimates_empty_and_prefers_first_product_quote():

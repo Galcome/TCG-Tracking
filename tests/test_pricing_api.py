@@ -6,9 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from src.database import engine
 from src.models.catalog import CatalogMapping
 from src.models.market_price import CurrentMarketQuote
 from src.models.taxonomy import ProductType
@@ -141,6 +142,38 @@ def test_pricing_refresh_is_authenticated_and_returns_service_summary(client, mo
         "source_revision": "2026-08-29",
         "errors": ["one warning"],
     }
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_text"),
+    [
+        (pricing.PricingRefreshBusy("already running"), 409, "already running"),
+        (pricing.PricingRefreshLimitExceeded("too many groups"), 422, "too many groups"),
+    ],
+)
+def test_pricing_refresh_returns_actionable_status_for_bounded_work(
+    client, monkeypatch, error, expected_status, expected_text
+):
+    def fail(_db):
+        raise error
+
+    monkeypatch.setattr(pricing_route.pricing_service, "refresh", fail)
+    response = client.post("/api/v1/pricing/refresh")
+    assert response.status_code == expected_status
+    assert expected_text in response.json()["detail"]
+
+
+def test_refresh_advisory_lock_blocks_a_second_database_session(db):
+    with engine.connect() as blocker:
+        transaction = blocker.begin()
+        try:
+            assert blocker.execute(
+                select(func.pg_try_advisory_xact_lock(pricing.PRICING_REFRESH_LOCK_KEY))
+            ).scalar_one()
+            with pytest.raises(pricing.PricingRefreshBusy):
+                pricing.refresh(db)
+        finally:
+            transaction.rollback()
 
 
 def test_current_estimate_is_display_only_and_disabled_mappings_are_hidden(

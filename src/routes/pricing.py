@@ -182,7 +182,23 @@ def refresh_pricing(
     db: Session = Depends(db_session),
 ) -> PricingRefreshRead:
     """Refresh confirmed mappings once; a later scheduler can call this same operation."""
-    summary = pricing_service.refresh(db)
+    try:
+        summary = pricing_service.refresh(db)
+    except pricing_service.PricingRefreshBusy as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except pricing_service.PricingRefreshLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+    except pricing_service.PricingError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
     return PricingRefreshRead(
         attempted=summary.attempted,
         refreshed=summary.refreshed,
