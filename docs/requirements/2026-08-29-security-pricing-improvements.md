@@ -32,6 +32,8 @@ change accounting.
   missing, chunked, malformed, or falsified `Content-Length`, before multipart parsing.
 - Require `RESTORE_CONFIRM=DROP_TARGET_SCHEMA` for every restore because the script drops
   and recreates the target schema.
+- Require the separate `RESTORE_ALLOW_SAME_DATABASE=i-know` acknowledgement when the
+  connected source and target identities match; it never replaces the per-run confirmation.
 - Compare source and target database identities returned by PostgreSQL after connecting;
   URL spelling and hostname normalization are not identity.
 
@@ -41,6 +43,9 @@ change accounting.
 - [x] Restore confirmation and connection-derived identity checks, docs, and tests.
 - [x] Preserve vision identity fields through the rip form and inline product creation.
 - [x] Expose collector number and variant in add/edit product flows.
+- [ ] Before external pricing mappings, search likely existing products and offer a human
+  reuse/create choice; photo rows currently create products directly and can otherwise
+  split one product's purchase history across duplicates.
 - [ ] Confirm production terms and reliability for the free catalog feed.
 - [ ] Add provider/catalog mappings and a CAD quote/snapshot schema.
 - [ ] Add current estimate display on Inventory, Store, and Vault.
@@ -80,7 +85,8 @@ automatic valuation.
 - An oversized upload cannot consume multipart temporary storage regardless of how its
   length is declared.
 - A restore cannot reach `DROP SCHEMA` without the explicit confirmation and a successful
-  source/target identity check.
+  source/target identity check; matching identities additionally require the dedicated
+  same-database acknowledgement.
 - A photographed hit's set, collector number, variant, and language remain editable and
   are present on the saved product.
 - A future free quote refresh can update display-only estimates while accounting outputs

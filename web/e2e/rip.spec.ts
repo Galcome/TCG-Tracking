@@ -113,6 +113,56 @@ test('identity details stay with a hit created from the rip form', async ({ page
   await expect(page.getByText(/123\/204 · Iconic foil · English/)).toBeVisible()
 })
 
+test('photo identity suggestions prefill and stay with the saved hit', async ({ page }) => {
+  const boxName = await addBox(page, '150.00')
+  const hit = uniqueName('Photo Identified Hit')
+
+  await page.route('**/api/v1/vision/status', async (route) => {
+    await route.fulfill({
+      json: { available: true, cards: [] },
+    })
+  })
+  await page.route('**/api/v1/vision/cards', async (route) => {
+    await route.fulfill({
+      json: {
+        available: true,
+        cards: [
+          {
+            name: hit,
+            set_name: 'Fabled',
+            collector_number: '123/204',
+            variant: 'Iconic foil',
+            language: 'English',
+          },
+        ],
+      },
+    })
+  })
+
+  await openProduct(page, boxName)
+  await page.getByRole('button', { name: 'Rip open' }).click()
+
+  const dialog = page.locator('form')
+  await expect(dialog.getByText('Photograph them instead')).toBeVisible()
+  await dialog.locator('input[type=file]').setInputFiles({
+    name: 'hits.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from('test image'),
+  })
+
+  await expect(dialog.getByLabel('Hit 1 name')).toHaveValue(hit)
+  await expect(dialog.getByLabel('Hit 1 set')).toHaveValue('Fabled')
+  await expect(dialog.getByLabel('Hit 1 collector number')).toHaveValue('123/204')
+  await expect(dialog.getByLabel('Hit 1 variant')).toHaveValue('Iconic foil')
+  await expect(dialog.getByLabel('Hit 1 language')).toHaveValue('English')
+
+  await dialog.getByRole('button', { name: 'Log the hits' }).click()
+  await expect(dialog).toBeHidden()
+
+  await openProduct(page, hit)
+  await expect(page.getByText(/123\/204 · Iconic foil · English/)).toBeVisible()
+})
+
 test('the camera is not offered when nothing can read a photo', async ({ page }) => {
   const boxName = await addBox(page, '150.00')
 
