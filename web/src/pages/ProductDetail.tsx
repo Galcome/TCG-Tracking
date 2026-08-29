@@ -115,7 +115,7 @@ function PricingMappingEditor({ productId }: { productId: string }) {
     mutationFn: () =>
       mapping
         ? api.updatePricingMapping(mapping.id, { ...draft, match_status: 'confirmed' })
-        : api.createPricingMapping(draft),
+        : api.createPricingMapping({ product_id: productId, ...draft }),
     onSuccess: async () => {
       setDraftOverride(null)
       await invalidatePricing()

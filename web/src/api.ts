@@ -165,6 +165,8 @@ export type CatalogMappingDraft = Pick<
   | 'subtype_name'
 >
 
+export type CatalogMappingCreateInput = CatalogMappingDraft & Pick<CatalogMapping, 'product_id'>
+
 export interface PricingRefresh {
   attempted: number
   refreshed: number
@@ -916,7 +918,7 @@ export const api = {
   pricingMappings: (productId?: string) =>
     request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId })}`),
 
-  createPricingMapping: (input: CatalogMappingDraft) =>
+  createPricingMapping: (input: CatalogMappingCreateInput) =>
     request<CatalogMapping>('/api/v1/pricing/mappings', {
       method: 'POST',
       body: JSON.stringify({ ...input, provider: 'tcgcsv' }),
