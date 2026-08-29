@@ -10,7 +10,8 @@
 #   RESTORE_TARGET_URL=postgresql://... ./scripts/restore-backup.sh [stamp]
 #
 # With no stamp it takes whatever `latest.txt` points at. RESTORE_TARGET_URL must
-# be a database you are willing to lose: this drops and recreates its schema.
+# be a database you are willing to lose: this drops and recreates its schema. A
+# same-database recovery additionally requires RESTORE_ALLOW_SAME_DATABASE=i-know.
 
 set -euo pipefail
 
@@ -60,7 +61,12 @@ same="$(python3 "$(dirname "$0")/_same_database.py" "$RESTORE_TARGET_URL" "$BACK
   exit 1
 }
 if [ "$same" = "same" ]; then
-  echo "NOTICE: target identity matches the backup source; explicit confirmation accepted." >&2
+  if [ "${RESTORE_ALLOW_SAME_DATABASE:-}" != "i-know" ]; then
+    echo "REFUSING: target identity matches the backup source." >&2
+    echo "This recovery requires RESTORE_ALLOW_SAME_DATABASE=i-know in addition to RESTORE_CONFIRM=DROP_TARGET_SCHEMA." >&2
+    exit 1
+  fi
+  echo "NOTICE: target identity matches the backup source; both confirmations accepted." >&2
 fi
 
 STAMP="${1:-}"

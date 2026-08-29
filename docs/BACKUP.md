@@ -112,8 +112,11 @@ restore refuses to proceed. The identity check is defence in depth; it does not
 replace the explicit confirmation.
 
 Restoring **into** production is a real recovery and sometimes exactly right.
-It still needs the same deliberately typed confirmation, plus a source URL so
-the identity check can run.
+It still needs the deliberately typed `RESTORE_CONFIRM=DROP_TARGET_SCHEMA`
+confirmation, plus a source URL so the identity check can run. Because a
+production restore intentionally targets the same database as the backup source,
+it also requires the separate `RESTORE_ALLOW_SAME_DATABASE=i-know` confirmation;
+that second phrase never replaces the per-run schema-drop acknowledgement.
 
 On success it prints the tables, rows and migration head it verified. On any
 mismatch it lists exactly what differed and exits non-zero.

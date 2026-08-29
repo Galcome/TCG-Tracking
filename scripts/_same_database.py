@@ -42,9 +42,10 @@ def connected_identity(url: str) -> tuple[str, str, str, str]:
     """Return identity observed by PostgreSQL, never inferred from the URL.
 
     The database OID distinguishes databases with the same name on one server. The server
-    address and port distinguish the server reached through an alias. All values come from
-    a successful `psql` connection, and no command output is included in raised errors so a
-    password embedded in a connection URL cannot leak into logs.
+    address and port are retained for diagnostics, but can legitimately differ when the
+    same database is reached through a Unix socket, proxy, or alternate interface. All
+    values come from a successful `psql` connection, and no command output is included in
+    raised errors so a password embedded in a connection URL cannot leak into logs.
     """
     try:
         result = subprocess.run(
@@ -77,8 +78,16 @@ def connected_identity(url: str) -> tuple[str, str, str, str]:
 
 
 def same_database(target: str, source: str) -> bool:
-    """Compare identities obtained from both live connections."""
-    return connected_identity(target) == connected_identity(source)
+    """Compare the stable database identity obtained from both live connections.
+
+    Server address and port are intentionally not part of the equality check: one logical
+    database can report different values through a Unix socket, proxy, or alternate
+    network interface. A match is conservative for restore safety because it requires the
+    operator's separate same-database confirmation in addition to the per-run confirmation.
+    """
+    target_identity = connected_identity(target)
+    source_identity = connected_identity(source)
+    return target_identity[:2] == source_identity[:2]
 
 
 if __name__ == "__main__":

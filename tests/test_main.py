@@ -3,9 +3,11 @@
 import asyncio
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.main import UploadSizeLimitMiddleware, app, create_app
+from src.dependencies import get_current_member
+from src.main import MAX_UPLOAD_BYTES, UploadSizeLimitMiddleware, app, create_app
 
 client = TestClient(app)
 
@@ -128,3 +130,66 @@ def test_upload_receive_wrapper_rejects_missing_or_falsified_lengths():
         sent = asyncio.run(exercise(headers))
         assert sent[0]["status"] == 413
         assert all(message.get("status") != 200 for message in sent)
+
+
+@pytest.mark.parametrize("content_length", [None, "1"], ids=["missing", "falsified"])
+def test_real_app_rejects_a_chunked_upload_before_multipart_or_auth(content_length):
+    """The receive guard remains in front of FastAPI's parser in the full stack."""
+    multipart_prefix = (
+        b'--test\r\nContent-Disposition: form-data; name="photo"; filename="x.jpg"\r\n'
+        b"Content-Type: image/jpeg\r\n\r\n"
+    )
+    chunks = iter(
+        [
+            {
+                "type": "http.request",
+                "body": multipart_prefix
+                + b"x" * (MAX_UPLOAD_BYTES - len(multipart_prefix) + 1),
+                "more_body": True,
+            },
+            {"type": "http.request", "body": b"x", "more_body": False},
+        ]
+    )
+    sent = []
+    auth_calls = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    def auth_override():
+        auth_calls.append(True)
+        return None
+
+    headers = [(b"content-type", b"multipart/form-data; boundary=test")]
+    if content_length is not None:
+        headers.append((b"content-length", content_length.encode()))
+
+    app.dependency_overrides[get_current_member] = auth_override
+    try:
+        asyncio.run(
+            app(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/v1/vision/cards",
+                    "raw_path": b"/api/v1/vision/cards",
+                    "query_string": b"",
+                    "headers": headers,
+                    "scheme": "http",
+                    "http_version": "1.1",
+                    "client": ("test", 1),
+                    "server": ("test", 80),
+                    "asgi": {"version": "3.0"},
+                },
+                receive,
+                send,
+            )
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert sent[0]["status"] == 413
+    assert auth_calls == []

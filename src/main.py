@@ -32,10 +32,6 @@ MULTIPART_OVERHEAD_BYTES = 64 * 1024
 MAX_UPLOAD_BYTES = MAX_IMAGE_BYTES + MULTIPART_OVERHEAD_BYTES
 
 
-class _UploadBodyTooLarge(Exception):
-    """Internal signal used to stop an upload while ASGI is still receiving it."""
-
-
 async def _send_upload_too_large(send) -> None:
     """Send the upload-size response without allowing the request body to be parsed."""
     await send(
@@ -88,20 +84,32 @@ class UploadSizeLimitMiddleware:
             return
 
         received = 0
+        rejected = False
 
         async def limited_receive():
-            nonlocal received
+            nonlocal received, rejected
+            if rejected:
+                # The parser may ask for another message after the response has already
+                # been sent. A disconnect lets it unwind without reading more bytes.
+                return {"type": "http.disconnect"}
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
                 if received > self.max_body_bytes:
-                    raise _UploadBodyTooLarge
+                    rejected = True
+                    # FastAPI's multipart parser translates exceptions from `receive` to a
+                    # generic 400. Send the precise 413 before returning a disconnect, and
+                    # suppress the parser's follow-up response below.
+                    await _send_upload_too_large(send)
+                    return {"type": "http.disconnect"}
             return message
 
-        try:
-            await self.app(scope, limited_receive, send)
-        except _UploadBodyTooLarge:
-            await _send_upload_too_large(send)
+        async def guarded_send(message):
+            if not rejected:
+                await send(message)
+
+        await self.app(scope, limited_receive, guarded_send)
+
 
 if settings.sentry_dsn:  # pragma: no cover
     sentry_sdk.init(
