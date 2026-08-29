@@ -126,3 +126,14 @@ def test_candidates_exclude_non_hit_product_types(client, make_product, game_id)
     )
     assert response.status_code == 200, response.text
     assert booster_box["id"] not in {row["id"] for row in response.json()}
+
+
+def test_candidate_prefilter_normalizes_decomposed_unicode(client, db, make_product, game_id):
+    single_type_id = db.scalar(select(ProductType.id).where(ProductType.slug == "single"))
+    product = make_product("Éclair", product_type_id=str(single_type_id))
+    response = client.get(
+        "/api/v1/products/candidates",
+        params={"game_id": str(game_id), "name": "E\u0301clair"},
+    )
+    assert response.status_code == 200, response.text
+    assert [row["id"] for row in response.json()] == [product["id"]]

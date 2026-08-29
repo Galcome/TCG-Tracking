@@ -28,7 +28,7 @@ IDENTITY_FIELDS = ("name", "set_name", "collector_number", "variant", "language"
 
 
 def normalize_identity(value: str | None) -> str:
-    """Fold case, accents, whitespace, and punctuation for identity comparison."""
+    """Fold case, Unicode composition, whitespace, and punctuation for comparison."""
     if not value:
         return ""
     folded = unicodedata.normalize("NFKC", value).casefold()
@@ -93,7 +93,7 @@ def find_candidates(db: Session, identity: ProductIdentity) -> list[Match]:
     endpoint is called while somebody is entering a hit and must not load a catalogue-sized
     result into the browser.
     """
-    name = identity.name.strip()
+    name = unicodedata.normalize("NFKC", identity.name).strip()
     if not name:
         return []
 

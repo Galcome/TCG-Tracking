@@ -116,7 +116,7 @@ function PricingMappingEditor({ productId }: { productId: string }) {
   const groups = useQuery({
     queryKey: ['pricingCatalogGroups', categoryId],
     queryFn: () => api.pricingCatalogGroups(categoryId),
-    enabled: Number.isInteger(categoryId) && categoryId > 0,
+    enabled: catalogDiscoveryEnabled && Number.isInteger(categoryId) && categoryId > 0,
   })
   const catalogProducts = useQuery({
     queryKey: ['pricingCatalogProducts', categoryId, groupId, submittedCatalogSearch],

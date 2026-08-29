@@ -12,7 +12,7 @@ import logging
 import re
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -55,6 +55,12 @@ MAX_CATALOG_CATEGORIES = 200
 MAX_CATALOG_GROUPS = 500
 MAX_CATALOG_PRODUCTS = 50
 CATALOG_CACHE_SECONDS = 24 * 60 * 60
+MAX_CATALOG_CACHE_ENTRIES = 16
+MAX_CATALOG_CACHE_ITEMS = 20_000
+MAX_CATALOG_INDEX_PRODUCTS = 10_000
+MAX_CATALOG_REQUESTS_PER_DAY = 500
+MAX_CATALOG_SUBTYPES = 20
+MAX_CATALOG_CONCURRENT_REQUESTS = 2
 # Stable application-wide PostgreSQL advisory lock key. Transaction-scoped locking means
 # the request's normal commit/rollback releases it even if a provider call fails.
 PRICING_REFRESH_LOCK_KEY = 1951704321
@@ -72,6 +78,10 @@ class PricingError(RuntimeError):
 
 class QuoteUnavailable(PricingError):
     """The provider has the product but no usable market quote for it."""
+
+
+class ProviderFeedError(PricingError):
+    """A group feed could not be fetched or parsed at all."""
 
 
 class PricingRefreshBusy(PricingError):
@@ -253,8 +263,15 @@ class TCGCSVProvider:
         self._pause = pause or time.sleep
         self._clock = clock or time.monotonic
         self._catalog_cache_seconds = catalog_cache_seconds
-        self._catalog_cache: dict[tuple[object, ...], tuple[float, tuple[Any, ...]]] = {}
+        self._catalog_cache: OrderedDict[
+            tuple[object, ...], tuple[float, tuple[Any, ...]]
+        ] = OrderedDict()
         self._catalog_lock = threading.Lock()
+        self._catalog_request_lock = threading.Lock()
+        self._catalog_slots = threading.BoundedSemaphore(MAX_CATALOG_CONCURRENT_REQUESTS)
+        self._catalog_inflight: dict[tuple[object, ...], threading.Event] = {}
+        self._catalog_request_window_started = self._clock()
+        self._catalog_request_count = 0
         self._prices_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._price_errors: dict[tuple[str, str], PricingError] = {}
 
@@ -269,8 +286,25 @@ class TCGCSVProvider:
         return FeedRevision(marker[:120], _marker_date(marker))
 
     def _get_catalog(self, url: str) -> list[dict[str, Any]]:
-        self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
-        return _catalog_results(self._get_bytes(url))
+        self._reserve_catalog_request()
+        if not self._catalog_slots.acquire(timeout=HTTP_TIMEOUT_SECONDS):
+            raise PricingError("TCGCSV catalog discovery is busy; retry shortly")
+        try:
+            self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
+            return _catalog_results(self._get_bytes(url))
+        finally:
+            self._catalog_slots.release()
+
+    def _reserve_catalog_request(self) -> None:
+        """Bound discovery traffic even when an authenticated client churns cache keys."""
+        with self._catalog_request_lock:
+            now = self._clock()
+            if now - self._catalog_request_window_started >= CATALOG_CACHE_SECONDS:
+                self._catalog_request_window_started = now
+                self._catalog_request_count = 0
+            if self._catalog_request_count >= MAX_CATALOG_REQUESTS_PER_DAY:
+                raise PricingError("TCGCSV catalog discovery daily request limit was reached")
+            self._catalog_request_count += 1
 
     def _cached_catalog(
         self, key: tuple[object, ...], loader: Callable[[], list[Any]]
@@ -281,13 +315,48 @@ class TCGCSVProvider:
         small lock during a load prevents simultaneous browser requests from multiplying
         provider calls; price refreshes use separate per-run caches and are unaffected.
         """
-        with self._catalog_lock:
-            cached = self._catalog_cache.get(key)
-            now = self._clock()
-            if cached is not None and cached[0] > now:
-                return list(cached[1])
+        while True:
+            with self._catalog_lock:
+                cached = self._catalog_cache.get(key)
+                now = self._clock()
+                if cached is not None and cached[0] > now:
+                    self._catalog_cache.move_to_end(key)
+                    return list(cached[1])
+                waiter = self._catalog_inflight.get(key)
+                if waiter is None:
+                    waiter = threading.Event()
+                    self._catalog_inflight[key] = waiter
+                    break
+            if not waiter.wait(timeout=HTTP_TIMEOUT_SECONDS * 3):
+                raise PricingError("TCGCSV catalog discovery timed out waiting for a load")
+
+        try:
             loaded = tuple(loader())
+        except BaseException:
+            with self._catalog_lock:
+                self._catalog_inflight.pop(key, None)
+                waiter.set()
+            raise
+
+        with self._catalog_lock:
+            now = self._clock()
+            expired = [
+                cache_key
+                for cache_key, value in self._catalog_cache.items()
+                if value[0] <= now
+            ]
+            for cache_key in expired:
+                self._catalog_cache.pop(cache_key, None)
+            cached_items = sum(len(value[1]) for value in self._catalog_cache.values())
+            while self._catalog_cache and (
+                len(self._catalog_cache) >= MAX_CATALOG_CACHE_ENTRIES
+                or cached_items + len(loaded) > MAX_CATALOG_CACHE_ITEMS
+            ):
+                _, removed = self._catalog_cache.popitem(last=False)
+                cached_items -= len(removed[1])
             self._catalog_cache[key] = (now + self._catalog_cache_seconds, loaded)
+            self._catalog_inflight.pop(key, None)
+            waiter.set()
             return list(loaded)
 
     @staticmethod
@@ -352,8 +421,16 @@ class TCGCSVProvider:
             product_rows = self._get_catalog(
                 f"{TCGCSV_BASE_URL}/tcgplayer/{category}/{group}/products"
             )
+            if len(product_rows) > MAX_CATALOG_INDEX_PRODUCTS:
+                raise PricingError("TCGCSV product group was too large to index safely")
             try:
-                price_rows = self._prices(category, group)
+                self._reserve_catalog_request()
+                if not self._catalog_slots.acquire(timeout=HTTP_TIMEOUT_SECONDS):
+                    raise PricingError("TCGCSV catalog discovery is busy; retry shortly")
+                try:
+                    price_rows = self._prices(category, group)
+                finally:
+                    self._catalog_slots.release()
                 subtypes: dict[int, set[str]] = defaultdict(set)
                 for item in price_rows:
                     product_id = _catalog_id(item, "productId")
@@ -384,7 +461,9 @@ class TCGCSVProvider:
                             image_url=_catalog_text(item, "imageUrl", max_length=500),
                             url=_catalog_text(item, "url", max_length=500),
                             subtypes=tuple(
-                                sorted(subtypes.get(product_id, {"Normal"}), key=str.casefold)
+                                sorted(
+                                    subtypes.get(product_id, {"Normal"}), key=str.casefold
+                                )[:MAX_CATALOG_SUBTYPES]
                             ),
                         )
                     )
@@ -412,7 +491,7 @@ class TCGCSVProvider:
         key = (category_id, group_id)
         cached_error = self._price_errors.get(key)
         if cached_error is not None:
-            raise PricingError(str(cached_error)) from cached_error
+            raise cached_error
         if key not in self._prices_cache:
             try:
                 # TCGCSV explicitly asks backend importers to leave 100 ms between files.
@@ -431,8 +510,9 @@ class TCGCSVProvider:
             except PricingError as error:
                 # Several local products can point at one group. Remember a bad response for
                 # this refresh so they share one bounded network attempt too.
-                self._price_errors[key] = error
-                raise
+                feed_error = ProviderFeedError(str(error))
+                self._price_errors[key] = feed_error
+                raise feed_error from error
         return self._prices_cache[key]
 
     def release_group(self, category_id: str, group_id: str) -> None:
@@ -770,7 +850,10 @@ def refresh(
         # Rows arrive newest-first. Do not overwrite the first one with older history.
         history_by_mapping.setdefault(snapshot.mapping_id, snapshot)
     refreshed = stale = unavailable = 0
+    provider_groups_attempted = provider_groups_failed = 0
     for group_key, group_mappings in pending_by_group.items():
+        group_provider_attempted = False
+        group_feed_failed = False
         try:
             for mapping in group_mappings:
                 current = current_by_mapping.get(mapping.id)
@@ -782,10 +865,19 @@ def refresh(
                     errors.append(message)
                     continue
                 try:
+                    group_provider_attempted = True
                     quote = provider.quote_for(mapping, revisions)
                     original_cents = _cents(quote.original_value)
                     cad_cents = _cents(quote.original_value * exchange.rate)
                 except QuoteUnavailable as error:
+                    message = str(error)
+                    _, had_value = _record_failure(db, mapping, current, attempted_at, message)
+                    stale += int(had_value)
+                    unavailable += int(not had_value)
+                    errors.append(message)
+                    continue
+                except ProviderFeedError as error:
+                    group_feed_failed = True
                     message = str(error)
                     _, had_value = _record_failure(db, mapping, current, attempted_at, message)
                     stale += int(had_value)
@@ -858,13 +950,27 @@ def refresh(
                     )
                 refreshed += 1
         finally:
+            if group_provider_attempted:
+                provider_groups_attempted += 1
+                provider_groups_failed += int(group_feed_failed)
             release_group = getattr(provider, "release_group", None)
             if callable(release_group):
                 release_group(*group_key)
 
     db.flush()
+    systemic_failure = (
+        provider_groups_attempted > 0
+        and provider_groups_failed == provider_groups_attempted
+    )
     return RefreshSummary(
-        len(mappings), refreshed, skipped, stale, unavailable, revisions.value, tuple(errors[:20])
+        len(mappings),
+        refreshed,
+        skipped,
+        stale,
+        unavailable,
+        revisions.value,
+        tuple(errors[:20]),
+        systemic_failure,
     )
 
 

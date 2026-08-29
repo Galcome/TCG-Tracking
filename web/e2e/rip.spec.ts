@@ -121,7 +121,7 @@ test('identity details stay with a hit created from the rip form', async ({ page
   await expect(page.getByText(/123\/204 · Iconic foil · English/)).toBeVisible()
 })
 
-test('a hit can explicitly reuse an existing product without creating a duplicate', async ({
+test('duplicate hits can explicitly reuse one product as quantity two', async ({
   page,
 }) => {
   const existing = uniqueName('Existing Hit')
@@ -145,12 +145,16 @@ test('a hit can explicitly reuse an existing product without creating a duplicat
   await expect(dialog.getByText(existing, { exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: 'Reuse this product' }).click()
   await expect(dialog.getByText(`Reusing ${existing}`)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add another' }).click()
+  await dialog.getByLabel('Hit 2 name').fill(existing)
+  await dialog.getByRole('button', { name: 'Find existing product' }).nth(1).click()
+  await dialog.getByRole('button', { name: 'Reuse this product' }).nth(1).click()
   await dialog.getByRole('button', { name: 'Log the hits' }).click()
   await expect(dialog).toBeHidden()
 
   await openProduct(page, existing)
   // The existing product received one derived unit; no second product was created.
-  await expect(statAmount(page, 'In stock')).resolves.toBe(2)
+  await expect(statAmount(page, 'In stock')).resolves.toBe(3)
 })
 
 test('photo identity suggestions prefill and stay with the saved hit', async ({ page }) => {

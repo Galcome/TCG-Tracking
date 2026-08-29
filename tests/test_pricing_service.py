@@ -1,7 +1,9 @@
 """Unit coverage for the free pricing adapters and refresh state machine."""
 
 import json
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -274,6 +276,76 @@ def test_tcgcsv_catalog_discovery_caches_provider_payloads_until_ttl_expires():
     clock[0] = 161.0
     assert provider.categories()[0].category_id == 3
     assert calls == [pricing.TCGCSV_CATEGORIES_URL, pricing.TCGCSV_CATEGORIES_URL]
+
+
+def test_tcgcsv_catalog_cache_and_daily_provider_work_are_strictly_bounded():
+    provider = pricing.TCGCSVProvider(
+        lambda _url, **_kwargs: b'{"success": true, "results": []}',
+        pause=lambda _seconds: None,
+    )
+    for category_id in range(1, pricing.MAX_CATALOG_CACHE_ENTRIES + 2):
+        provider.groups(category_id)
+    assert len(provider._catalog_cache) == pricing.MAX_CATALOG_CACHE_ENTRIES
+    assert ("groups", 1) not in provider._catalog_cache
+
+    provider._catalog_request_count = pricing.MAX_CATALOG_REQUESTS_PER_DAY
+    expect_pricing_error(provider.categories, "daily request limit")
+
+
+def test_tcgcsv_catalog_cache_single_flights_the_same_key_without_global_network_lock():
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+    payload = b'{"success": true, "results": [{"categoryId": 3, "name": "Pokemon"}]}'
+
+    def get_bytes(url, **_kwargs):
+        calls.append(url)
+        started.set()
+        assert release.wait(timeout=2)
+        return payload
+
+    provider = pricing.TCGCSVProvider(get_bytes, pause=lambda _seconds: None)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(provider.categories)
+        assert started.wait(timeout=1)
+        second = executor.submit(provider.categories)
+        release.set()
+        assert first.result(timeout=2) == second.result(timeout=2)
+    assert calls == [pricing.TCGCSV_CATEGORIES_URL]
+
+
+def test_tcgcsv_catalog_caps_subtypes_and_rejects_oversized_product_indexes():
+    products_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/products"
+    prices_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/prices"
+    payload = {
+        products_url: json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {"productId": 1, "categoryId": 3, "groupId": 3170, "name": "Card"}
+                ],
+            }
+        ).encode(),
+        prices_url: json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {"productId": 1, "subTypeName": f"Printing {index}"}
+                    for index in range(pricing.MAX_CATALOG_SUBTYPES + 5)
+                ],
+            }
+        ).encode(),
+    }
+    provider = pricing.TCGCSVProvider(
+        lambda url, **_kwargs: payload[url], pause=lambda _seconds: None
+    )
+    assert len(provider.products(3, 3170)[0].subtypes) == pricing.MAX_CATALOG_SUBTYPES
+
+    provider = pricing.TCGCSVProvider(lambda *_args, **_kwargs: b"{}")
+    provider._get_catalog = lambda _url: [
+        {}
+    ] * (pricing.MAX_CATALOG_INDEX_PRODUCTS + 1)
+    expect_pricing_error(lambda: provider.products(3, 3170), "too large")
 
 
 def test_tcgcsv_catalog_discovery_skips_invalid_and_nonmatching_rows_and_honors_limit():
@@ -758,6 +830,35 @@ def test_refresh_handles_ineligible_unavailable_and_provider_errors():
     assert summary.unavailable == 3
     assert len(summary.errors) == 3
     assert len(db.currents) == 3
+
+
+def test_refresh_marks_complete_group_feed_outage_systemic_for_worker_retry():
+    first = mapping(external_group_id="1")
+    second = mapping(external_group_id="2")
+    provider = FakeProvider(
+        quotes={
+            first.id: pricing.ProviderFeedError("group feed unavailable"),
+            second.id: pricing.ProviderFeedError("group feed unavailable"),
+        }
+    )
+    summary = pricing.refresh(
+        FakeDB([first, second]), today=TODAY, now=NOW, provider=provider, fx=FakeFX()
+    )
+    assert summary.refreshed == 0
+    assert summary.unavailable == 2
+    assert summary.systemic_failure is True
+
+
+def test_refresh_does_not_mark_isolated_missing_product_as_systemic():
+    item = mapping()
+    provider = FakeProvider(
+        quotes={item.id: pricing.QuoteUnavailable("no market price")}
+    )
+    summary = pricing.refresh(
+        FakeDB([item]), today=TODAY, now=NOW, provider=provider, fx=FakeFX()
+    )
+    assert summary.unavailable == 1
+    assert summary.systemic_failure is False
 
 
 def test_refresh_keeps_daily_fx_change_out_of_history_until_monthly_checkpoint():

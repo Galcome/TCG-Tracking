@@ -337,7 +337,10 @@ export function RipDialog({
       return
     }
 
-    const hits = []
+    const hitsByProductAndBucket = new Map<
+      string,
+      { product_id: string; quantity: number; bucket: Bucket; value: string }
+    >()
     for (const row of filled) {
       let productId = row.productId
       if (row.choice === 'create') {
@@ -361,15 +364,22 @@ export function RipDialog({
         setError('Choose an existing product or Create new product for every hit.')
         return
       }
-      hits.push({
-        product_id: productId,
-        quantity: 1,
-        bucket: row.bucket,
-        value: row.value || '0',
-      })
+      const key = `${productId}\u001f${row.bucket}`
+      const existing = hitsByProductAndBucket.get(key)
+      if (existing) {
+        existing.quantity += 1
+        existing.value = (Number(existing.value) + Number(row.value || 0)).toFixed(2)
+      } else {
+        hitsByProductAndBucket.set(key, {
+          product_id: productId,
+          quantity: 1,
+          bucket: row.bucket,
+          value: row.value || '0',
+        })
+      }
     }
 
-    run.mutate(hits)
+    run.mutate([...hitsByProductAndBucket.values()])
   }
 
   const assigned = split.reduce((sum, share) => sum + share, 0)
