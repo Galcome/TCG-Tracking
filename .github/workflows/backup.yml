@@ -101,6 +101,9 @@ jobs:
       # A disposable container on the runner, and the newest major so nothing the
       # restore emits can be rejected by it.
       RESTORE_TARGET_URL: postgresql://postgres:scratch@localhost:5432/scratch
+      # The restore script drops and recreates the scratch schema. Keep the deliberate
+      # confirmation visible in the workflow rather than weakening the script's guard.
+      RESTORE_CONFIRM: DROP_TARGET_SCHEMA
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

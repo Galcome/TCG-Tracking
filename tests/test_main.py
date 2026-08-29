@@ -1,10 +1,11 @@
 """Tests for the FastAPI application."""
 
+import asyncio
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.main import app, create_app
+from src.main import UploadSizeLimitMiddleware, app, create_app
 
 client = TestClient(app)
 
@@ -77,3 +78,53 @@ def test_lifespan_startup_and_shutdown():
         with TestClient(app) as c:
             response = c.get("/health")
     assert response.status_code == 200
+
+
+def test_upload_receive_wrapper_rejects_missing_or_falsified_lengths():
+    """Chunked and dishonest declarations cannot bypass the ingress cap."""
+
+    async def downstream(scope, receive, send):
+        while (message := await receive()).get("type") == "http.request":
+            if not message.get("more_body"):
+                break
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    async def exercise(headers):
+        messages = iter(
+            [
+                {"type": "http.request", "body": b"abc", "more_body": True},
+                {"type": "http.request", "body": b"def", "more_body": False},
+            ]
+        )
+        sent = []
+
+        async def receive():
+            return next(messages)
+
+        async def send(message):
+            sent.append(message)
+
+        await UploadSizeLimitMiddleware(
+            downstream, upload_path="/upload", max_body_bytes=5
+        )(
+            {
+                "type": "http",
+                "path": "/upload",
+                "headers": headers,
+            },
+            receive,
+            send,
+        )
+        return sent
+
+    for headers in ([], [(b"content-length", b"1")], [(b"content-length", b"not-a-number")]):
+        sent = asyncio.run(exercise(headers))
+        assert sent[0]["status"] == 413
+        assert all(message.get("status") != 200 for message in sent)

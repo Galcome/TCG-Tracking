@@ -31,6 +31,78 @@ UPLOAD_PATH = "/api/v1/vision/cards"
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
 MAX_UPLOAD_BYTES = MAX_IMAGE_BYTES + MULTIPART_OVERHEAD_BYTES
 
+
+class _UploadBodyTooLarge(Exception):
+    """Internal signal used to stop an upload while ASGI is still receiving it."""
+
+
+async def _send_upload_too_large(send) -> None:
+    """Send the upload-size response without allowing the request body to be parsed."""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": b'{"detail":"That photo is too large. Try a smaller one."}',
+        }
+    )
+
+
+class UploadSizeLimitMiddleware:
+    """Cap the complete upload body before Starlette parses multipart form data.
+
+    ``Content-Length`` is only an early rejection hint. It can be absent for chunked
+    requests or deliberately falsified, so the receive wrapper counts every body chunk and
+    aborts as soon as the complete multipart body exceeds the ingress cap. The route still
+    measures the image itself for defence in depth.
+    """
+
+    def __init__(self, app, *, upload_path: str, max_body_bytes: int):
+        self.app = app
+        self.upload_path = upload_path
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != self.upload_path:
+            await self.app(scope, receive, send)
+            return
+
+        declared: int | None = None
+        for name, value in scope.get("headers", ()):
+            if name.lower() != b"content-length":
+                continue
+            try:
+                declared = int(value)
+            except (TypeError, ValueError):
+                # A malformed declaration cannot weaken the receive-side cap.
+                declared = None
+            break
+
+        if declared is not None and declared > self.max_body_bytes:
+            await _send_upload_too_large(send)
+            return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    raise _UploadBodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except _UploadBodyTooLarge:
+            await _send_upload_too_large(send)
+
 if settings.sentry_dsn:  # pragma: no cover
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
@@ -65,29 +137,11 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
 
-    @app.middleware("http")
-    async def limit_upload_size(request: Request, call_next):
-        """Refuse an oversized upload before anything reads it.
-
-        The route measures the photo exactly, but by the time it runs FastAPI has
-        already parsed the multipart body and spooled the file to disk - so a
-        check there caps memory, not ingress. Content-Length is the only thing
-        available before that happens, and it is enough for the honest client the
-        app actually has.
-
-        A client that lies about the length, or streams chunked with no length at
-        all, still gets through to the route's exact check. Stopping *that* costs
-        a body-size limit at the proxy, which is not something the app can do to
-        itself.
-        """
-        declared = request.headers.get("content-length", "")
-        if request.url.path == UPLOAD_PATH and declared.isdigit():
-            if int(declared) > MAX_UPLOAD_BYTES:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "That photo is too large. Try a smaller one."},
-                )
-        return await call_next(request)
+    app.add_middleware(
+        UploadSizeLimitMiddleware,
+        upload_path=UPLOAD_PATH,
+        max_body_bytes=MAX_UPLOAD_BYTES,
+    )
 
     app.add_middleware(
         CORSMiddleware,

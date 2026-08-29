@@ -6,7 +6,7 @@
 # against a scratch database, and for real the day something goes wrong.
 #
 #   BACKUP_DATABASE_URL=... R2_BUCKET=... R2_ENDPOINT=... \
-#   BACKUP_ENCRYPTION_PASSPHRASE=... \
+#   BACKUP_ENCRYPTION_PASSPHRASE=... RESTORE_CONFIRM=DROP_TARGET_SCHEMA \
 #   RESTORE_TARGET_URL=postgresql://... ./scripts/restore-backup.sh [stamp]
 #
 # With no stamp it takes whatever `latest.txt` points at. RESTORE_TARGET_URL must
@@ -19,6 +19,17 @@ set -euo pipefail
 : "${R2_BUCKET:?R2_BUCKET is required}"
 : "${R2_ENDPOINT:?R2_ENDPOINT is required}"
 
+# Every restore drops the target's public schema, including a supposedly disposable
+# scratch database. A separate confirmation is deliberately required even when the
+# source and target appear different: DNS aliases, poolers, and mistaken environment
+# variables are exactly how a destructive guard gets bypassed. The operator must type the
+# same phrase in the environment for each invocation.
+if [ "${RESTORE_CONFIRM:-}" != "DROP_TARGET_SCHEMA" ]; then
+  echo "REFUSING: every restore drops the target schema." >&2
+  echo "Set RESTORE_CONFIRM=DROP_TARGET_SCHEMA for this deliberate operation." >&2
+  exit 1
+fi
+
 PREFIX="${BACKUP_PREFIX:-tcg-tracking}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -27,7 +38,8 @@ s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
 
 # Refuse to point this at the live database by accident. The next thing this
 # script does is DROP SCHEMA ... CASCADE, so being wrong here destroys the exact
-# thing the backups exist to protect.
+# thing the backups exist to protect. The explicit confirmation above remains
+# mandatory even when this comparison says the endpoints differ.
 #
 # Comparing the two URLs as strings was not enough: the same database reached as
 # `postgresql://` and `postgres://`, or with a different sslmode, or via a pooler
@@ -36,21 +48,19 @@ s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
 # which turned the guard off silently rather than loudly. Either is how you lose
 # a ledger.
 #
-# So: compare where the databases actually live, and fail closed when we cannot.
-if [ -z "${BACKUP_DATABASE_URL:-}" ] && [ "${RESTORE_ALLOW_SAME_DATABASE:-}" != "i-know" ]; then
+# So: compare identities observed after connecting, and fail closed when we cannot.
+if [ -z "${BACKUP_DATABASE_URL:-}" ]; then
   echo "REFUSING: BACKUP_DATABASE_URL is unset, so the safety check cannot run." >&2
-  echo "Set it, or set RESTORE_ALLOW_SAME_DATABASE=i-know to restore anyway." >&2
+  echo "Set BACKUP_DATABASE_URL so both database identities can be checked." >&2
   exit 1
 fi
 
-if [ -n "${BACKUP_DATABASE_URL:-}" ]; then
-  same="$(python3 "$(dirname "$0")/_same_database.py" "$RESTORE_TARGET_URL" "$BACKUP_DATABASE_URL")"
-  if [ "$same" = "same" ] && [ "${RESTORE_ALLOW_SAME_DATABASE:-}" != "i-know" ]; then
-    echo "REFUSING: RESTORE_TARGET_URL is the database the backup came from." >&2
-    echo "That is a real recovery, not a drill. Re-run with" >&2
-    echo "RESTORE_ALLOW_SAME_DATABASE=i-know if that is genuinely what you want." >&2
-    exit 1
-  fi
+same="$(python3 "$(dirname "$0")/_same_database.py" "$RESTORE_TARGET_URL" "$BACKUP_DATABASE_URL")" || {
+  echo "REFUSING: could not verify the target and source database identities." >&2
+  exit 1
+}
+if [ "$same" = "same" ]; then
+  echo "NOTICE: target identity matches the backup source; explicit confirmation accepted." >&2
 fi
 
 STAMP="${1:-}"
