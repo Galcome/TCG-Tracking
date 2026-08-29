@@ -130,6 +130,15 @@ export interface ProductStats {
   by_bucket: Record<Bucket, number>
 }
 
+/** A provider quote in CAD, per unit. It is never a ledger value or manual valuation. */
+export interface MarketEstimate {
+  value: string | null
+  captured_on: string | null
+  status: 'fresh' | 'stale' | 'unavailable'
+  provider: string
+  source_revision: string | null
+}
+
 export interface Transaction {
   kind: 'purchase' | 'sale' | 'adjustment' | 'move'
   id: string
@@ -180,6 +189,8 @@ export interface Product {
   is_archived: boolean
   created_at: string
   stats: ProductStats
+  /** Current free-source quote, separate from cost and realized profit. */
+  market_estimate: MarketEstimate | null
 }
 
 export interface ProductDetail extends Product {
@@ -647,6 +658,8 @@ export interface VaultHolding {
   days_held: number | null
   /** How long it sat in the Store before being moved here. The loophole guard. */
   days_in_store_first: number | null
+  /** Current free-source quote, separate from the manual Vault valuation above. */
+  market_estimate: MarketEstimate | null
 }
 
 /** One card a photo turned up. Empty strings mean the model would not say. */

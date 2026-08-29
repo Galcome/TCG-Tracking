@@ -24,6 +24,7 @@ from src.schemas.product import (
 )
 from src.services import history, inventory, ledger, sets
 from src.services import money as money_service
+from src.services.pricing import current_estimates
 from src.services.search import escape_like
 
 router = APIRouter()
@@ -179,8 +180,10 @@ def list_products(
 
     # Cost basis and profit are only ever wanted for what is on screen.
     stats_by_product = inventory.product_stats(db, [item.id for item in page])
+    estimates_by_product = current_estimates(db, [item.id for item in page])
     for item in page:
         item.stats = _stats_for(stats_by_product, item.id)
+        item.market_estimate = estimates_by_product.get(item.id)
 
     return ProductList(
         items=[ProductRead.model_validate(item, from_attributes=True) for item in page],
@@ -262,6 +265,7 @@ def _detail(db: Session, product: Product) -> ProductDetail:
     """
     product.stats = _stats_for(inventory.product_stats(db, [product.id]), product.id)
     product.history = history.product_history(db, product.id)
+    product.market_estimate = current_estimates(db, [product.id]).get(product.id)
     return ProductDetail.model_validate(product, from_attributes=True)
 
 

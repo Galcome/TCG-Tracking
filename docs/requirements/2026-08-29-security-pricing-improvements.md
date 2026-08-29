@@ -46,10 +46,31 @@ change accounting.
 - [ ] Before external pricing mappings, search likely existing products and offer a human
   reuse/create choice; photo rows currently create products directly and can otherwise
   split one product's purchase history across duplicates.
-- [ ] Confirm production terms and reliability for the free catalog feed.
-- [ ] Add provider/catalog mappings and a CAD quote/snapshot schema.
-- [ ] Add current estimate display on Inventory, Store, and Vault.
-- [ ] Add a bounded daily refresh job with stale/error handling.
+- [x] Confirm the public endpoint shape and reliability safeguards for the free catalog
+  feed. TCGCSV is read by its daily marker and group price endpoint with a bounded request,
+  a descriptive User-Agent, and no more than one fetch per group in a refresh. Bank of
+  Canada Valet supplies the latest USD/CAD business-day rate without a key.
+- [x] Add provider/catalog mappings and separate mutable current-quote and append-only
+  provider snapshot tables. Mappings are human-confirmed, unique per local product/provider,
+  and retain TCGCSV category, group, product, subtype/printing, condition, and language.
+  TCGCSV market prices are not condition-specific; that limitation stays visible in the
+  mapping model rather than being presented as a raw-card condition valuation.
+- [x] Add authenticated mapping create/update/list and manual refresh operations. Existing
+  member authentication is the access boundary; no new admin role is invented, and there
+  is no automatic external-product matching.
+- [x] Add display-only current estimate data to product and Vault response shapes while
+  leaving the manual Vault valuation, cost basis, and profit calculations untouched.
+- [x] Render the new estimate fields as explicitly per-unit, sourced, dated display-only
+  values in Inventory/Store, product detail, and Vault. Stale/unavailable state remains
+  distinct from manual Vault value, cost, and realized profit.
+- [ ] Add a bounded daily scheduler/job after choosing its deployment authentication,
+  failure notification, and retry policy. The authenticated refresh endpoint is the
+  callable seam for that follow-on.
+
+Live contract check on 2026-08-29: TCGCSV's marker and Pokémon group-price endpoints
+returned the documented product/subtype/market-price shape, and Bank of Canada Valet
+returned a dated USD/CAD observation. This verifies the adapter contract once; provider
+monitoring and stale-state handling remain necessary because availability can change.
 
 ## Free pricing design (follow-on)
 
@@ -57,8 +78,10 @@ The provider adapter should resolve a confirmed product to an external catalog i
 once, then fetch prices by that identifier. It should store provider, source product ID,
 condition/variant, original currency, CAD conversion rate, fetched time, and match status.
 The Bank of Canada Valet API is the preferred no-key source for daily USD/CAD conversion.
-TCGCSV is a candidate free catalog/price feed, subject to terms verification before it
-becomes a production dependency.
+TCGCSV is the first free adapter. Its public documentation expressly permits backend
+scraping and defines once-daily, User-Agent, request-delay, and request-count safeguards;
+the adapter follows those published usage rules. A production refresh should still be
+monitored because the service describes itself as a one-person hobby project.
 
 The daily job should:
 
@@ -73,11 +96,30 @@ No AI call is needed after an external product ID is confirmed. Search-grounded 
 help an operator resolve an exception, but its listings are evidence for review, not an
 automatic valuation.
 
+### First implementation slice
+
+The first slice intentionally supports only `single`/`raw-single`, `booster-box`, and
+`sealed-case` product types. Any grading company, grade, or certificate identity—and the
+`graded-card` type itself—is rejected by mapping operations and never receives an automatic
+raw-card fallback. TCGCSV mappings require numeric category, group, and product IDs plus an
+explicit subtype/printing such as `Normal` or `Holofoil`.
+
+`current_market_quotes` is the mutable last-known per-unit quote used for display. It is
+separate from the existing `price_snapshots` table, which remains the append-only manual
+Vault valuation ledger. `market_price_snapshots` records successful provider revisions and
+CAD conversions for future trend/monthly-checkpoint work. A failed fetch retains the last
+number as `stale`, or reports `unavailable` when there has never been a successful number.
+
+The API surface is `/api/v1/pricing/mappings` (human-confirmed mapping operations) and
+`POST /api/v1/pricing/refresh` (a member-authenticated manual refresh suitable for a later
+daily scheduler). No scheduler, provider auto-match, slab feed, or condition-specific
+TCGCSV claim is included in this slice.
+
 ## Out of scope
 
 - Paid slab feeds or automatic slab valuation.
 - AI-generated prices or sell recommendations.
-- A scheduler/worker until the provider contract and quote schema are implemented.
+- A scheduler/worker and its deployment authentication/notification policy.
 - Any change to cost-basis or realized-profit calculations.
 
 ## Success looks like
@@ -89,5 +131,5 @@ automatic valuation.
   same-database acknowledgement.
 - A photographed hit's set, collector number, variant, and language remain editable and
   are present on the saved product.
-- A future free quote refresh can update display-only estimates while accounting outputs
-  remain byte-for-byte unchanged.
+- A free quote refresh updates display-only estimates while accounting outputs remain
+  byte-for-byte unchanged.

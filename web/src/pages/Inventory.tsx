@@ -24,7 +24,7 @@ import {
   RowLink,
   Skeleton,
 } from '../components/ui'
-import { money, toneFor } from '../format'
+import { money, shortDate, toneFor } from '../format'
 
 /** Debounce so typing does not fire a request per keystroke. */
 function useDebounced<T>(value: T, delayMs: number): T {
@@ -271,6 +271,7 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     Unit cost
                   </th>
                   <th className="px-4 py-3 text-right font-medium">Inventory value</th>
+                  <th className="px-4 py-3 text-right font-medium">Market estimate</th>
                   <th className="px-4 py-3 text-right font-medium">Realized profit</th>
                   <th className="py-3 pl-2 pr-4" />
                 </tr>
@@ -322,6 +323,28 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {money(product.stats.remaining_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {product.market_estimate?.value === null || !product.market_estimate ? (
+                        <span className="text-(--color-faint)">—</span>
+                      ) : (
+                        <>
+                          {money(product.market_estimate.value)}
+                          <span
+                            className={`mt-0.5 block text-[0.6875rem] ${
+                              product.market_estimate.status === 'fresh'
+                                ? 'text-(--color-faint)'
+                                : 'text-(--color-loss)'
+                            }`}
+                          >
+                            per unit · {product.market_estimate.provider}
+                            {product.market_estimate.captured_on &&
+                              ` · ${shortDate(product.market_estimate.captured_on)}`}
+                            {product.market_estimate.status !== 'fresh' &&
+                              ` · ${product.market_estimate.status}`}
+                          </span>
+                        </>
+                      )}
                     </td>
                     <td
                       className={`px-4 py-3 text-right tabular-nums ${toneFor(product.stats.realized_profit)}`}
@@ -388,6 +411,19 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       <p className="text-xs tabular-nums text-(--color-muted)">
                         {money(product.stats.remaining_cost)}
                       </p>
+                      {product.market_estimate?.value !== null && product.market_estimate && (
+                        <p
+                          className={`text-[0.6875rem] tabular-nums ${
+                            product.market_estimate.status === 'fresh'
+                              ? 'text-(--color-faint)'
+                              : 'text-(--color-loss)'
+                          }`}
+                        >
+                          Market {money(product.market_estimate.value)} / unit
+                          {product.market_estimate.status !== 'fresh' &&
+                            ` · ${product.market_estimate.status}`}
+                        </p>
+                      )}
                     </div>
                   </button>
                   <div className="mt-3 flex gap-2 border-t border-(--color-edge) pt-3">

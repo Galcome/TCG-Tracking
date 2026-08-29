@@ -350,6 +350,19 @@ export function ProductDetail() {
         <Stat label="Revenue" value={money(stats.gross_revenue)} />
         <Stat label="Cost of sales" value={money(stats.cost_of_sales)} />
         <Stat label="Average unit cost" value={money(stats.average_unit_cost, '—')} />
+        <Stat
+          label="Market estimate"
+          value={money(item.market_estimate?.value, '—')}
+          hint={
+            item.market_estimate
+              ? `${item.market_estimate.provider} · ${item.market_estimate.status}${
+                  item.market_estimate.captured_on
+                    ? ` · ${shortDate(item.market_estimate.captured_on)}`
+                    : ''
+                } · per unit, display only`
+              : 'No confirmed free-source mapping'
+          }
+        />
       </div>
 
       {Number(stats.cost_written_off) > 0 && (

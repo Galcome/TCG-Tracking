@@ -9,6 +9,7 @@ from src.models.ledger import BUCKETS
 from src.schemas.ledger import BucketField, TransactionRead
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
 from src.schemas.money_ledger import FundingLeg
+from src.schemas.pricing import MarketEstimateRead
 from src.schemas.taxonomy import TaxonomyRead
 
 NAME_MAX_LENGTH = 200
@@ -195,6 +196,8 @@ class ProductRead(ProductBase):
     created_at: datetime
     updated_at: datetime
     stats: ProductStatsRead
+    #: A provider estimate, if mapped and fetched. This is display-only and per unit.
+    market_estimate: MarketEstimateRead | None = None
 
 
 class ProductDetail(ProductRead):

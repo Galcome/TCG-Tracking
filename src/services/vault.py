@@ -16,8 +16,10 @@ The Vault is measured on **appreciation** - value against cost, annualised - whi
 exactly how the workbook's own Vault tab already works, with year-over-year values and a
 percentage and no days-held column anywhere.
 
-Values come from `price_snapshots`, the same dated estimates the rip screen writes. Anything
-never valued keeps saying so rather than quietly reporting its cost as its worth.
+Manual appreciation values come from `price_snapshots`, the same dated estimates the rip
+screen writes. A provider market quote is attached separately when one exists; it never
+replaces the manual value. Anything never valued keeps saying so rather than quietly
+reporting its cost as its worth.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from src.models.ledger import BUCKET_STORE, BUCKET_VAULT, STATUS_ACTIVE, StockMo
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.services import inventory
+from src.services.pricing import MarketEstimate, current_estimates
 
 
 @dataclass
@@ -58,6 +61,9 @@ class VaultHolding:
     #: the loophole guard: exempting the Vault from ageing would otherwise make it the
     #: place slow stock goes to disappear.
     days_in_store_first: int | None
+
+    #: A separate provider quote. It never replaces the manual Vault valuation above.
+    market_estimate: MarketEstimate | None
 
     @property
     def appreciation_cents(self) -> int | None:
@@ -137,6 +143,8 @@ def holdings(db: Session, today: date | None = None) -> list[VaultHolding]:
         ).all()
     )
 
+    market_by_product = current_estimates(db, list(vaulted))
+
     from src.services.transformations import source_purchase_date
 
     rows: list[VaultHolding] = []
@@ -164,6 +172,7 @@ def holdings(db: Session, today: date | None = None) -> list[VaultHolding]:
                     if stored_first is not None and bought is not None and arrived is not None
                     else None
                 ),
+                market_estimate=market_by_product.get(product_id),
             )
         )
 
