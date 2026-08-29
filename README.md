@@ -20,7 +20,7 @@ Phase 1 (purchases, sales, FIFO cost basis) is next. See
 - SQLAlchemy + Alembic + **Neon** PostgreSQL (`NullPool` - see `docs/GOTCHAS.md`).
 - Money stored as integer cents; cost basis is FIFO.
 - Sentry backend hooks, request IDs, process timing, and security headers.
-- Railway service-specific API config.
+- Railway service-specific API and private pricing-cron config.
 - CI for lint, migrations, and tests at 100% coverage.
 
 ## Start Here
@@ -78,9 +78,10 @@ make db-revision message="add users"
 - Auth: Firebase Auth; accounts are created in the Firebase console
 - Backend observability: Sentry
 
-Root `railway.json` carries the API deploy config because this project runs a single
-Railway service; see [Gotchas](docs/GOTCHAS.md) before adding a second. Add a
-worker-specific Railway config only after the project has a real worker entrypoint.
+Root `railway.json` remains a safe API default. `railway.api.json` carries the same explicit
+API config for the point when Railway is configured with per-service config paths, while
+`railway.pricing-refresh.json` carries the private daily pricing Cron command. See the
+[pricing refresh runbook](docs/PRICING_REFRESH.md) before creating the second service.
 
 ## Environment Variables
 

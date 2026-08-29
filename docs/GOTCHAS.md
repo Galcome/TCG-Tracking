@@ -85,26 +85,28 @@ name the same project. There is no shared secret to compare - the project id *is
 
 ---
 
-## Railway - This Project Puts The API Config In Root `railway.json`
+## Railway - API and pricing Cron use separate config files
 
-The template's rule is that root `railway.json` stays service-neutral and each service points
-at its own file (`railway.api.json`, etc.), because a root config with an API-only
-`startCommand` or `healthcheckPath` applies to *every* service and will make a worker boot
-Uvicorn or fail an HTTP health check.
+The repository now has a real second service definition: a private daily pricing Cron. Root
+`railway.json` deliberately remains an API-safe fallback until the existing service has an
+explicit dashboard path; removing its commands first could stop migrations or the API on the
+next deploy. Set the service-specific config paths in the Railway dashboard:
 
-**This project deliberately breaks that rule**, because:
+1. API service -> `/railway.api.json`. It owns `uv run alembic upgrade head` and the Uvicorn
+   health check.
+2. Pricing Cron service -> `/railway.pricing-refresh.json`. It runs
+   `uv run python -m src.jobs.pricing_refresh`, has no health check, and exits after one run.
+3. Keep the Cron service private with no public domain. Give it the same secret Neon pooled
+   `DATABASE_URL` and `APP_ROLE=worker`; the process refuses to run under any other role.
 
-- It deploys exactly **one** service to Railway. The web SPA goes to Firebase Hosting.
-- The per-service "Railway config file" path is **dashboard-only** - the CLI cannot set it.
-  With the config in `railway.api.json`, a CLI- or GitHub-created service silently falls back
-  to the neutral root config, which has no `preDeployCommand`. **Migrations would never run**,
-  and the failure looks like a mysterious `relation does not exist` at runtime.
+Do not create the Cron service from root config and do not neutralize root `railway.json`
+until the API's `/railway.api.json` path is confirmed in Railway. The CLI cannot reliably
+make that dashboard-only rollout decision for an existing service.
 
-**Reverse this the moment a second Railway service appears** (a worker, a scheduler):
-
-1. Move the `deploy` block from `railway.json` back into `railway.api.json`.
-2. Return root `railway.json` to build-only plus restart policy.
-3. Set each service's config file path in the Railway dashboard.
+Railway Cron schedules are UTC, may run a few minutes late, and skip an invocation while a
+previous one is still active. The job's PostgreSQL transaction advisory lock is a second
+overlap guard, and its bounded retries make a transient lock/DB/provider failure visible.
+See [PRICING_REFRESH.md](PRICING_REFRESH.md) for the runbook.
 
 ---
 
