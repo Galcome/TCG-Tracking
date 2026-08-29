@@ -58,6 +58,10 @@ change accounting.
 - [x] Add authenticated mapping create/update/list and manual refresh operations. Existing
   member authentication is the access boundary; no new admin role is invented, and there
   is no automatic external-product matching.
+- [x] Ship a practical Product Detail mapping editor for the TCGCSV category/group/product
+  IDs and subtype/printing, with explicit confirm/disable actions and a manual refresh button.
+  Refreshes are bounded to 100 confirmed mappings and 25 groups, serialized with a
+  PostgreSQL transaction advisory lock, and return retry/limit guidance when busy or oversized.
 - [x] Add display-only current estimate data to product and Vault response shapes while
   leaving the manual Vault valuation, cost basis, and profit calculations untouched.
 - [x] Render the new estimate fields as explicitly per-unit, sourced, dated display-only
@@ -104,6 +108,12 @@ The first slice intentionally supports only `single`/`raw-single`, `booster-box`
 raw-card fallback. TCGCSV mappings require numeric category, group, and product IDs plus an
 explicit subtype/printing such as `Normal` or `Holofoil`.
 
+An operator enters those exact TCGCSV identifiers on Product Detail, confirms the mapping,
+and can disable it later if the identity changes. The same panel can manually refresh all
+confirmed mappings and reports fresh/stale/unavailable counts. A refresh accepts only strictly
+positive, bounded provider prices and preserves the last successful number when a source fails;
+it never creates an accounting valuation.
+
 `current_market_quotes` is the mutable last-known per-unit quote used for display. It is
 separate from the existing `price_snapshots` table, which remains the append-only manual
 Vault valuation ledger. `market_price_snapshots` records successful provider revisions and
@@ -112,8 +122,8 @@ number as `stale`, or reports `unavailable` when there has never been a successf
 
 The API surface is `/api/v1/pricing/mappings` (human-confirmed mapping operations) and
 `POST /api/v1/pricing/refresh` (a member-authenticated manual refresh suitable for a later
-daily scheduler). No scheduler, provider auto-match, slab feed, or condition-specific
-TCGCSV claim is included in this slice.
+daily scheduler). No automatic search/matching, scheduler, provider auto-match, slab feed,
+or condition-specific TCGCSV claim is included in this slice.
 
 ## Out of scope
 

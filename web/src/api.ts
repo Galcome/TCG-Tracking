@@ -139,6 +139,42 @@ export interface MarketEstimate {
   source_revision: string | null
 }
 
+/** A human-confirmed external identity used only by the free market estimate adapter. */
+export interface CatalogMapping {
+  id: string
+  product_id: string
+  provider: 'tcgcsv'
+  external_product_id: string
+  external_group_id: string | null
+  external_category_id: string | null
+  subtype_name: string
+  condition: string | null
+  language: string | null
+  match_status: 'confirmed' | 'disabled'
+  notes: string | null
+  created_by_member_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CatalogMappingDraft = Pick<
+  CatalogMapping,
+  | 'external_product_id'
+  | 'external_group_id'
+  | 'external_category_id'
+  | 'subtype_name'
+>
+
+export interface PricingRefresh {
+  attempted: number
+  refreshed: number
+  skipped: number
+  stale: number
+  unavailable: number
+  source_revision: string | null
+  errors: string[]
+}
+
 export interface Transaction {
   kind: 'purchase' | 'sale' | 'adjustment' | 'move'
   id: string
@@ -876,6 +912,28 @@ export const api = {
   }) => request<ProductPage>(`/api/v1/products${query(params)}`),
 
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),
+
+  pricingMappings: (productId?: string) =>
+    request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId })}`),
+
+  createPricingMapping: (input: CatalogMappingDraft) =>
+    request<CatalogMapping>('/api/v1/pricing/mappings', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, provider: 'tcgcsv' }),
+    }),
+
+  updatePricingMapping: (id: string, changes: Partial<CatalogMappingDraft> & {
+    match_status?: CatalogMapping['match_status']
+  }) =>
+    request<CatalogMapping>(`/api/v1/pricing/mappings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  refreshPricing: () =>
+    request<PricingRefresh>('/api/v1/pricing/refresh', {
+      method: 'POST',
+    }),
 
   createProduct: (product: NewProduct) =>
     request<ProductDetail>('/api/v1/products', {

@@ -6,7 +6,10 @@ import {
   api,
   BUCKET_LABELS,
   BUCKETS,
+  type CatalogMapping,
+  type CatalogMappingDraft,
   type GradingSubmission,
+  type Product,
   type Transaction,
 } from '../api'
 import {
@@ -42,6 +45,8 @@ import {
   Button,
   Card,
   Empty,
+  Field,
+  FIELD_CLASS,
   FifoNote,
   GameDot,
   RowAction,
@@ -61,6 +66,208 @@ type Dialog =
   | 'rip'
   | 'grade'
   | null
+
+const FREE_MARKET_PRICING_TYPES = new Set(['single', 'raw-single', 'booster-box', 'sealed-case'])
+
+const EMPTY_MAPPING: CatalogMappingDraft = {
+  external_product_id: '',
+  external_group_id: '',
+  external_category_id: '',
+  subtype_name: 'Normal',
+}
+
+function canUseFreeMarketPricing(product: Product): boolean {
+  if (!FREE_MARKET_PRICING_TYPES.has(product.product_type.slug)) return false
+  return !product.grading_company && !product.grade && !product.cert_number
+}
+
+function mappingDraft(mapping: CatalogMapping | null): CatalogMappingDraft {
+  if (!mapping) return EMPTY_MAPPING
+  return {
+    external_product_id: mapping.external_product_id,
+    external_group_id: mapping.external_group_id ?? '',
+    external_category_id: mapping.external_category_id ?? '',
+    subtype_name: mapping.subtype_name,
+  }
+}
+
+function PricingMappingEditor({ productId }: { productId: string }) {
+  const queryClient = useQueryClient()
+  const mappings = useQuery({
+    queryKey: ['pricingMappings', productId],
+    queryFn: () => api.pricingMappings(productId),
+  })
+  const mapping = mappings.data?.[0] ?? null
+  const [draftOverride, setDraftOverride] = useState<CatalogMappingDraft | null>(null)
+  const [refreshResult, setRefreshResult] = useState<string | null>(null)
+  const draft = draftOverride ?? mappingDraft(mapping)
+
+  const invalidatePricing = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['pricingMappings', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['product', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['products'] }),
+      queryClient.invalidateQueries({ queryKey: ['vaultHoldings'] }),
+    ])
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      mapping
+        ? api.updatePricingMapping(mapping.id, { ...draft, match_status: 'confirmed' })
+        : api.createPricingMapping(draft),
+    onSuccess: async () => {
+      setDraftOverride(null)
+      await invalidatePricing()
+    },
+  })
+
+  const toggle = useMutation({
+    mutationFn: () =>
+      api.updatePricingMapping(mapping!.id, {
+        match_status: mapping!.match_status === 'disabled' ? 'confirmed' : 'disabled',
+      }),
+    onSuccess: invalidatePricing,
+  })
+
+  const refresh = useMutation({
+    mutationFn: api.refreshPricing,
+    onSuccess: async (result) => {
+      setRefreshResult(
+        `Checked ${result.attempted}: ${result.refreshed} refreshed, ${result.skipped} skipped, ` +
+          `${result.stale} stale, ${result.unavailable} unavailable.`,
+      )
+      await invalidatePricing()
+    },
+  })
+
+  if (mappings.isLoading) {
+    return <Skeleton className="h-48 w-full" />
+  }
+
+  if (mappings.isError) {
+    return (
+      <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+        {(mappings.error as Error).message}
+      </p>
+    )
+  }
+
+  const updateField = (field: keyof CatalogMappingDraft, value: string) => {
+    setDraftOverride((current) => ({ ...(current ?? draft), [field]: value }))
+  }
+  const mutationError = save.error ?? toggle.error ?? refresh.error
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+          Free-source market estimate
+        </h2>
+        <span className="text-xs text-(--color-faint)">per unit · display only · CAD</span>
+      </div>
+      <Card>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            save.mutate()
+          }}
+        >
+          <p className="mb-4 text-sm text-(--color-muted)">
+            Confirm the exact TCGCSV printing before refreshing. This estimate never changes cost,
+            inventory, Vault value, or profit, and TCGCSV market prices are not condition-specific.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Provider">
+              <select value="tcgcsv" disabled className={FIELD_CLASS}>
+                <option value="tcgcsv">TCGCSV</option>
+              </select>
+            </Field>
+            <Field label="Subtype / printing" hint="For example Normal or Holofoil.">
+              <input
+                required
+                value={draft.subtype_name}
+                onChange={(event) => updateField('subtype_name', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Category ID" hint="TCGCSV numeric category.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_category_id ?? ''}
+                onChange={(event) => updateField('external_category_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Group ID" hint="TCGCSV numeric group.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_group_id ?? ''}
+                onChange={(event) => updateField('external_group_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Product ID" hint="TCGCSV numeric product.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_product_id}
+                onChange={(event) => updateField('external_product_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+          </div>
+
+          {mapping && (
+            <p className="mt-4 text-xs text-(--color-faint)">
+              Mapping is {mapping.match_status}. Saving confirms the identity again.
+            </p>
+          )}
+
+          {mutationError && (
+            <p className="mt-4 rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+              {(mutationError as Error).message}
+            </p>
+          )}
+          {refreshResult && <p className="mt-4 text-xs text-(--color-muted)">{refreshResult}</p>}
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button type="submit" disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : mapping ? 'Save and confirm' : 'Confirm mapping'}
+            </Button>
+            {mapping && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => toggle.mutate()}
+                disabled={toggle.isPending}
+              >
+                {toggle.isPending
+                  ? 'Updating…'
+                  : mapping.match_status === 'disabled'
+                    ? 'Re-enable mapping'
+                    : 'Disable mapping'}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => refresh.mutate()}
+              disabled={!mapping || mapping.match_status !== 'confirmed' || refresh.isPending}
+            >
+              {refresh.isPending ? 'Refreshing…' : 'Refresh confirmed estimates'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </section>
+  )
+}
 
 /**
  * What this card has away at a grader.
@@ -364,6 +571,8 @@ export function ProductDetail() {
           }
         />
       </div>
+
+      {canUseFreeMarketPricing(item) && <PricingMappingEditor productId={item.id} />}
 
       {Number(stats.cost_written_off) > 0 && (
         <p className="text-sm text-(--color-muted)">
