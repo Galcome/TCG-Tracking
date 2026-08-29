@@ -109,3 +109,78 @@ test('first pricing mapping includes the product and enables a manual refresh', 
   await expect.poll(() => refreshRequested).toBe(true)
   await expect(panel.getByText(/Checked 1: 1 refreshed/)).toBeVisible()
 })
+
+test('catalog discovery fills exact product and subtype identifiers before confirmation', async ({
+  page,
+}) => {
+  const productName = await addProduct(page, {
+    name: uniqueName('Catalog Discovery Box'),
+    quantity: 1,
+    total: '100.00',
+  })
+
+  await page.route('**/api/v1/pricing/mappings*', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: [] })
+      return
+    }
+    await route.continue()
+  })
+  await page.route('**/api/v1/pricing/catalog/categories', async (route) => {
+    await route.fulfill({
+      json: [{ category_id: 3, name: 'Pokemon', display_name: 'Pokémon' }],
+    })
+  })
+  await page.route('**/api/v1/pricing/catalog/groups*', async (route) => {
+    expect(new URL(route.request().url()).searchParams.get('category_id')).toBe('3')
+    await route.fulfill({
+      json: [
+        {
+          group_id: 3170,
+          category_id: 3,
+          name: 'Silver Tempest',
+          abbreviation: 'SIT',
+          published_on: null,
+        },
+      ],
+    })
+  })
+  await page.route('**/api/v1/pricing/catalog/products*', async (route) => {
+    const url = new URL(route.request().url())
+    expect(url.searchParams.get('category_id')).toBe('3')
+    expect(url.searchParams.get('group_id')).toBe('3170')
+    expect(url.searchParams.get('q')).toBe('Lugia')
+    await route.fulfill({
+      json: [
+        {
+          product_id: 42,
+          category_id: 3,
+          group_id: 3170,
+          name: 'Lugia V',
+          clean_name: 'Lugia V',
+          image_url: null,
+          url: null,
+          subtypes: ['Holofoil', 'Normal'],
+        },
+      ],
+    })
+  })
+
+  await openProduct(page, productName)
+  const panel = page
+    .getByRole('heading', { name: 'Free-source market estimate' })
+    .locator('..')
+    .locator('..')
+
+  await panel.getByRole('button', { name: 'Load free catalog options' }).click()
+  await panel.getByLabel('Catalog category').selectOption({ label: 'Pokémon (3)' })
+  await panel.getByLabel('Catalog group').selectOption({ label: 'Silver Tempest (3170)' })
+  await panel.getByLabel('Search catalog products').fill('Lugia')
+  await panel.getByRole('button', { name: 'Find products' }).click()
+  await panel.getByRole('button', { name: 'Use this listing' }).click()
+
+  await expect(panel.getByLabel('Category ID')).toHaveValue('3')
+  await expect(panel.getByLabel('Group ID')).toHaveValue('3170')
+  await expect(panel.getByLabel('Product ID')).toHaveValue('42')
+  await expect(panel.getByLabel('Subtype / printing')).toHaveValue('Holofoil')
+})

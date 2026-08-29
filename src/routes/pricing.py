@@ -20,12 +20,71 @@ from src.schemas.pricing import (
     CatalogMappingRead,
     CatalogMappingUpdate,
     PricingRefreshRead,
+    TCGCSVCategoryRead,
+    TCGCSVGroupRead,
+    TCGCSVProductRead,
 )
 from src.services import pricing as pricing_service
 
 router = APIRouter()
 
 MAX_MAPPINGS = 200
+catalog_provider = pricing_service.TCGCSVProvider()
+
+
+def _catalog_error(error: pricing_service.PricingError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"TCGCSV catalog discovery is unavailable: {error}",
+    )
+
+
+@router.get("/catalog/categories", response_model=list[TCGCSVCategoryRead])
+def list_catalog_categories(
+    _: Member = Depends(get_current_member),
+) -> list[TCGCSVCategoryRead]:
+    """Return provider categories for human mapping discovery."""
+    try:
+        rows = catalog_provider.categories()
+    except pricing_service.PricingError as error:
+        raise _catalog_error(error) from error
+    return [TCGCSVCategoryRead.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/catalog/groups", response_model=list[TCGCSVGroupRead])
+def list_catalog_groups(
+    category_id: int = Query(ge=1, le=1_000_000_000),
+    _: Member = Depends(get_current_member),
+) -> list[TCGCSVGroupRead]:
+    """Return provider groups under one selected category."""
+    try:
+        rows = catalog_provider.groups(category_id)
+    except pricing_service.PricingError as error:
+        raise _catalog_error(error) from error
+    return [TCGCSVGroupRead.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/catalog/products", response_model=list[TCGCSVProductRead])
+def list_catalog_products(
+    category_id: int = Query(ge=1, le=1_000_000_000),
+    group_id: int = Query(ge=1, le=1_000_000_000),
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=25, ge=1, le=pricing_service.MAX_CATALOG_PRODUCTS),
+    _: Member = Depends(get_current_member),
+) -> list[TCGCSVProductRead]:
+    """Search one provider group and expose exact product/subtype choices.
+
+    The server performs the provider calls and name filtering. Selecting a result in the
+    UI still only fills the mapping form; confirmation remains a separate human action.
+    """
+    search = (q or "").strip() or None
+    try:
+        rows = catalog_provider.products(
+            category_id, group_id, search=search, limit=limit
+        )
+    except pricing_service.PricingError as error:
+        raise _catalog_error(error) from error
+    return [TCGCSVProductRead.model_validate(row, from_attributes=True) for row in rows]
 
 
 def _mapping_values(payload: CatalogMappingCreate | CatalogMappingUpdate) -> dict:

@@ -10,6 +10,7 @@ import {
   type CatalogMappingDraft,
   type GradingSubmission,
   type Product,
+  type TCGCSVProduct,
   type Transaction,
 } from '../api'
 import {
@@ -100,7 +101,39 @@ function PricingMappingEditor({ productId }: { productId: string }) {
   const mapping = mappings.data?.[0] ?? null
   const [draftOverride, setDraftOverride] = useState<CatalogMappingDraft | null>(null)
   const [refreshResult, setRefreshResult] = useState<string | null>(null)
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [submittedCatalogSearch, setSubmittedCatalogSearch] = useState<string | null>(null)
+  const [catalogDiscoveryEnabled, setCatalogDiscoveryEnabled] = useState(false)
   const draft = draftOverride ?? mappingDraft(mapping)
+
+  const categoryId = Number(draft.external_category_id)
+  const groupId = Number(draft.external_group_id)
+  const categories = useQuery({
+    queryKey: ['pricingCatalogCategories'],
+    queryFn: api.pricingCatalogCategories,
+    enabled: catalogDiscoveryEnabled,
+  })
+  const groups = useQuery({
+    queryKey: ['pricingCatalogGroups', categoryId],
+    queryFn: () => api.pricingCatalogGroups(categoryId),
+    enabled: Number.isInteger(categoryId) && categoryId > 0,
+  })
+  const catalogProducts = useQuery({
+    queryKey: ['pricingCatalogProducts', categoryId, groupId, submittedCatalogSearch],
+    queryFn: () =>
+      api.pricingCatalogProducts({
+        category_id: categoryId,
+        group_id: groupId,
+        ...(submittedCatalogSearch ? { q: submittedCatalogSearch } : {}),
+        limit: 50,
+      }),
+    enabled:
+      submittedCatalogSearch !== null &&
+      Number.isInteger(categoryId) &&
+      categoryId > 0 &&
+      Number.isInteger(groupId) &&
+      groupId > 0,
+  })
 
   const invalidatePricing = async () => {
     await Promise.all([
@@ -156,6 +189,30 @@ function PricingMappingEditor({ productId }: { productId: string }) {
   const updateField = (field: keyof CatalogMappingDraft, value: string) => {
     setDraftOverride((current) => ({ ...(current ?? draft), [field]: value }))
   }
+  const updateCategory = (value: string) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_category_id: value,
+      external_group_id: '',
+      external_product_id: '',
+    }))
+    setSubmittedCatalogSearch(null)
+  }
+  const updateGroup = (value: string) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_group_id: value,
+      external_product_id: '',
+    }))
+    setSubmittedCatalogSearch(null)
+  }
+  const selectCatalogProduct = (product: TCGCSVProduct) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_product_id: String(product.product_id),
+      subtype_name: product.subtypes[0] ?? 'Normal',
+    }))
+  }
   const mutationError = save.error ?? toggle.error ?? refresh.error
 
   return (
@@ -177,6 +234,133 @@ function PricingMappingEditor({ productId }: { productId: string }) {
             Confirm the exact TCGCSV printing before refreshing. This estimate never changes cost,
             inventory, Vault value, or profit, and TCGCSV market prices are not condition-specific.
           </p>
+          <div className="mb-5 rounded-lg border border-(--color-edge) bg-(--color-ink)/30 p-3">
+            <p className="text-xs text-(--color-faint)">
+              Find an exact provider listing here. Search is server-side and only fills the form;
+              you still have to confirm the mapping below. Slabs and condition-specific prices are
+              not supported by this free source.
+            </p>
+            {!catalogDiscoveryEnabled && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCatalogDiscoveryEnabled(true)}
+              >
+                Load free catalog options
+              </Button>
+            )}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Catalog category">
+                <select
+                  aria-label="Catalog category"
+                  value={draft.external_category_id ?? ''}
+                  onChange={(event) => updateCategory(event.target.value)}
+                  disabled={!catalogDiscoveryEnabled || categories.isLoading}
+                  className={FIELD_CLASS}
+                >
+                  <option value="">Choose a category</option>
+                  {draft.external_category_id &&
+                    !categories.data?.some(
+                      (category) => String(category.category_id) === draft.external_category_id,
+                    ) && (
+                      <option value={draft.external_category_id}>
+                        Current category ({draft.external_category_id})
+                      </option>
+                    )}
+                  {categories.data?.map((category) => (
+                    <option key={category.category_id} value={category.category_id}>
+                      {category.display_name} ({category.category_id})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Catalog group">
+                <select
+                  aria-label="Catalog group"
+                  value={draft.external_group_id ?? ''}
+                  onChange={(event) => updateGroup(event.target.value)}
+                  disabled={!catalogDiscoveryEnabled || !categoryId || groups.isLoading}
+                  className={FIELD_CLASS}
+                >
+                  <option value="">Choose a group</option>
+                  {draft.external_group_id &&
+                    !groups.data?.some(
+                      (group) => String(group.group_id) === draft.external_group_id,
+                    ) && (
+                      <option value={draft.external_group_id}>
+                        Current group ({draft.external_group_id})
+                      </option>
+                    )}
+                  {groups.data?.map((group) => (
+                    <option key={group.group_id} value={group.group_id}>
+                      {group.name} ({group.group_id})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-(--color-muted)">
+                  Search products in this group
+                </span>
+                <input
+                  aria-label="Search catalog products"
+                  value={catalogSearch}
+                  onChange={(event) => setCatalogSearch(event.target.value)}
+                  placeholder="Product or set name"
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={!categoryId || !groupId || catalogProducts.isFetching}
+                onClick={() => setSubmittedCatalogSearch(catalogSearch.trim())}
+              >
+                {catalogProducts.isFetching ? 'Searching…' : 'Find products'}
+              </Button>
+            </div>
+            {catalogProducts.isError && (
+              <p className="mt-2 text-xs text-(--color-loss)">
+                {(catalogProducts.error as Error).message}
+              </p>
+            )}
+            {catalogProducts.data && catalogProducts.data.length === 0 && (
+              <p className="mt-2 text-xs text-(--color-faint)">
+                No products matched. Try a shorter search or enter numeric IDs manually below.
+              </p>
+            )}
+            {catalogProducts.data && catalogProducts.data.length > 0 && (
+              <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-(--color-edge) p-2">
+                {catalogProducts.data.map((catalogProduct) => (
+                  <li
+                    key={catalogProduct.product_id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-1 py-1"
+                  >
+                    <span className="min-w-0 text-xs text-(--color-muted)">
+                      <span className="font-medium text-(--color-text)">
+                        {catalogProduct.name}
+                      </span>
+                      <span className="ml-1 text-(--color-faint)">
+                        · {catalogProduct.product_id}
+                        {catalogProduct.subtypes.length > 0
+                          ? ` · ${catalogProduct.subtypes.join(', ')}`
+                          : ''}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => selectCatalogProduct(catalogProduct)}
+                    >
+                      Use this listing
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Provider">
               <select value="tcgcsv" disabled className={FIELD_CLASS}>

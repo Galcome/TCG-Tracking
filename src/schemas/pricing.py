@@ -113,6 +113,37 @@ class CatalogMappingRead(BaseModel):
     updated_at: datetime
 
 
+class TCGCSVCategoryRead(BaseModel):
+    """One bounded category option from the free catalog."""
+
+    category_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=120)
+    display_name: str = Field(min_length=1, max_length=160)
+
+
+class TCGCSVGroupRead(BaseModel):
+    """One bounded set/group option from a selected category."""
+
+    group_id: int = Field(gt=0)
+    category_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=200)
+    abbreviation: str | None = Field(default=None, max_length=40)
+    published_on: str | None = Field(default=None, max_length=40)
+
+
+class TCGCSVProductRead(BaseModel):
+    """A selectable catalog product with the available printing names."""
+
+    product_id: int = Field(gt=0)
+    category_id: int = Field(gt=0)
+    group_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=200)
+    clean_name: str | None = Field(default=None, max_length=200)
+    image_url: str | None = Field(default=None, max_length=500)
+    url: str | None = Field(default=None, max_length=500)
+    subtypes: list[str] = Field(default_factory=list, max_length=20)
+
+
 class PricingRefreshRead(BaseModel):
     attempted: int
     refreshed: int
@@ -130,5 +161,8 @@ __all__ = [
     "CatalogMappingUpdate",
     "MarketEstimateRead",
     "PricingRefreshRead",
+    "TCGCSVCategoryRead",
+    "TCGCSVGroupRead",
+    "TCGCSVProductRead",
     "QUOTE_STATUSES",
 ]

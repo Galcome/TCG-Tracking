@@ -57,6 +57,89 @@ def test_mapping_create_list_update_and_duplicate_guard(client, make_product):
     assert missing.status_code == 404
 
 
+def test_catalog_discovery_is_authenticated_and_returns_bounded_choices(client, monkeypatch):
+    monkeypatch.setattr(
+        pricing_route.pricing_service.TCGCSVProvider,
+        "categories",
+        lambda _provider: [pricing.CatalogCategory(3, "Pokemon", "Pokémon")],
+    )
+    monkeypatch.setattr(
+        pricing_route.pricing_service.TCGCSVProvider,
+        "groups",
+        lambda _provider, category_id: [
+            pricing.CatalogGroup(3170, category_id, "Silver Tempest", "SIT", None)
+        ],
+    )
+    monkeypatch.setattr(
+        pricing_route.pricing_service.TCGCSVProvider,
+        "products",
+        lambda _provider, category_id, group_id, *, search, limit: [
+            pricing.CatalogProduct(
+                42,
+                category_id,
+                group_id,
+                "Lugia V",
+                "Lugia V",
+                None,
+                None,
+                ("Normal", "Holofoil"),
+            )
+        ][:limit],
+    )
+
+    categories = client.get("/api/v1/pricing/catalog/categories")
+    assert categories.status_code == 200
+    assert categories.json()[0]["display_name"] == "Pokémon"
+
+    groups = client.get("/api/v1/pricing/catalog/groups", params={"category_id": 3})
+    assert groups.status_code == 200
+    assert groups.json()[0]["group_id"] == 3170
+
+    products = client.get(
+        "/api/v1/pricing/catalog/products",
+        params={"category_id": 3, "group_id": 3170, "q": "lugia"},
+    )
+    assert products.status_code == 200
+    assert products.json()[0]["subtypes"] == ["Normal", "Holofoil"]
+
+
+def test_catalog_discovery_maps_provider_failure_to_503(client, monkeypatch):
+    def fail(_provider):
+        raise pricing.PricingError("feed down")
+
+    monkeypatch.setattr(pricing_route.pricing_service.TCGCSVProvider, "categories", fail)
+    response = client.get("/api/v1/pricing/catalog/categories")
+    assert response.status_code == 503
+    assert "feed down" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("path", "method_name", "params"),
+    [
+        (
+            "/api/v1/pricing/catalog/groups",
+            "groups",
+            {"category_id": 3},
+        ),
+        (
+            "/api/v1/pricing/catalog/products",
+            "products",
+            {"category_id": 3, "group_id": 3170},
+        ),
+    ],
+)
+def test_catalog_discovery_group_and_product_failures_map_to_503(
+    client, monkeypatch, path, method_name, params
+):
+    def fail(*_args, **_kwargs):
+        raise pricing.PricingError("feed down")
+
+    monkeypatch.setattr(pricing_route.pricing_service.TCGCSVProvider, method_name, fail)
+    response = client.get(path, params=params)
+    assert response.status_code == 503
+    assert "feed down" in response.json()["detail"]
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -149,6 +232,7 @@ def test_pricing_refresh_is_authenticated_and_returns_service_summary(client, mo
     [
         (pricing.PricingRefreshBusy("already running"), 409, "already running"),
         (pricing.PricingRefreshLimitExceeded("too many groups"), 422, "too many groups"),
+        (pricing.PricingError("provider failed"), 503, "provider failed"),
     ],
 )
 def test_pricing_refresh_returns_actionable_status_for_bounded_work(

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 TCGCSV_BASE_URL = "https://tcgcsv.com"
 TCGCSV_LAST_UPDATED_URL = f"{TCGCSV_BASE_URL}/last-updated.txt"
+TCGCSV_CATEGORIES_URL = f"{TCGCSV_BASE_URL}/tcgplayer/categories"
 BOC_USD_CAD_URL = "https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json"
 HTTP_TIMEOUT_SECONDS = 10
 MAX_PROVIDER_RESPONSE_BYTES = 25 * 1024 * 1024
@@ -49,6 +51,10 @@ MAX_PROVIDER_MARKET_PRICE = Decimal("1000000")
 MAX_EXCHANGE_RATE = Decimal("10")
 MAX_REFRESH_MAPPINGS = 100
 MAX_REFRESH_GROUPS = 25
+MAX_CATALOG_CATEGORIES = 200
+MAX_CATALOG_GROUPS = 500
+MAX_CATALOG_PRODUCTS = 50
+CATALOG_CACHE_SECONDS = 24 * 60 * 60
 # Stable application-wide PostgreSQL advisory lock key. Transaction-scoped locking means
 # the request's normal commit/rollback releases it even if a provider call fails.
 PRICING_REFRESH_LOCK_KEY = 1951704321
@@ -169,16 +175,86 @@ class ProviderQuote:
     source_revision: FeedRevision
 
 
+@dataclass(frozen=True)
+class CatalogCategory:
+    category_id: int
+    name: str
+    display_name: str
+
+
+@dataclass(frozen=True)
+class CatalogGroup:
+    group_id: int
+    category_id: int
+    name: str
+    abbreviation: str | None
+    published_on: str | None
+
+
+@dataclass(frozen=True)
+class CatalogProduct:
+    product_id: int
+    category_id: int
+    group_id: int
+    name: str
+    clean_name: str | None
+    image_url: str | None
+    url: str | None
+    subtypes: tuple[str, ...]
+
+
+def _catalog_id(item: object, field: str) -> int | None:
+    if not isinstance(item, dict):
+        return None
+    value = item.get(field)
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _catalog_text(item: object, field: str, *, max_length: int = 500) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    value = item.get(field)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text[:max_length] if text else None
+
+
+def _catalog_results(body: bytes) -> list[dict[str, Any]]:
+    payload = _json(body)
+    if payload.get("success") is not True or not isinstance(payload.get("results"), list):
+        raise PricingError("TCGCSV catalog response was invalid")
+    return [item for item in payload["results"] if isinstance(item, dict)]
+
+
 class TCGCSVProvider:
-    """Read TCGCSV's once-daily cached group price files."""
+    """Read TCGCSV's once-daily cached catalog and group price files.
+
+    TCGCSV has no search endpoint. Discovery therefore fetches one bounded category/group
+    payload on the server, filters product names there, and joins subtype names from that
+    group's price file. The browser never contacts the provider or receives an unbounded
+    response.
+    """
 
     def __init__(
         self,
         get_bytes: Callable[..., bytes] | None = None,
         pause: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        catalog_cache_seconds: float = CATALOG_CACHE_SECONDS,
     ):
         self._get_bytes = get_bytes or _http_get
         self._pause = pause or time.sleep
+        self._clock = clock or time.monotonic
+        self._catalog_cache_seconds = catalog_cache_seconds
+        self._catalog_cache: dict[tuple[object, ...], tuple[float, tuple[Any, ...]]] = {}
+        self._catalog_lock = threading.Lock()
         self._prices_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._price_errors: dict[tuple[str, str], PricingError] = {}
 
@@ -191,6 +267,144 @@ class TCGCSVProvider:
         if not marker:
             raise PricingError("provider update marker was empty")
         return FeedRevision(marker[:120], _marker_date(marker))
+
+    def _get_catalog(self, url: str) -> list[dict[str, Any]]:
+        self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
+        return _catalog_results(self._get_bytes(url))
+
+    def _cached_catalog(
+        self, key: tuple[object, ...], loader: Callable[[], list[Any]]
+    ) -> list[Any]:
+        """Cache one bounded provider payload for a day across API requests.
+
+        Catalog discovery is operator-facing and TCGCSV publishes once daily. Holding the
+        small lock during a load prevents simultaneous browser requests from multiplying
+        provider calls; price refreshes use separate per-run caches and are unaffected.
+        """
+        with self._catalog_lock:
+            cached = self._catalog_cache.get(key)
+            now = self._clock()
+            if cached is not None and cached[0] > now:
+                return list(cached[1])
+            loaded = tuple(loader())
+            self._catalog_cache[key] = (now + self._catalog_cache_seconds, loaded)
+            return list(loaded)
+
+    @staticmethod
+    def _validate_catalog_id(value: int, label: str) -> str:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise PricingError(f"TCGCSV {label} must be a positive integer")
+        return str(value)
+
+    def categories(self) -> list[CatalogCategory]:
+        """Return a bounded list of TCGCSV categories for operator selection."""
+        def load() -> list[CatalogCategory]:
+            rows = self._get_catalog(TCGCSV_CATEGORIES_URL)
+            categories: list[CatalogCategory] = []
+            for item in rows[:MAX_CATALOG_CATEGORIES]:
+                category_id = _catalog_id(item, "categoryId")
+                name = _catalog_text(item, "name", max_length=120)
+                display_name = _catalog_text(item, "displayName", max_length=160) or name
+                if category_id is None or name is None or display_name is None:
+                    continue
+                categories.append(CatalogCategory(category_id, name, display_name))
+            return categories
+
+        return self._cached_catalog(("categories",), load)
+
+    def groups(self, category_id: int) -> list[CatalogGroup]:
+        """Return a bounded list of groups under one category."""
+        category = self._validate_catalog_id(category_id, "category ID")
+        def load() -> list[CatalogGroup]:
+            rows = self._get_catalog(f"{TCGCSV_BASE_URL}/tcgplayer/{category}/groups")
+            groups: list[CatalogGroup] = []
+            for item in rows[:MAX_CATALOG_GROUPS]:
+                group_id = _catalog_id(item, "groupId")
+                item_category = _catalog_id(item, "categoryId") or category_id
+                name = _catalog_text(item, "name", max_length=200)
+                if group_id is None or item_category != category_id or name is None:
+                    continue
+                groups.append(
+                    CatalogGroup(
+                        group_id=group_id,
+                        category_id=item_category,
+                        name=name,
+                        abbreviation=_catalog_text(item, "abbreviation", max_length=40),
+                        published_on=_catalog_text(item, "publishedOn", max_length=40),
+                    )
+                )
+            return groups
+
+        return self._cached_catalog(("groups", category_id), load)
+
+    def products(
+        self, category_id: int, group_id: int, *, search: str | None = None, limit: int = 50
+    ) -> list[CatalogProduct]:
+        """Find products and their available printing/subtype names in one group."""
+        category = self._validate_catalog_id(category_id, "category ID")
+        group = self._validate_catalog_id(group_id, "group ID")
+        if limit < 1 or limit > MAX_CATALOG_PRODUCTS:
+            raise PricingError(
+                f"TCGCSV product discovery is limited to {MAX_CATALOG_PRODUCTS} results"
+            )
+
+        def load() -> list[CatalogProduct]:
+            product_rows = self._get_catalog(
+                f"{TCGCSV_BASE_URL}/tcgplayer/{category}/{group}/products"
+            )
+            try:
+                price_rows = self._prices(category, group)
+                subtypes: dict[int, set[str]] = defaultdict(set)
+                for item in price_rows:
+                    product_id = _catalog_id(item, "productId")
+                    subtype = _catalog_text(item, "subTypeName", max_length=80) or "Normal"
+                    if product_id is not None:
+                        subtypes.setdefault(product_id, set()).add(subtype)
+
+                found: list[CatalogProduct] = []
+                for item in product_rows:
+                    product_id = _catalog_id(item, "productId")
+                    item_category = _catalog_id(item, "categoryId") or category_id
+                    item_group = _catalog_id(item, "groupId") or group_id
+                    name = _catalog_text(item, "name", max_length=200)
+                    if (
+                        product_id is None
+                        or item_category != category_id
+                        or item_group != group_id
+                        or name is None
+                    ):
+                        continue
+                    found.append(
+                        CatalogProduct(
+                            product_id=product_id,
+                            category_id=item_category,
+                            group_id=item_group,
+                            name=name,
+                            clean_name=_catalog_text(item, "cleanName", max_length=200),
+                            image_url=_catalog_text(item, "imageUrl", max_length=500),
+                            url=_catalog_text(item, "url", max_length=500),
+                            subtypes=tuple(
+                                sorted(subtypes.get(product_id, {"Normal"}), key=str.casefold)
+                            ),
+                        )
+                    )
+                return found
+            finally:
+                self.release_group(category, group)
+
+        catalog = self._cached_catalog(("products", category_id, group_id), load)
+        needle = " ".join((search or "").split()).casefold()
+        found: list[CatalogProduct] = []
+        for item in catalog:
+            searchable = " ".join(
+                value for value in (item.name, item.clean_name or "") if value
+            ).casefold()
+            if needle and needle not in searchable:
+                continue
+            found.append(item)
+            if len(found) >= limit:
+                break
+        return found
 
     def _prices(self, category_id: str, group_id: str) -> list[dict[str, Any]]:
         if not category_id.isdigit() or not group_id.isdigit():
@@ -323,6 +537,8 @@ class RefreshSummary:
     unavailable: int
     source_revision: str | None
     errors: tuple[str, ...]
+    #: Marker/FX failures prevent a meaningful refresh; a worker should retry and exit nonzero.
+    systemic_failure: bool = False
 
 
 def _acquire_refresh_lock(db: Session) -> None:
@@ -493,7 +709,7 @@ def refresh(
             unavailable += int(not had_value)
         db.flush()
         return RefreshSummary(
-            len(mappings), 0, 0, stale, unavailable, None, (message,)
+            len(mappings), 0, 0, stale, unavailable, None, (message,), True
         )
 
     pending = []
@@ -535,7 +751,14 @@ def refresh(
             unavailable += int(not had_value)
         db.flush()
         return RefreshSummary(
-            len(mappings), 0, skipped, stale, unavailable, revisions.value, (message,)
+            len(mappings),
+            0,
+            skipped,
+            stale,
+            unavailable,
+            revisions.value,
+            (message,),
+            True,
         )
 
     history_by_mapping: dict[Any, MarketPriceSnapshot] = {}
@@ -647,6 +870,9 @@ def refresh(
 
 __all__ = [
     "BOC_USD_CAD_URL",
+    "CatalogCategory",
+    "CatalogGroup",
+    "CatalogProduct",
     "CATALOG_PROVIDER_TCGCSV",
     "ELIGIBLE_PRODUCT_TYPE_SLUGS",
     "ExchangeRate",
@@ -656,6 +882,9 @@ __all__ = [
     "MAX_PROVIDER_MARKET_PRICE",
     "MAX_REFRESH_GROUPS",
     "MAX_REFRESH_MAPPINGS",
+    "MAX_CATALOG_CATEGORIES",
+    "MAX_CATALOG_GROUPS",
+    "MAX_CATALOG_PRODUCTS",
     "MARKET_QUOTE_STALE_DAYS",
     "MarketEstimate",
     "PricingError",

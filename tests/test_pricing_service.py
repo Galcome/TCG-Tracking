@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from urllib.error import URLError
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.catalog import CatalogMapping
 from src.models.market_price import CurrentMarketQuote, MarketPriceSnapshot
@@ -89,6 +90,15 @@ def test_json_and_decimal_helpers_reject_untrusted_values():
     assert pricing._marker_date("updated 2026-08-29T12:00:00Z") == TODAY
 
 
+def test_pricing_helpers_reject_unusable_catalog_rows_and_currency_values():
+    expect_pricing_error(lambda: pricing._cents(Decimal("NaN")), "out of range")
+    expect_pricing_error(lambda: pricing._cents(Decimal("-0.01")), "out of range")
+    assert pricing._catalog_id(None, "categoryId") is None
+    assert pricing._catalog_id({"categoryId": True}, "categoryId") is None
+    assert pricing._catalog_text(None, "name") is None
+    expect_pricing_error(lambda: pricing._catalog_results(b'{}'), "catalog response")
+
+
 def mapping(**overrides):
     values = {
         "id": uuid.uuid4(),
@@ -144,6 +154,165 @@ def test_tcgcsv_provider_parses_marker_prices_and_caches_group():
         f"{pricing.TCGCSV_BASE_URL}/tcgplayer/1/7/prices",
     ]
     assert pauses == [pricing.TCGCSV_REQUEST_DELAY_SECONDS]
+
+
+def test_tcgcsv_catalog_discovery_filters_products_and_joins_subtypes():
+    calls = []
+    payload = {
+        pricing.TCGCSV_CATEGORIES_URL: json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {"categoryId": 3, "name": "Pokemon", "displayName": "Pokémon"},
+                    {"categoryId": "bad", "name": "Ignored", "displayName": "Ignored"},
+                ],
+            }
+        ).encode(),
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/groups": json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {
+                        "groupId": 3170,
+                        "categoryId": 3,
+                        "name": "Silver Tempest",
+                        "abbreviation": "SIT",
+                        "publishedOn": "2022-11-11T00:00:00",
+                    },
+                    {"groupId": 8, "categoryId": 2, "name": "Wrong category"},
+                ],
+            }
+        ).encode(),
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/products": json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {
+                        "productId": 1,
+                        "categoryId": 3,
+                        "groupId": 3170,
+                        "name": "Lugia V",
+                        "cleanName": "Lugia V",
+                        "imageUrl": "https://example.test/lugia.jpg",
+                    },
+                    {
+                        "productId": 2,
+                        "categoryId": 3,
+                        "groupId": 3170,
+                        "name": "Lugia VSTAR",
+                    },
+                ],
+            }
+        ).encode(),
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/prices": json.dumps(
+            {
+                "success": True,
+                "results": [
+                    {"productId": 1, "subTypeName": "Normal", "marketPrice": 4},
+                    {"productId": 1, "subTypeName": "Holofoil", "marketPrice": 5},
+                    {"productId": 2, "subTypeName": "Normal", "marketPrice": 6},
+                ],
+            }
+        ).encode(),
+    }
+
+    def get_bytes(url, **_kwargs):
+        calls.append(url)
+        return payload[url]
+
+    pauses = []
+    provider = pricing.TCGCSVProvider(get_bytes, pause=pauses.append)
+    assert provider.categories() == [pricing.CatalogCategory(3, "Pokemon", "Pokémon")]
+    assert provider.groups(3) == [
+        pricing.CatalogGroup(3170, 3, "Silver Tempest", "SIT", "2022-11-11T00:00:00")
+    ]
+    products = provider.products(3, 3170, search="lugia v", limit=5)
+    assert products[0] == pricing.CatalogProduct(
+        1,
+        3,
+        3170,
+        "Lugia V",
+        "Lugia V",
+        "https://example.test/lugia.jpg",
+        None,
+        ("Holofoil", "Normal"),
+    )
+    assert products[1].product_id == 2
+    assert calls == [
+        pricing.TCGCSV_CATEGORIES_URL,
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/groups",
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/products",
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/prices",
+    ]
+    assert pauses == [pricing.TCGCSV_REQUEST_DELAY_SECONDS] * 4
+
+
+def test_tcgcsv_catalog_discovery_caches_provider_payloads_until_ttl_expires():
+    calls = []
+    clock = [100.0]
+    payload = json.dumps(
+        {
+            "success": True,
+            "results": [{"categoryId": 3, "name": "Pokemon", "displayName": "Pokémon"}],
+        }
+    ).encode()
+
+    def get_bytes(url, **_kwargs):
+        calls.append(url)
+        return payload
+
+    provider = pricing.TCGCSVProvider(
+        get_bytes,
+        pause=lambda _seconds: None,
+        clock=lambda: clock[0],
+        catalog_cache_seconds=60,
+    )
+    assert provider.categories()[0].category_id == 3
+    assert provider.categories()[0].category_id == 3
+    assert calls == [pricing.TCGCSV_CATEGORIES_URL]
+
+    clock[0] = 161.0
+    assert provider.categories()[0].category_id == 3
+    assert calls == [pricing.TCGCSV_CATEGORIES_URL, pricing.TCGCSV_CATEGORIES_URL]
+
+
+def test_tcgcsv_catalog_discovery_skips_invalid_and_nonmatching_rows_and_honors_limit():
+    products_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/products"
+    prices_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/prices"
+    payload = {
+        products_url: json.dumps(
+            {
+                "success": True,
+                "results": [
+                    "ignored",
+                    {"productId": 1, "categoryId": 2, "groupId": 3170, "name": "Wrong"},
+                    {"productId": 2, "categoryId": 3, "groupId": 3170, "name": "Other"},
+                    {"productId": 3, "categoryId": 3, "groupId": 3170, "name": "Target"},
+                ],
+            }
+        ).encode(),
+        prices_url: json.dumps(
+            {"success": True, "results": [{"productId": 3, "subTypeName": "Normal"}]}
+        ).encode(),
+    }
+    provider = pricing.TCGCSVProvider(
+        lambda url, **_kwargs: payload[url], pause=lambda _seconds: None
+    )
+    assert [item.product_id for item in provider.products(3, 3170, search="target")] == [3]
+    assert provider.products(3, 3170, search="other", limit=1)[0].product_id == 2
+    provider = pricing.TCGCSVProvider(
+        lambda url, **_kwargs: payload[url], pause=lambda _seconds: None
+    )
+    assert provider.products(3, 3170, limit=1)[0].product_id == 2
+
+
+def test_tcgcsv_catalog_discovery_rejects_invalid_ids_and_limits():
+    provider = pricing.TCGCSVProvider(lambda *_args, **_kwargs: b"{}")
+    expect_pricing_error(lambda: provider.groups(0), "positive integer")
+    expect_pricing_error(lambda: provider.groups(True), "positive integer")
+    expect_pricing_error(
+        lambda: provider.products(1, 2, limit=pricing.MAX_CATALOG_PRODUCTS + 1), "limited"
+    )
 
 
 def test_tcgcsv_provider_rejects_bad_marker_group_payload_and_missing_quote():
@@ -345,6 +514,7 @@ class FakeProvider:
         self.quotes = quotes or {}
         self.marker_error = marker_error
         self.quote_calls = []
+        self.release_calls = []
 
     def latest_update(self):
         if self.marker_error:
@@ -357,6 +527,9 @@ class FakeProvider:
         if isinstance(result, BaseException):
             raise result
         return pricing.ProviderQuote(Decimal(str(result)), "USD", revision)
+
+    def release_group(self, category_id, group_id):
+        self.release_calls.append((category_id, group_id))
 
 
 class FakeFX:
@@ -377,6 +550,25 @@ def test_refresh_uses_transaction_lock_and_rejects_concurrent_run():
     with pytest.raises(pricing.PricingRefreshBusy, match="already running"):
         pricing.refresh(db, today=TODAY, now=NOW, provider=FakeProvider(), fx=FakeFX())
     assert db.lock_calls == 1
+
+
+def test_refresh_lock_requires_postgres_and_surfaces_lock_query_errors():
+    class NonPostgresDB(FakeDB):
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+    with pytest.raises(pricing.PricingError, match="PostgreSQL"):
+        pricing._acquire_refresh_lock(NonPostgresDB())
+
+    class BrokenDB(FakeDB):
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, _statement):
+            raise SQLAlchemyError("lock query failed")
+
+    with pytest.raises(pricing.PricingError, match="acquire"):
+        pricing._acquire_refresh_lock(BrokenDB())
 
 
 def test_refresh_rejects_mapping_limit_before_provider_work():
