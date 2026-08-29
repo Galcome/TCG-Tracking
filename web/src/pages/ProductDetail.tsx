@@ -265,6 +265,15 @@ export function ProductDetail() {
                 </span>
               )}
             </p>
+            {(item.collector_number || item.variant || item.language || item.grading_company) && (
+              <p className="mt-1 text-xs text-(--color-faint)">
+                {[item.collector_number, item.variant, item.language]
+                  .filter(Boolean)
+                  .join(' · ')}
+                {item.grading_company &&
+                  ` · ${item.grading_company}${item.grade ? ` ${item.grade}` : ''}`}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => setDialog('purchase')}>

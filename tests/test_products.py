@@ -37,6 +37,8 @@ def test_optional_detail_is_stored(client, game_id, product_type_id):
             "product_type_id": str(product_type_id),
             "set_name": "Base Set",
             "collector_number": "4/102",
+            "variant": "Holo",
+            "language": "English",
             "grading_company": "PSA",
             "grade": "9",
             "cert_number": "12345678",
@@ -44,7 +46,10 @@ def test_optional_detail_is_stored(client, game_id, product_type_id):
         },
     )
     assert response.status_code == 201
-    assert response.json()["cert_number"] == "12345678"
+    body = response.json()
+    assert body["cert_number"] == "12345678"
+    assert body["variant"] == "Holo"
+    assert body["language"] == "English"
 
 
 def test_whitespace_only_optional_fields_are_stored_as_null(client, game_id, product_type_id):

@@ -93,6 +93,26 @@ test('the estimate never becomes the profit', async ({ page }) => {
   await expect(statAmount(page, 'Realized profit')).resolves.toBe(0)
 })
 
+test('identity details stay with a hit created from the rip form', async ({ page }) => {
+  const boxName = await addBox(page, '150.00')
+  const hit = uniqueName('Identified Hit')
+
+  await openProduct(page, boxName)
+  await page.getByRole('button', { name: 'Rip open' }).click()
+
+  const dialog = page.locator('form')
+  await dialog.getByLabel('Hit 1 name').fill(hit)
+  await dialog.getByLabel('Hit 1 set').fill('Fabled')
+  await dialog.getByLabel('Hit 1 collector number').fill('123/204')
+  await dialog.getByLabel('Hit 1 variant').fill('Iconic foil')
+  await dialog.getByLabel('Hit 1 language').fill('English')
+  await dialog.getByRole('button', { name: 'Log the hits' }).click()
+  await expect(dialog).toBeHidden()
+
+  await openProduct(page, hit)
+  await expect(page.getByText(/123\/204 · Iconic foil · English/)).toBeVisible()
+})
+
 test('the camera is not offered when nothing can read a photo', async ({ page }) => {
   const boxName = await addBox(page, '150.00')
 

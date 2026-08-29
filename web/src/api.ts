@@ -169,6 +169,12 @@ export interface Product {
   product_type: Taxonomy
   set_name: string | null
   collector_number: string | null
+  variant: string | null
+  condition: string | null
+  grading_company: string | null
+  grade: string | null
+  cert_number: string | null
+  external_ref: string | null
   storage_location: string | null
   notes: string | null
   is_archived: boolean
@@ -647,7 +653,9 @@ export interface VaultHolding {
 export interface ReadCard {
   name: string
   set_name: string
+  collector_number: string
   variant: string
+  language: string
 }
 
 export interface ReadResult {
@@ -745,8 +753,15 @@ export interface NewProduct {
   game_id: string
   product_type_id: string
   set_name?: string | null
+  collector_number?: string | null
+  variant?: string | null
   /** Drives the case and box size suggestions: a Japanese case is 20 boxes, not six. */
   language?: string | null
+  condition?: string | null
+  grading_company?: string | null
+  grade?: string | null
+  cert_number?: string | null
+  external_ref?: string | null
   storage_location?: string | null
   notes?: string | null
   initial_purchase?: {

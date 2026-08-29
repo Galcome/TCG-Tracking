@@ -42,7 +42,9 @@ class ReadCardOut(BaseModel):
 
     name: str
     set_name: str
+    collector_number: str
     variant: str
+    language: str
 
 
 class ReadResult(BaseModel):
@@ -65,9 +67,10 @@ async def read_cards(
 ) -> ReadResult:
     """What cards are in this photo.
 
-    Returns names, sets and variants to prefill the rip screen's hit rows. Anything the
-    model is unsure of comes back blank rather than guessed - a wrong card name mints a
-    phantom product that then splits every report.
+    Returns identity fields to prefill the rip screen's hit rows. Anything the model is
+    unsure of comes back blank rather than guessed - a wrong card name mints a phantom
+    product that then splits every report. The response is still only a suggestion; saving
+    the product remains a person-controlled action on the rip form.
 
     Never asked for value, condition or rarity. That is judgement, and it is not what this
     is for.
@@ -92,7 +95,13 @@ async def read_cards(
     return ReadResult(
         available=True,
         cards=[
-            ReadCardOut(name=card.name, set_name=card.set_name, variant=card.variant)
+            ReadCardOut(
+                name=card.name,
+                set_name=card.set_name,
+                collector_number=card.collector_number,
+                variant=card.variant,
+                language=card.language,
+            )
             for card in found
         ],
     )

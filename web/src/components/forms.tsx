@@ -70,6 +70,8 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
   const [tax, setTax] = useState('')
   const [fees, setFees] = useState('')
   const [setLabel, setSetLabel] = useState('')
+  const [collectorNumber, setCollectorNumber] = useState('')
+  const [variant, setVariant] = useState('')
   const [language, setLanguage] = useState<string>('English')
   const [storage, setStorage] = useState('')
   const [source, setSource] = useState('')
@@ -109,6 +111,8 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
       game_id: gameId,
       product_type_id: typeId,
       set_name: setLabel.trim() || null,
+      collector_number: collectorNumber.trim() || null,
+      variant: variant.trim() || null,
       language,
       storage_location: storage.trim() || null,
       initial_purchase: {
@@ -298,6 +302,24 @@ export function AddProductDialog({ onClose }: { onClose: () => void }) {
             className={FIELD_CLASS}
           />
         </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Collector number">
+            <input
+              value={collectorNumber}
+              onChange={(e) => setCollectorNumber(e.target.value)}
+              placeholder="123/204"
+              className={FIELD_CLASS}
+            />
+          </Field>
+          <Field label="Variant">
+            <input
+              value={variant}
+              onChange={(e) => setVariant(e.target.value)}
+              placeholder="Holo, alternate art…"
+              className={FIELD_CLASS}
+            />
+          </Field>
+        </div>
         <Field label="Bought from">
           <input
             value={source}
@@ -1341,6 +1363,8 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
   const [gameId, setGame] = useState(item.game.id)
   const [typeId, setType] = useState(item.product_type.id)
   const [setLabel, setSetLabel] = useState(item.set_name ?? '')
+  const [collectorNumber, setCollectorNumber] = useState(item.collector_number ?? '')
+  const [variant, setVariant] = useState(item.variant ?? '')
   // Editable here as well, so a product added before the field existed can be corrected
   // rather than deleted and re-entered.
   const [language, setLanguage] = useState(item.language ?? 'English')
@@ -1369,6 +1393,10 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
     if (gameId !== item.game.id) productChanges.game_id = gameId
     if (typeId !== item.product_type.id) productChanges.product_type_id = typeId
     if (setLabel.trim() !== (item.set_name ?? '')) productChanges.set_name = setLabel.trim() || null
+    if (collectorNumber.trim() !== (item.collector_number ?? '')) {
+      productChanges.collector_number = collectorNumber.trim() || null
+    }
+    if (variant.trim() !== (item.variant ?? '')) productChanges.variant = variant.trim() || null
     if (language !== (item.language ?? 'English')) productChanges.language = language
     if (storage.trim() !== (item.storage_location ?? '')) {
       productChanges.storage_location = storage.trim() || null
@@ -1530,6 +1558,24 @@ function EditItemForm({ item, onClose }: { item: ProductDetail; onClose: () => v
             ))}
           </select>
         </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Collector number">
+            <input
+              value={collectorNumber}
+              onChange={(e) => setCollectorNumber(e.target.value)}
+              placeholder="123/204"
+              className={FIELD_CLASS}
+            />
+          </Field>
+          <Field label="Variant">
+            <input
+              value={variant}
+              onChange={(e) => setVariant(e.target.value)}
+              placeholder="Holo, alternate art…"
+              className={FIELD_CLASS}
+            />
+          </Field>
+        </div>
         <Field label="Storage location">
           <input
             value={storage}

@@ -26,6 +26,10 @@ interface HitRow {
   /** Blank means "make a new product for this one". */
   productId: string
   name: string
+  setName: string
+  collectorNumber: string
+  variant: string
+  language: string
   value: string
   bucket: Bucket
 }
@@ -33,7 +37,17 @@ interface HitRow {
 let nextKey = 1
 
 function emptyRow(): HitRow {
-  return { key: nextKey++, productId: '', name: '', value: '', bucket: 'inventory' }
+  return {
+    key: nextKey++,
+    productId: '',
+    name: '',
+    setName: '',
+    collectorNumber: '',
+    variant: '',
+    language: '',
+    value: '',
+    bucket: 'inventory',
+  }
 }
 
 /**
@@ -110,7 +124,12 @@ export function RipDialog({
           product_type_id: types.data?.find((t) => t.slug === 'single')?.id
             ?? types.data?.[0]?.id
             ?? '',
-          set_name: product.set_name ?? null,
+          // Vision suggestions stay attached to the hit. Fall back to the box's set only
+          // when the row did not supply one, which preserves the convenient manual path.
+          set_name: row.setName.trim() || product.set_name || null,
+          collector_number: row.collectorNumber.trim() || null,
+          variant: row.variant.trim() || null,
+          language: row.language.trim() || product.language || null,
         })
         productId = created.id
       }
@@ -193,44 +212,73 @@ export function RipDialog({
           {rows.map((row, index) => {
             const position = filled.indexOf(row)
             return (
-              <li key={row.key} className="grid grid-cols-[1fr_7rem_auto] gap-2">
-                <input
-                  value={row.name}
-                  onChange={(e) =>
-                    setRows(
-                      rows.map((other) =>
-                        other.key === row.key ? { ...other, name: e.target.value } : other,
-                      ),
-                    )
-                  }
-                  placeholder="Card name"
-                  aria-label={`Hit ${index + 1} name`}
-                  className={`${FIELD_CLASS} mt-0`}
-                />
-                <input
-                  {...MONEY_INPUT}
-                  value={row.value}
-                  onChange={(e) =>
-                    setRows(
-                      rows.map((other) =>
-                        other.key === row.key ? { ...other, value: e.target.value } : other,
-                      ),
-                    )
-                  }
-                  aria-label={`Hit ${index + 1} value`}
-                  className={`${FIELD_CLASS} mt-0`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setRows(rows.filter((other) => other.key !== row.key))}
-                  aria-label={`Remove hit ${index + 1}`}
-                  disabled={rows.length === 1}
-                  className="rounded-md border border-(--color-edge) px-2 text-(--color-faint) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss) disabled:opacity-30"
-                >
-                  <X size={14} />
-                </button>
+              <li key={row.key} className="space-y-1">
+                <div className="grid grid-cols-[1fr_7rem_auto] gap-2">
+                  <input
+                    value={row.name}
+                    onChange={(e) =>
+                      setRows(
+                        rows.map((other) =>
+                          other.key === row.key ? { ...other, name: e.target.value } : other,
+                        ),
+                      )
+                    }
+                    placeholder="Card name"
+                    aria-label={`Hit ${index + 1} name`}
+                    className={`${FIELD_CLASS} mt-0`}
+                  />
+                  <input
+                    {...MONEY_INPUT}
+                    value={row.value}
+                    onChange={(e) =>
+                      setRows(
+                        rows.map((other) =>
+                          other.key === row.key ? { ...other, value: e.target.value } : other,
+                        ),
+                      )
+                    }
+                    aria-label={`Hit ${index + 1} value`}
+                    className={`${FIELD_CLASS} mt-0`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRows(rows.filter((other) => other.key !== row.key))}
+                    aria-label={`Remove hit ${index + 1}`}
+                    disabled={rows.length === 1}
+                    className="rounded-md border border-(--color-edge) px-2 text-(--color-faint) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss) disabled:opacity-30"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {(
+                    [
+                      ['setName', 'Set'],
+                      ['collectorNumber', 'Collector number'],
+                      ['variant', 'Variant'],
+                      ['language', 'Language'],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <input
+                      key={field}
+                      value={row[field]}
+                      onChange={(e) =>
+                        setRows(
+                          rows.map((other) =>
+                            other.key === row.key
+                              ? { ...other, [field]: e.target.value }
+                              : other,
+                          ),
+                        )
+                      }
+                      placeholder={label}
+                      aria-label={`Hit ${index + 1} ${label.toLowerCase()}`}
+                      className={`${FIELD_CLASS} mt-0 text-xs`}
+                    />
+                  ))}
+                </div>
                 {position >= 0 && boxCost > 0 && (
-                  <span className="col-span-3 -mt-1 text-xs text-(--color-faint)">
+                  <span className="block text-xs text-(--color-faint)">
                     takes {money(split[position].toFixed(2))} of the box
                   </span>
                 )}
@@ -249,9 +297,9 @@ export function RipDialog({
         </button>
       </div>
 
-      {/* Eyes, not judgement. The photo fills in rows; a person still presses save, and
-          nothing here is ever asked what a card is worth. Hidden entirely when no key is
-          configured, rather than offered and always failing. */}
+      {/* Eyes, not judgement. The photo fills in identity fields; a person still presses
+          save, and nothing here is ever asked what a card is worth. Hidden entirely when
+          no key is configured, rather than offered and always failing. */}
       {vision.data?.available && (
         <div>
           <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-(--color-accent) hover:underline">
@@ -281,6 +329,10 @@ export function RipDialog({
                       ...found.cards.map((card) => ({
                         ...emptyRow(),
                         name: card.name,
+                        setName: card.set_name,
+                        collectorNumber: card.collector_number,
+                        variant: card.variant,
+                        language: card.language,
                         value: '',
                         bucket: current[0]?.bucket ?? ('inventory' as Bucket),
                       })),
@@ -299,9 +351,8 @@ export function RipDialog({
             />
           </label>
           <p className="mt-1 text-xs text-(--color-faint)">
-            Names only, and only what it is sure of &mdash; check the set and the variant
-            yourself. An Iconic foil against a regular is $560 against about $2, and it is
-            the one thing a photo gets wrong.
+            Identity suggestions only &mdash; check the set, number, variant and language
+            yourself before saving. Unsure fields stay blank.
           </p>
           {photoError && (
             <p className="mt-1 text-xs text-(--color-loss)">{photoError}</p>

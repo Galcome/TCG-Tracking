@@ -81,7 +81,8 @@ def test_it_reads_the_cards_out_of_a_photo(client, keyed, monkeypatch):
             200,
             json=gemini(
                 '{"cards": [{"name": "Mickey Mouse", "set": "Fabled", '
-                '"variant": "Iconic foil"}]}'
+                '"collector_number": "123/204", "variant": "Iconic foil", '
+                '"language": "English"}]}'
             ),
             request=httpx.Request("POST", "https://example.invalid"),
         ),
@@ -90,8 +91,39 @@ def test_it_reads_the_cards_out_of_a_photo(client, keyed, monkeypatch):
     body = post_photo(client).json()
 
     assert body["cards"] == [
-        {"name": "Mickey Mouse", "set_name": "Fabled", "variant": "Iconic foil"}
+        {
+            "name": "Mickey Mouse",
+            "set_name": "Fabled",
+            "collector_number": "123/204",
+            "variant": "Iconic foil",
+            "language": "English",
+        }
     ]
+
+
+def test_identity_fields_use_empty_values_when_the_model_cannot_read_them(
+    client, keyed, monkeypatch
+):
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(
+            200,
+            json=gemini(
+                '{"cards": [{"name": "Mickey Mouse", "set": "Fabled", '
+                '"collectorNumber": "", "variant": "", "language": ""}]}'
+            ),
+            request=httpx.Request("POST", "https://example.invalid"),
+        ),
+    )
+
+    assert post_photo(client).json()["cards"][0] == {
+        "name": "Mickey Mouse",
+        "set_name": "Fabled",
+        "collector_number": "",
+        "variant": "",
+        "language": "",
+    }
 
 
 def test_what_it_is_unsure_of_comes_back_blank(client, keyed, monkeypatch):
@@ -113,7 +145,9 @@ def test_what_it_is_unsure_of_comes_back_blank(client, keyed, monkeypatch):
     card = post_photo(client).json()["cards"][0]
     assert card["name"] == "Mickey Mouse"
     assert card["set_name"] == ""
+    assert card["collector_number"] == ""
     assert card["variant"] == ""
+    assert card["language"] == ""
 
 
 def test_a_card_with_no_name_is_dropped(client, keyed, monkeypatch):
