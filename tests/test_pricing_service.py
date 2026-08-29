@@ -314,6 +314,53 @@ def test_tcgcsv_catalog_cache_single_flights_the_same_key_without_global_network
     assert calls == [pricing.TCGCSV_CATEGORIES_URL]
 
 
+def test_tcgcsv_catalog_queue_only_counts_requests_that_obtain_a_provider_slot():
+    provider = pricing.TCGCSVProvider(
+        lambda _url, **_kwargs: b'{"success": true, "results": []}',
+        pause=lambda _seconds: None,
+    )
+    for _ in range(pricing.MAX_CATALOG_CONCURRENT_REQUESTS):
+        assert provider._catalog_slots.acquire(timeout=0)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        waiting = executor.submit(provider.categories)
+        # The worker is blocked on the outbound semaphore, before reserving quota.
+        threading.Event().wait(0.05)
+        assert provider._catalog_request_count == 0
+        provider._catalog_slots.release()
+        assert waiting.result(timeout=2) == []
+
+    # Release the second slot retained by this test.
+    provider._catalog_slots.release()
+    assert provider._catalog_request_count == 1
+
+
+def test_tcgcsv_catalog_single_flight_shares_provider_failures_with_waiters():
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def fail(url, **_kwargs):
+        calls.append(url)
+        started.set()
+        assert release.wait(timeout=2)
+        raise pricing.PricingError("provider unavailable")
+
+    provider = pricing.TCGCSVProvider(fail, pause=lambda _seconds: None)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        leader = executor.submit(provider.categories)
+        assert started.wait(timeout=1)
+        release_timer = threading.Timer(0.05, release.set)
+        release_timer.start()
+        with pytest.raises(pricing.PricingError, match="provider unavailable"):
+            provider.categories()
+        with pytest.raises(pricing.PricingError, match="provider unavailable"):
+            leader.result(timeout=2)
+        release_timer.join(timeout=1)
+
+    assert calls == [pricing.TCGCSV_CATEGORIES_URL]
+
+
 def test_tcgcsv_catalog_caps_subtypes_and_rejects_oversized_product_indexes():
     products_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/products"
     prices_url = f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/3170/prices"

@@ -367,8 +367,12 @@ export function RipDialog({
       const key = `${productId}\u001f${row.bucket}`
       const existing = hitsByProductAndBucket.get(key)
       if (existing) {
-        existing.quantity += 1
-        existing.value = (Number(existing.value) + Number(row.value || 0)).toFixed(2)
+        const quantity = existing.quantity + 1
+        const totalValue = Number(existing.value) * existing.quantity + Number(row.value || 0)
+        existing.quantity = quantity
+        // Rip values and dated snapshots are per unit. Keep the average per-unit value
+        // when duplicate rows are combined into one quantity-bearing API row.
+        existing.value = (totalValue / quantity).toFixed(2)
       } else {
         hitsByProductAndBucket.set(key, {
           product_id: productId,

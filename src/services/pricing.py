@@ -92,6 +92,14 @@ class PricingRefreshLimitExceeded(PricingError):
     """A refresh would exceed the deliberately bounded work set."""
 
 
+@dataclass
+class _CatalogFlight:
+    """One shared catalog load, including its failure for concurrent waiters."""
+
+    event: threading.Event
+    error: PricingError | None = None
+
+
 def _http_get(url: str, *, accept: str = "application/json") -> bytes:
     """Fetch a bounded response with the provider's required identification header."""
     request = Request(url, headers={"Accept": accept, "User-Agent": USER_AGENT})
@@ -269,7 +277,7 @@ class TCGCSVProvider:
         self._catalog_lock = threading.Lock()
         self._catalog_request_lock = threading.Lock()
         self._catalog_slots = threading.BoundedSemaphore(MAX_CATALOG_CONCURRENT_REQUESTS)
-        self._catalog_inflight: dict[tuple[object, ...], threading.Event] = {}
+        self._catalog_inflight: dict[tuple[object, ...], _CatalogFlight] = {}
         self._catalog_request_window_started = self._clock()
         self._catalog_request_count = 0
         self._prices_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -286,10 +294,12 @@ class TCGCSVProvider:
         return FeedRevision(marker[:120], _marker_date(marker))
 
     def _get_catalog(self, url: str) -> list[dict[str, Any]]:
-        self._reserve_catalog_request()
         if not self._catalog_slots.acquire(timeout=HTTP_TIMEOUT_SECONDS):
             raise PricingError("TCGCSV catalog discovery is busy; retry shortly")
         try:
+            # Only work that obtained an outbound slot consumes the daily allowance.
+            # Timed-out queue waiters never contacted TCGCSV and must not exhaust it.
+            self._reserve_catalog_request()
             self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
             return _catalog_results(self._get_bytes(url))
         finally:
@@ -322,20 +332,27 @@ class TCGCSVProvider:
                 if cached is not None and cached[0] > now:
                     self._catalog_cache.move_to_end(key)
                     return list(cached[1])
-                waiter = self._catalog_inflight.get(key)
-                if waiter is None:
-                    waiter = threading.Event()
-                    self._catalog_inflight[key] = waiter
+                flight = self._catalog_inflight.get(key)
+                if flight is None:
+                    flight = _CatalogFlight(threading.Event())
+                    self._catalog_inflight[key] = flight
                     break
-            if not waiter.wait(timeout=HTTP_TIMEOUT_SECONDS * 3):
+            if not flight.event.wait(timeout=HTTP_TIMEOUT_SECONDS * 3):
                 raise PricingError("TCGCSV catalog discovery timed out waiting for a load")
+            if flight.error is not None:
+                raise PricingError(str(flight.error)) from flight.error
 
         try:
             loaded = tuple(loader())
-        except BaseException:
+        except BaseException as error:
             with self._catalog_lock:
                 self._catalog_inflight.pop(key, None)
-                waiter.set()
+                flight.error = (
+                    error
+                    if isinstance(error, PricingError)
+                    else PricingError("TCGCSV catalog discovery failed")
+                )
+                flight.event.set()
             raise
 
         with self._catalog_lock:
@@ -356,7 +373,7 @@ class TCGCSVProvider:
                 cached_items -= len(removed[1])
             self._catalog_cache[key] = (now + self._catalog_cache_seconds, loaded)
             self._catalog_inflight.pop(key, None)
-            waiter.set()
+            flight.event.set()
             return list(loaded)
 
     @staticmethod
@@ -424,10 +441,10 @@ class TCGCSVProvider:
             if len(product_rows) > MAX_CATALOG_INDEX_PRODUCTS:
                 raise PricingError("TCGCSV product group was too large to index safely")
             try:
-                self._reserve_catalog_request()
                 if not self._catalog_slots.acquire(timeout=HTTP_TIMEOUT_SECONDS):
                     raise PricingError("TCGCSV catalog discovery is busy; retry shortly")
                 try:
+                    self._reserve_catalog_request()
                     price_rows = self._prices(category, group)
                 finally:
                     self._catalog_slots.release()
