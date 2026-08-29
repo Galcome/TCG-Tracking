@@ -177,6 +177,31 @@ export interface PricingRefresh {
   errors: string[]
 }
 
+export interface TCGCSVCategory {
+  category_id: number
+  name: string
+  display_name: string
+}
+
+export interface TCGCSVGroup {
+  group_id: number
+  category_id: number
+  name: string
+  abbreviation: string | null
+  published_on: string | null
+}
+
+export interface TCGCSVProduct {
+  product_id: number
+  category_id: number
+  group_id: number
+  name: string
+  clean_name: string | null
+  image_url: string | null
+  url: string | null
+  subtypes: string[]
+}
+
 export interface Transaction {
   kind: 'purchase' | 'sale' | 'adjustment' | 'move'
   id: string
@@ -229,6 +254,30 @@ export interface Product {
   stats: ProductStats
   /** Current free-source quote, separate from cost and realized profit. */
   market_estimate: MarketEstimate | null
+}
+
+/** A possible existing product for a human reuse/create decision during a rip. */
+export interface ProductCandidate {
+  id: string
+  name: string
+  game: Taxonomy
+  product_type: Taxonomy
+  set_id: string | null
+  set_name: string | null
+  collector_number: string | null
+  variant: string | null
+  language: string | null
+  condition: string | null
+  grading_company: string | null
+  grade: string | null
+  cert_number: string | null
+  external_ref: string | null
+  image_url: string | null
+  storage_location: string | null
+  notes: string | null
+  quantity_on_hand: number
+  match_score: number
+  matched_fields: string[]
 }
 
 export interface ProductDetail extends Product {
@@ -915,8 +964,34 @@ export const api = {
 
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),
 
+  productCandidates: (input: {
+    game_id: string
+    name: string
+    set_name?: string
+    collector_number?: string
+    variant?: string
+    language?: string
+  }) =>
+    request<ProductCandidate[]>(
+      `/api/v1/products/candidates${query(input)}`,
+    ),
+
   pricingMappings: (productId?: string) =>
     request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId })}`),
+
+  pricingCatalogCategories: () =>
+    request<TCGCSVCategory[]>('/api/v1/pricing/catalog/categories'),
+
+  pricingCatalogGroups: (categoryId: number) =>
+    request<TCGCSVGroup[]>(`/api/v1/pricing/catalog/groups${query({ category_id: categoryId })}`),
+
+  pricingCatalogProducts: (input: {
+    category_id: number
+    group_id: number
+    q?: string
+    limit?: number
+  }) =>
+    request<TCGCSVProduct[]>(`/api/v1/pricing/catalog/products${query(input)}`),
 
   createPricingMapping: (input: CatalogMappingCreateInput) =>
     request<CatalogMapping>('/api/v1/pricing/mappings', {

@@ -16,7 +16,14 @@ import { useQuery } from '@tanstack/react-query'
 import { Camera, Plus, X } from 'lucide-react'
 import { useState } from 'react'
 
-import { BUCKET_LABELS, BUCKETS, api, type Bucket, type ProductDetail } from '../api'
+import {
+  BUCKET_LABELS,
+  BUCKETS,
+  api,
+  type Bucket,
+  type ProductCandidate,
+  type ProductDetail,
+} from '../api'
 import { money, todayIso } from '../format'
 import { MONEY_INPUT, useLedgerMutation } from './forms'
 import { Advanced, Dialog, Field, FIELD_CLASS } from './ui'
@@ -30,6 +37,8 @@ interface HitRow {
   collectorNumber: string
   variant: string
   language: string
+  choice: 'undecided' | 'create' | 'reuse'
+  selectedProductName: string
   value: string
   bucket: Bucket
 }
@@ -45,9 +54,186 @@ function emptyRow(): HitRow {
     collectorNumber: '',
     variant: '',
     language: '',
+    choice: 'undecided',
+    selectedProductName: '',
     value: '',
     bucket: 'inventory',
   }
+}
+
+type IdentityField = 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'
+
+function identityKey(row: HitRow): string {
+  return [row.name, row.setName, row.collectorNumber, row.variant, row.language]
+    .map((value) => value.trim())
+    .join('\u001f')
+}
+
+function candidateIdentity(row: HitRow, gameId: string) {
+  return {
+    game_id: gameId,
+    name: row.name.trim(),
+    ...(row.setName.trim() ? { set_name: row.setName.trim() } : {}),
+    ...(row.collectorNumber.trim() ? { collector_number: row.collectorNumber.trim() } : {}),
+    ...(row.variant.trim() ? { variant: row.variant.trim() } : {}),
+    ...(row.language.trim() ? { language: row.language.trim() } : {}),
+  }
+}
+
+function candidateIdentitySummary(candidate: ProductCandidate): string {
+  return [
+    candidate.set_name,
+    candidate.collector_number,
+    candidate.variant,
+    candidate.language,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function HitIdentityChooser({
+  row,
+  index,
+  gameId,
+  onFieldChange,
+  onValueChange,
+  onRemove,
+  canRemove,
+  onChoice,
+}: {
+  row: HitRow
+  index: number
+  gameId: string
+  onFieldChange: (field: IdentityField, value: string) => void
+  onValueChange: (value: string) => void
+  onRemove: () => void
+  canRemove: boolean
+  onChoice: (choice: 'create' | 'reuse', candidate?: ProductCandidate) => void
+}) {
+  const key = identityKey(row)
+  const [searchedKey, setSearchedKey] = useState('')
+  const candidates = useQuery({
+    queryKey: ['productCandidates', gameId, key],
+    queryFn: () => api.productCandidates(candidateIdentity(row, gameId)),
+    enabled: row.name.trim().length > 0 && searchedKey === key,
+  })
+
+  const fields: [IdentityField, string][] = [
+    ['setName', 'Set'],
+    ['collectorNumber', 'Collector number'],
+    ['variant', 'Variant'],
+    ['language', 'Language'],
+  ]
+
+  return (
+    <>
+      <div className="grid grid-cols-[1fr_7rem_auto] gap-2">
+        <input
+          value={row.name}
+          onChange={(event) => onFieldChange('name', event.target.value)}
+          placeholder="Card name"
+          aria-label={`Hit ${index + 1} name`}
+          className={`${FIELD_CLASS} mt-0`}
+        />
+        <input
+          {...MONEY_INPUT}
+          value={row.value}
+          onChange={(event) => onValueChange(event.target.value)}
+          aria-label={`Hit ${index + 1} value`}
+          className={`${FIELD_CLASS} mt-0`}
+        />
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove hit ${index + 1}`}
+          disabled={!canRemove}
+          className="rounded-md border border-(--color-edge) px-2 text-(--color-faint) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss) disabled:opacity-30"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {fields.map(([field, label]) => (
+          <input
+            key={field}
+            value={row[field]}
+            onChange={(event) => onFieldChange(field, event.target.value)}
+            placeholder={label}
+            aria-label={`Hit ${index + 1} ${label.toLowerCase()}`}
+            className={`${FIELD_CLASS} mt-0 text-xs`}
+          />
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setSearchedKey(key)}
+          disabled={!row.name.trim() || candidates.isFetching}
+          className="rounded-md border border-(--color-edge) px-2.5 py-1.5 text-(--color-muted) hover:border-(--color-edge-strong) hover:text-(--color-text) disabled:opacity-40"
+        >
+          {candidates.isFetching ? 'Searching…' : 'Find existing product'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChoice('create')}
+          className={`rounded-md border px-2.5 py-1.5 transition-colors ${
+            row.choice === 'create'
+              ? 'border-(--color-accent) bg-(--color-accent)/12 text-(--color-accent)'
+              : 'border-(--color-edge) text-(--color-muted) hover:border-(--color-edge-strong) hover:text-(--color-text)'
+          }`}
+        >
+          Create new product
+        </button>
+        {row.choice === 'reuse' && (
+          <span className="text-(--color-accent)">
+            Reusing {row.selectedProductName || 'selected product'}
+          </span>
+        )}
+        {row.choice === 'create' && (
+          <span className="text-(--color-muted)">A new product will be created</span>
+        )}
+        {row.choice === 'undecided' && (
+          <span className="text-(--color-loss)">Choose reuse or create before saving</span>
+        )}
+      </div>
+      {searchedKey === key && candidates.isError && (
+        <p className="mt-1 text-xs text-(--color-loss)">
+          Could not search existing products. You can still choose Create new product.
+        </p>
+      )}
+      {searchedKey === key && candidates.data && candidates.data.length === 0 && (
+        <p className="mt-1 text-xs text-(--color-faint)">
+          No strong match found. Choose Create new product if this is a new item.
+        </p>
+      )}
+      {searchedKey === key && candidates.data && candidates.data.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded-lg border border-(--color-edge) bg-(--color-ink)/40 p-2">
+          {candidates.data.map((candidate) => (
+            <li key={candidate.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span className="min-w-0 text-xs text-(--color-muted)">
+                <span className="font-medium text-(--color-text)">{candidate.name}</span>
+                {candidateIdentitySummary(candidate) && (
+                  <span className="ml-1 text-(--color-faint)">
+                    · {candidateIdentitySummary(candidate)}
+                  </span>
+                )}
+                <span className="ml-1 text-(--color-faint)">
+                  · {candidate.quantity_on_hand} in stock
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onChoice('reuse', candidate)}
+                className="rounded-md border border-(--color-accent)/50 px-2 py-1 text-xs text-(--color-accent) hover:bg-(--color-accent)/10"
+              >
+                Reuse this product
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  )
 }
 
 /**
@@ -108,14 +294,53 @@ export function RipDialog({
     onClose,
   )
 
+  function updateIdentity(key: number, field: IdentityField, value: string) {
+    setRows((current) =>
+      current.map((row) =>
+        row.key === key
+          ? {
+              ...row,
+              [field]: value,
+              // A changed identity invalidates a previous reuse decision. Keeping the old
+              // product id here would silently send the newly typed card to the old item.
+              productId: '',
+              choice: 'undecided',
+              selectedProductName: '',
+            }
+          : row,
+      ),
+    )
+  }
+
+  function updateChoice(key: number, choice: 'create' | 'reuse', candidate?: ProductCandidate) {
+    setRows((current) =>
+      current.map((row) =>
+        row.key === key
+          ? {
+              ...row,
+              choice,
+              productId: candidate?.id ?? '',
+              selectedProductName: candidate?.name ?? '',
+            }
+          : row,
+      ),
+    )
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     setError(null)
 
+    const undecided = filled.find((row) => row.choice === 'undecided')
+    if (undecided) {
+      setError('Choose Reuse or Create new product for every hit before saving.')
+      return
+    }
+
     const hits = []
     for (const row of filled) {
       let productId = row.productId
-      if (!productId) {
+      if (row.choice === 'create') {
         // Created inline. Being unable to log the card you are holding because nobody set
         // up a product for it first is exactly how this screen would go unused.
         const created = await api.createProduct({
@@ -132,6 +357,9 @@ export function RipDialog({
           language: row.language.trim() || product.language || null,
         })
         productId = created.id
+      } else if (!productId) {
+        setError('Choose an existing product or Create new product for every hit.')
+        return
       }
       hits.push({
         product_id: productId,
@@ -213,70 +441,22 @@ export function RipDialog({
             const position = filled.indexOf(row)
             return (
               <li key={row.key} className="space-y-1">
-                <div className="grid grid-cols-[1fr_7rem_auto] gap-2">
-                  <input
-                    value={row.name}
-                    onChange={(e) =>
-                      setRows(
-                        rows.map((other) =>
-                          other.key === row.key ? { ...other, name: e.target.value } : other,
-                        ),
-                      )
-                    }
-                    placeholder="Card name"
-                    aria-label={`Hit ${index + 1} name`}
-                    className={`${FIELD_CLASS} mt-0`}
-                  />
-                  <input
-                    {...MONEY_INPUT}
-                    value={row.value}
-                    onChange={(e) =>
-                      setRows(
-                        rows.map((other) =>
-                          other.key === row.key ? { ...other, value: e.target.value } : other,
-                        ),
-                      )
-                    }
-                    aria-label={`Hit ${index + 1} value`}
-                    className={`${FIELD_CLASS} mt-0`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRows(rows.filter((other) => other.key !== row.key))}
-                    aria-label={`Remove hit ${index + 1}`}
-                    disabled={rows.length === 1}
-                    className="rounded-md border border-(--color-edge) px-2 text-(--color-faint) transition-colors hover:border-(--color-loss)/50 hover:text-(--color-loss) disabled:opacity-30"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {(
-                    [
-                      ['setName', 'Set'],
-                      ['collectorNumber', 'Collector number'],
-                      ['variant', 'Variant'],
-                      ['language', 'Language'],
-                    ] as const
-                  ).map(([field, label]) => (
-                    <input
-                      key={field}
-                      value={row[field]}
-                      onChange={(e) =>
-                        setRows(
-                          rows.map((other) =>
-                            other.key === row.key
-                              ? { ...other, [field]: e.target.value }
-                              : other,
-                          ),
-                        )
-                      }
-                      placeholder={label}
-                      aria-label={`Hit ${index + 1} ${label.toLowerCase()}`}
-                      className={`${FIELD_CLASS} mt-0 text-xs`}
-                    />
-                  ))}
-                </div>
+                <HitIdentityChooser
+                  row={row}
+                  index={index}
+                  gameId={product.game.id}
+                  onFieldChange={(field, value) => updateIdentity(row.key, field, value)}
+                  onValueChange={(value) =>
+                    setRows((current) =>
+                      current.map((other) =>
+                        other.key === row.key ? { ...other, value } : other,
+                      ),
+                    )
+                  }
+                  onRemove={() => setRows((current) => current.filter((other) => other.key !== row.key))}
+                  canRemove={rows.length > 1}
+                  onChoice={(choice, candidate) => updateChoice(row.key, choice, candidate)}
+                />
                 {position >= 0 && boxCost > 0 && (
                   <span className="block text-xs text-(--color-faint)">
                     takes {money(split[position].toFixed(2))} of the box

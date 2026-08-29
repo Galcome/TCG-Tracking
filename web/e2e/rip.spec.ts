@@ -7,7 +7,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { gotoInventory, openProduct, statAmount, uniqueName } from './helpers'
+import { addProduct, gotoInventory, openProduct, statAmount, uniqueName } from './helpers'
 
 /** An actual box. Left at the dialog default this made a `Single`, which cannot be ripped. */
 async function addBox(page: Page, total: string): Promise<string> {
@@ -44,6 +44,8 @@ test('the big hit carries most of the box', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Add another' }).click()
   await dialog.getByLabel('Hit 2 name').fill(small)
   await dialog.getByLabel('Hit 2 value').fill('10.00')
+  await dialog.getByRole('button', { name: 'Create new product' }).nth(0).click()
+  await dialog.getByRole('button', { name: 'Create new product' }).nth(1).click()
 
   // The split is shown while you type, not discovered afterwards.
   await expect(dialog.getByText(/takes \$147\./)).toBeVisible()
@@ -87,6 +89,7 @@ test('the estimate never becomes the profit', async ({ page }) => {
   await dialog.getByLabel('Hit 1 name').fill(hit)
   // Valued at $50 out of a $150 box - "down $100" is a true statement of the day.
   await dialog.getByLabel('Hit 1 value').fill('50.00')
+  await dialog.getByRole('button', { name: 'Create new product' }).first().click()
   await expect(dialog.getByText(/never becomes profit/)).toBeVisible()
   await dialog.getByRole('button', { name: 'Log the hits' }).click()
   await expect(dialog).toBeHidden()
@@ -110,11 +113,44 @@ test('identity details stay with a hit created from the rip form', async ({ page
   await dialog.getByLabel('Hit 1 collector number').fill('123/204')
   await dialog.getByLabel('Hit 1 variant').fill('Iconic foil')
   await dialog.getByLabel('Hit 1 language').fill('English')
+  await dialog.getByRole('button', { name: 'Create new product' }).click()
   await dialog.getByRole('button', { name: 'Log the hits' }).click()
   await expect(dialog).toBeHidden()
 
   await openProduct(page, hit)
   await expect(page.getByText(/123\/204 · Iconic foil · English/)).toBeVisible()
+})
+
+test('a hit can explicitly reuse an existing product without creating a duplicate', async ({
+  page,
+}) => {
+  const existing = uniqueName('Existing Hit')
+  // The helper's default is a Booster Box; this product is deliberately a Single so the
+  // candidate carries the same kind of identity as a photographed hit.
+  await addProduct(page, {
+    name: existing,
+    quantity: 1,
+    total: '10.00',
+    type: 'Single',
+  })
+  const boxName = uniqueName('Reuse Box')
+  await addProduct(page, { name: boxName, quantity: 1, total: '150.00' })
+
+  await openProduct(page, boxName)
+  await page.getByRole('button', { name: 'Rip open' }).click()
+  const dialog = ripDialog(page)
+  await dialog.getByLabel('Hit 1 name').fill(existing)
+  await dialog.getByRole('button', { name: 'Find existing product' }).click()
+
+  await expect(dialog.getByText(existing, { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Reuse this product' }).click()
+  await expect(dialog.getByText(`Reusing ${existing}`)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Log the hits' }).click()
+  await expect(dialog).toBeHidden()
+
+  await openProduct(page, existing)
+  // The existing product received one derived unit; no second product was created.
+  await expect(statAmount(page, 'In stock')).resolves.toBe(2)
 })
 
 test('photo identity suggestions prefill and stay with the saved hit', async ({ page }) => {
@@ -160,6 +196,7 @@ test('photo identity suggestions prefill and stay with the saved hit', async ({ 
   await expect(dialog.getByLabel('Hit 1 variant')).toHaveValue('Iconic foil')
   await expect(dialog.getByLabel('Hit 1 language')).toHaveValue('English')
 
+  await dialog.getByRole('button', { name: 'Create new product' }).first().click()
   await dialog.getByRole('button', { name: 'Log the hits' }).click()
   await expect(dialog).toBeHidden()
 

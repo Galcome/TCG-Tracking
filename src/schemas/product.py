@@ -206,6 +206,21 @@ class ProductDetail(ProductRead):
     history: list[TransactionRead]
 
 
+class ProductCandidateRead(ProductBase):
+    """A possible existing product for an explicit reuse/create decision."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    game: TaxonomyRead
+    product_type: TaxonomyRead
+    set_id: uuid.UUID | None
+    quantity_on_hand: int
+    match_score: int
+    matched_fields: list[str]
+
+
 class ProductList(BaseModel):
     """Explicit envelope so pagination never has to be inferred from the array."""
 
