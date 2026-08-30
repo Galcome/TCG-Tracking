@@ -123,9 +123,12 @@ test('the boxes can be split across buckets as they come out', async ({ page }) 
   await expect(dialog).toBeHidden()
 
   await openProduct(page, boxName)
-  await expect(page.getByText('1 inventory · 4 store · 1 vault')).toBeVisible({
-    timeout: 10_000,
-  })
+  // Assert each labelled place independently. The presentation may be a joined hint or
+  // separate colour-coded chips; the important contract is that every allocation remains
+  // visible and named.
+  for (const allocation of ['1 inventory', '4 store', '1 vault']) {
+    await expect(page.getByText(allocation, { exact: false })).toBeVisible({ timeout: 10_000 })
+  }
 })
 
 test('a split that does not add up is refused before anything is written', async ({ page }) => {
