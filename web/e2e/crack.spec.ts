@@ -30,7 +30,7 @@ async function addCase(page: Page, total: string): Promise<string> {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Product type').selectOption({ label: 'Sealed Case' })
   await dialog.getByLabel('Quantity').fill('1')
@@ -48,7 +48,7 @@ test('a case becomes its boxes, and the cost goes with them', async ({ page }) =
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(boxName)
 
@@ -86,7 +86,7 @@ test('opening a case is not spending money again', async ({ page }) => {
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(uniqueName('Spend Box'))
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
@@ -113,7 +113,7 @@ test('the boxes can be split across buckets as they come out', async ({ page }) 
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(boxName)
   await dialog.getByLabel('Store', { exact: true }).fill('4')
@@ -134,7 +134,7 @@ test('a split that does not add up is refused before anything is written', async
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(uniqueName('Bad Split Box'))
   await dialog.getByLabel('Store', { exact: true }).fill('2')
@@ -151,7 +151,7 @@ test('what came out of what is on the page, and can be undone', async ({ page })
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(boxName)
   await dialog.getByRole('button', { name: 'Crack it open' }).click()
@@ -170,7 +170,7 @@ test('what came out of what is on the page, and can be undone', async ({ page })
   await expect(row).toBeVisible({ timeout: 10_000 })
 
   await row.getByRole('button', { name: 'Undo' }).click()
-  const undo = page.locator('form')
+  const undo = page.getByRole('dialog').locator('form')
   await undo.getByLabel('Reason').fill('wrong case')
   await undo.getByRole('button', { name: 'Undo it' }).click()
   await expect(undo).toBeHidden()
@@ -199,7 +199,7 @@ test('opening a box talks about packs, not cases', async ({ page }) => {
   await openProduct(page, box)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await expect(dialog.getByText('How many boxes')).toBeVisible()
   await expect(dialog.getByText('Packs per box')).toBeVisible()
   await expect(dialog.getByText(/packs keep the box.s purchase date/)).toBeVisible()
@@ -214,7 +214,7 @@ test('opening a case still talks about cases and boxes', async ({ page }) => {
   await openProduct(page, kase)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await expect(dialog.getByText('How many cases')).toBeVisible()
   await expect(dialog.getByLabel('Boxes per case')).toHaveValue('6')
 })
@@ -231,7 +231,7 @@ test('a Japanese box suggests Japanese sizes', async ({ page }) => {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const add = page.locator('form')
+  const add = page.getByRole('dialog').locator('form')
   const name = uniqueName('JP Box')
   await add.getByLabel('Name').fill(name)
   await add.getByLabel('Product type').selectOption({ label: 'Booster Box' })
@@ -245,14 +245,14 @@ test('a Japanese box suggests Japanese sizes', async ({ page }) => {
   await page.getByRole('button', { name: 'Crack open' }).click()
 
   // 30 packs in a Japanese box, against 36 in an English one.
-  await expect(page.locator('form').getByLabel('Packs per box')).toHaveValue('30')
+  await expect(page.getByRole('dialog').locator('form').getByLabel('Packs per box')).toHaveValue('30')
 })
 
 test('a Japanese case suggests twenty boxes, not six', async ({ page }) => {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const add = page.locator('form')
+  const add = page.getByRole('dialog').locator('form')
   const name = uniqueName('JP Case')
   await add.getByLabel('Name').fill(name)
   await add.getByLabel('Product type').selectOption({ label: 'Sealed Case' })
@@ -265,7 +265,7 @@ test('a Japanese case suggests twenty boxes, not six', async ({ page }) => {
   await openProduct(page, name)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  await expect(page.locator('form').getByLabel('Boxes per case')).toHaveValue('20')
+  await expect(page.getByRole('dialog').locator('form').getByLabel('Boxes per case')).toHaveValue('20')
 })
 
 /**
@@ -283,7 +283,7 @@ test('cracking lands you on what you just made', async ({ page }) => {
   await openProduct(page, kase)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(boxName)
   await dialog.getByRole('button', { name: 'Crack it open' }).click()

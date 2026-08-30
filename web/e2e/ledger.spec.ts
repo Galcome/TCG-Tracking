@@ -42,7 +42,7 @@ test('editing what a purchase cost re-runs FIFO on the sale drawn from it', asyn
 
   // The receipt actually said 500, not 400. One unit's cost goes 200 -> 250.
   await page.getByRole('row', { name: /Purchase/ }).getByRole('button', { name: 'Edit' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Total paid').fill('500.00')
   await dialog.getByLabel('Why the change?').fill('receipt said 500')
   await dialog.getByRole('button', { name: 'Save changes' }).click()
@@ -63,7 +63,7 @@ test('saving a purchase untouched does not quietly inflate what it cost', async 
   expect(await statAmount(page, 'Inventory at cost')).toBe(200)
 
   await page.getByRole('row', { name: /Purchase/ }).getByRole('button', { name: 'Edit' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await expect(dialog.getByLabel('Total paid')).toHaveValue('180.00')
   await dialog.getByRole('button', { name: 'Save changes' }).click()
   await expect(dialog).toBeHidden()

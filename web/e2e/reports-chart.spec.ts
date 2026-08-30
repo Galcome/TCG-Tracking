@@ -101,7 +101,7 @@ test('sets can be compared as an axis of their own', async ({ page }) => {
   // Give it a set, then sell one so it has a return to report.
   await openProduct(page, name)
   await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
-  const edit = page.locator('form')
+  const edit = page.getByRole('dialog').locator('form')
   await edit.getByText('Advanced').click()
   await edit.getByPlaceholder('Start typing, or pick one below').fill(setName)
   await edit.getByRole('button', { name: 'Save changes' }).click()

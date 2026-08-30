@@ -15,7 +15,7 @@ async function addCard(page: Page, total: string): Promise<string> {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Product type').selectOption({ label: 'Single' })
   await dialog.getByLabel('Quantity').fill('1')
@@ -34,7 +34,7 @@ test('a card sent away stays in stock and shows how long it has been out', async
   await openProduct(page, name)
   await page.getByRole('button', { name: 'Send to grading' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Fees').fill('30.00')
   // Said plainly, because "it left the house but it is still in Inventory" reads as a bug.
   await expect(dialog.getByText(/still your stock and still your money/)).toBeVisible()
@@ -52,14 +52,14 @@ test('it comes back as a graded card carrying the fees', async ({ page }) => {
 
   await openProduct(page, name)
   await page.getByRole('button', { name: 'Send to grading' }).click()
-  let dialog = page.locator('form')
+  let dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Fees').fill('30.00')
   await dialog.getByRole('button', { name: 'Send it' }).click()
   await expect(dialog).toBeHidden()
 
   // The flag is the way back in.
   await page.getByRole('button', { name: 'It came back' }).click()
-  dialog = page.locator('form')
+  dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Grade', { exact: true }).fill('10')
 
   // Pre-filled from the card, the grader and the grade - shown, and editable.
@@ -96,14 +96,14 @@ test('what it was worth raw and what it is worth graded are both kept', async ({
   await openProduct(page, card)
 
   await page.getByRole('button', { name: 'Send to grading' }).click()
-  const send = page.locator('form')
+  const send = page.getByRole('dialog').locator('form')
   await send.getByLabel('Fees').fill('25.00')
   await send.getByLabel('What is it worth raw?').fill('560.00')
   await send.getByRole('button', { name: 'Send it' }).click()
   await expect(send).toBeHidden()
 
   await page.getByRole('button', { name: 'It came back' }).click()
-  const back = page.locator('form')
+  const back = page.getByRole('dialog').locator('form')
   // exact: the "Now called" hint mentions the grade, so its accessible name
   // contains "Grade" too.
   await back.getByLabel('Grade', { exact: true }).fill('10')
@@ -124,7 +124,7 @@ test('an estimate is never allowed to become profit', async ({ page }) => {
   await openProduct(page, card)
 
   await page.getByRole('button', { name: 'Send to grading' }).click()
-  const send = page.locator('form')
+  const send = page.getByRole('dialog').locator('form')
   await send.getByLabel('What is it worth raw?').fill('900.00')
   await send.getByRole('button', { name: 'Send it' }).click()
   await expect(send).toBeHidden()

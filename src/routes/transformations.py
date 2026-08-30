@@ -275,7 +275,10 @@ def _hit_costs(db: Session, payload: RipRequest) -> list[int]:
 
     remaining = max(total - sum(value for value in explicit if value is not None), 0)
     open_rows = [index for index, value in enumerate(explicit) if value is None]
-    weights = [payload.hits[index].value for index in open_rows]
+    # A hit's value is a per-unit estimate (and is stored that way below), while the
+    # allocated transformation cost belongs to the whole output row.  Account for
+    # quantity here so two $10 copies carry the same weight as one $20 copy.
+    weights = [payload.hits[index].value * payload.hits[index].quantity for index in open_rows]
     if not any(weights):
         weights = [1] * len(open_rows)
 

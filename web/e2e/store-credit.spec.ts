@@ -34,7 +34,7 @@ async function buyUnfunded(page: Page, total: string): Promise<string> {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
@@ -47,7 +47,7 @@ async function buyUnfunded(page: Page, total: string): Promise<string> {
 /** Record a sale, sending the money to a named shop as credit. */
 async function sellForCredit(page: Page, options: { total: string; shop: string }) {
   await page.getByRole('button', { name: 'Record sale' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
 
   await dialog.getByLabel('Total received').fill(options.total)
   await dialog.getByRole('button', { name: 'Store credit…' }).click()
@@ -92,7 +92,7 @@ test('the shop appears as a pot you can spend from', async ({ page }) => {
   // Buying with that credit spends it down - no separate mechanism, it is just an account.
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(uniqueName('Bought With Credit'))
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill('150.00')
@@ -116,7 +116,7 @@ test('the shop is offered as a chip the next time', async ({ page }) => {
 
   // Typed once. Shops behave like marketplaces, not like a list somebody maintains.
   await expect(
-    page.locator('form').getByRole('button', { name: shop, exact: true }),
+    page.getByRole('dialog').locator('form').getByRole('button', { name: shop, exact: true }),
   ).toBeVisible()
 })
 
@@ -167,7 +167,7 @@ test('typing the name of a shop that already exists keeps the field open', async
   await openProduct(page, second)
   await page.getByRole('button', { name: 'Record sale' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Total received').fill('300.00')
   await dialog.getByRole('button', { name: 'Store credit…' }).click()
 

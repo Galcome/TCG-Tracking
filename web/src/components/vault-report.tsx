@@ -15,7 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { api, type VaultHolding } from '../api'
-import { money, percent, signedMoney, todayIso, toneFor } from '../format'
+import { money, percent, shortDate, signedMoney, todayIso, toneFor } from '../format'
 import { MONEY_INPUT, useLedgerMutation } from './forms'
 import { Card, Dialog, Empty, Field, FIELD_CLASS, RowAction, Skeleton } from './ui'
 
@@ -110,6 +110,7 @@ export function VaultReport() {
               <th className="px-4 py-3 font-medium">Held</th>
               <th className="px-4 py-3 text-right font-medium">Cost</th>
               <th className="px-4 py-3 text-right font-medium">Worth</th>
+              <th className="px-4 py-3 text-right font-medium">Market estimate</th>
               <th className="px-4 py-3 text-right font-medium">Change</th>
               <th className="px-4 py-3 text-right font-medium">A year</th>
               <th className="py-3 pl-2 pr-4" />
@@ -141,6 +142,28 @@ export function VaultReport() {
                             {row.days_since_valued}d old
                           </span>
                         )}
+                    </>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {row.market_estimate?.value === null || !row.market_estimate ? (
+                    <span className="text-(--color-faint)">—</span>
+                  ) : (
+                    <>
+                      {money(row.market_estimate.value)}
+                      <span
+                        className={`mt-0.5 block text-[0.6875rem] ${
+                          row.market_estimate.status === 'fresh'
+                            ? 'text-(--color-faint)'
+                            : 'text-(--color-loss)'
+                        }`}
+                      >
+                        per unit · {row.market_estimate.provider}
+                        {row.market_estimate.captured_on &&
+                          ` · ${shortDate(row.market_estimate.captured_on)}`}
+                        {row.market_estimate.status !== 'fresh' &&
+                          ` · ${row.market_estimate.status}`}
+                      </span>
                     </>
                   )}
                 </td>

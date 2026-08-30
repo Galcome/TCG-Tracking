@@ -15,7 +15,7 @@ async function openAddProduct(page: Page, game: string) {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(uniqueName('Set Box'))
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill('100.00')

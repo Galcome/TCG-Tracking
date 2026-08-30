@@ -379,6 +379,9 @@ export function Dialog({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       className="fixed inset-0 z-30 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >

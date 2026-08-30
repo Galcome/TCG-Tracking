@@ -11,10 +11,10 @@ Three rules shape everything here:
 then splits every report - the same twin problem as Fable/Fabled, arriving by camera. "Did
 not catch this one" is the correct output.
 
-**The risky field is the variant, not the character.** Any model reads "Mickey Mouse"
+**The risky fields are the set details, not the character.** Any model reads "Mickey Mouse"
 reliably; telling an Iconic foil from a regular is a tiny set symbol and a treatment, and
-that distinction is $560 against about $2. So the prompt asks for set and variant explicitly
-and is told to leave them empty rather than guess.
+that distinction is $560 against about $2. So the prompt asks for set, collector number,
+variant and language explicitly and is told to leave them empty rather than guess.
 
 **It degrades to typing.** No key, a failed call, a rate limit, a malformed answer - every
 screen still works exactly as it did, the same way the app behaves with no price feed.
@@ -59,14 +59,17 @@ _PROMPT = """You are reading a photo of trading cards laid out on a surface.
 List every distinct card you can see. For each one return:
 - name: the character or card name printed on it
 - set: the set or expansion, if you can read it
+- collector_number: the printed collector/card number, if visible
 - variant: foil, holo, alternate art, full art, or similar treatment, if visible
+- language: the card's language, only if it is clear from the card
 
 Rules you must follow:
 - If you are not confident about a field, return an empty string for it. Never guess.
 - If you cannot identify a card at all, leave it out entirely.
 - Do not estimate value, condition, rarity or price. You are not asked for those.
 
-Return only JSON: {"cards": [{"name": "", "set": "", "variant": ""}]}"""
+Return only JSON with this shape:
+{"cards": [{"name": "", "set": "", "collector_number": "", "variant": "", "language": ""}]}"""
 
 
 @dataclass(frozen=True)
@@ -75,7 +78,9 @@ class ReadCard:
 
     name: str
     set_name: str
+    collector_number: str
     variant: str
+    language: str
 
 
 class VisionUnavailable(RuntimeError):
@@ -134,7 +139,11 @@ def _parse(payload: dict) -> list[ReadCard]:
             ReadCard(
                 name=name,
                 set_name=str(row.get("set") or "").strip(),
+                collector_number=str(
+                    row.get("collector_number") or row.get("collectorNumber") or ""
+                ).strip(),
                 variant=str(row.get("variant") or "").strip(),
+                language=str(row.get("language") or "").strip(),
             )
         )
     return cards

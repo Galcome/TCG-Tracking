@@ -12,6 +12,7 @@ from src.models.member import Member
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.schemas.pricing import MarketEstimateRead
 from src.services import reporting, rollups, vault
 
 router = APIRouter()
@@ -432,6 +433,9 @@ class VaultHoldingRead(BaseModel):
     #: How long it sat in the Store before being moved here. This is the loophole guard:
     #: exempting the Vault from ageing must not make it where slow stock disappears.
     days_in_store_first: int | None
+
+    #: A free-source quote, independent of the manual valuation and accounting fields.
+    market_estimate: MarketEstimateRead | None = None
 
 
 @router.post("/valuations", response_model=ValuationRead, status_code=status.HTTP_201_CREATED)

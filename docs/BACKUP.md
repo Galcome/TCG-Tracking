@@ -92,23 +92,31 @@ BACKUP_ENCRYPTION_PASSPHRASE=... \
 R2_BUCKET=... R2_ENDPOINT=... \
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=auto \
 RESTORE_TARGET_URL=postgresql://... \
+RESTORE_CONFIRM=DROP_TARGET_SCHEMA \
 ./scripts/restore-backup.sh [stamp]
 ```
 
 With no stamp it takes whatever `latest.txt` points at.
 
 `RESTORE_TARGET_URL` must be a database you are willing to lose - the script
-drops and recreates its `public` schema.
+drops and recreates its `public` schema. Every invocation also requires the
+explicit `RESTORE_CONFIRM=DROP_TARGET_SCHEMA` acknowledgement, even for a
+throwaway scratch database. The phrase is intentionally not remembered between
+runs, so a copied command cannot silently become a destructive restore later.
 
-It refuses if the target is the database the backup came from. That check
-compares host, port and database name rather than the URL text, because the same
-database reached as `postgresql://` or `postgres://`, with a different sslmode,
-or through a pooler hostname is textually different but is still the database you
-must not destroy. It also refuses when `BACKUP_DATABASE_URL` is unset, because a
-check that cannot run must not pass silently.
+The script connects to both `RESTORE_TARGET_URL` and `BACKUP_DATABASE_URL` and
+compares the database identity returned by PostgreSQL (database OID, server
+address and server port). This catches localhost/127.0.0.1 and DNS aliases that
+would defeat a text comparison. If either identity cannot be queried, the
+restore refuses to proceed. The identity check is defence in depth; it does not
+replace the explicit confirmation.
 
-Restoring **into** production is a real recovery and sometimes exactly right. It
-needs `RESTORE_ALLOW_SAME_DATABASE=i-know`, deliberately typed.
+Restoring **into** production is a real recovery and sometimes exactly right.
+It still needs the deliberately typed `RESTORE_CONFIRM=DROP_TARGET_SCHEMA`
+confirmation, plus a source URL so the identity check can run. Because a
+production restore intentionally targets the same database as the backup source,
+it also requires the separate `RESTORE_ALLOW_SAME_DATABASE=i-know` confirmation;
+that second phrase never replaces the per-run schema-drop acknowledgement.
 
 On success it prints the tables, rows and migration head it verified. On any
 mismatch it lists exactly what differed and exits non-zero.

@@ -144,6 +144,30 @@ def test_an_explicit_cost_wins_over_the_proportional_one(client, make_product):
     assert response.json()["outputs"][0]["cost"] == "150.00"
 
 
+def test_hit_quantity_weights_cost_but_keeps_a_per_unit_value(client, make_product, db):
+    box = make_product("Quantity Weighted Box")
+    doubled = make_product("Two Ten Dollar Hits")
+    single = make_product("One Twenty Dollar Hit")
+    buy(client, box["id"], 1, "120.00")
+
+    response = rip(
+        client,
+        box["id"],
+        [
+            {"product_id": doubled["id"], "quantity": 2, "value": "10.00"},
+            {"product_id": single["id"], "quantity": 1, "value": "20.00"},
+        ],
+    )
+
+    costs = {row["product_id"]: row["cost"] for row in response.json()["outputs"]}
+    assert costs == {doubled["id"]: "60.00", single["id"]: "60.00"}
+
+    snapshot = db.scalars(
+        select(PriceSnapshot).where(PriceSnapshot.product_id == uuid.UUID(doubled["id"]))
+    ).one()
+    assert snapshot.value_cents == 1000
+
+
 # ---------------------------------------------------------------------------- bulk
 
 

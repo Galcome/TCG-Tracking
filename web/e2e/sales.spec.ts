@@ -22,7 +22,7 @@ test('a mistyped fee can be fixed from the sales ledger', async ({ page }) => {
   await expect(row).toContainText('+$60.00') // profit
 
   await row.getByRole('button', { name: 'Edit' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByText('Advanced').click()
   await dialog.getByLabel('Platform fees').fill('30.00')
   await dialog.getByRole('button', { name: 'Save changes' }).click()
@@ -41,7 +41,7 @@ test('voiding a sale takes its profit back out', async ({ page }) => {
 
   const row = await saleRow(page, name)
   await row.getByRole('button', { name: 'Void' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Reason').fill('entered twice')
   await dialog.getByRole('button', { name: 'Void it' }).click()
   await expect(dialog).toBeHidden()
@@ -100,7 +100,7 @@ test('the suggested fee follows the total, until you type your own', async ({ pa
   await openProduct(page, box)
 
   await page.getByRole('button', { name: 'Record sale' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
 
   await dialog.getByLabel('Total received').fill('500.00')
   await dialog.getByRole('button', { name: 'TCGplayer', exact: true }).click()

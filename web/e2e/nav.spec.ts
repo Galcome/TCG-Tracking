@@ -85,7 +85,7 @@ test('move stock to the Store, then find it under Store', async ({ page }) => {
   await openProduct(page, name)
 
   await page.getByRole('button', { name: 'Move', exact: true }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Move to').selectOption('store')
   await dialog.getByLabel('How many').fill('2')
   await dialog.getByRole('button', { name: 'Move', exact: true }).click()
@@ -217,7 +217,7 @@ test('cracking a case produces boxes, not singles', async ({ page }) => {
   await openProduct(page, kase)
   await page.getByRole('button', { name: 'Crack open' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   // The default came from `types[0]` — `Single`, first in a seed list — so every box a
   // crack produced was filed as a card and quietly wrecked the tier report.
   await expect(dialog.getByLabel('Type')).toHaveValue(

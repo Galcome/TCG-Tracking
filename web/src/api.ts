@@ -130,6 +130,78 @@ export interface ProductStats {
   by_bucket: Record<Bucket, number>
 }
 
+/** A provider quote in CAD, per unit. It is never a ledger value or manual valuation. */
+export interface MarketEstimate {
+  value: string | null
+  captured_on: string | null
+  status: 'fresh' | 'stale' | 'unavailable'
+  provider: string
+  source_revision: string | null
+}
+
+/** A human-confirmed external identity used only by the free market estimate adapter. */
+export interface CatalogMapping {
+  id: string
+  product_id: string
+  provider: 'tcgcsv'
+  external_product_id: string
+  external_group_id: string | null
+  external_category_id: string | null
+  subtype_name: string
+  condition: string | null
+  language: string | null
+  match_status: 'confirmed' | 'disabled'
+  notes: string | null
+  created_by_member_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CatalogMappingDraft = Pick<
+  CatalogMapping,
+  | 'external_product_id'
+  | 'external_group_id'
+  | 'external_category_id'
+  | 'subtype_name'
+>
+
+export type CatalogMappingCreateInput = CatalogMappingDraft & Pick<CatalogMapping, 'product_id'>
+
+export interface PricingRefresh {
+  attempted: number
+  refreshed: number
+  skipped: number
+  stale: number
+  unavailable: number
+  source_revision: string | null
+  errors: string[]
+}
+
+export interface TCGCSVCategory {
+  category_id: number
+  name: string
+  display_name: string
+}
+
+export interface TCGCSVGroup {
+  group_id: number
+  category_id: number
+  name: string
+  abbreviation: string | null
+  published_on: string | null
+}
+
+export interface TCGCSVProduct {
+  product_id: number
+  category_id: number
+  group_id: number
+  name: string
+  clean_name: string | null
+  image_url: string | null
+  url: string | null
+  subtypes: string[]
+}
+
 export interface Transaction {
   kind: 'purchase' | 'sale' | 'adjustment' | 'move'
   id: string
@@ -169,11 +241,43 @@ export interface Product {
   product_type: Taxonomy
   set_name: string | null
   collector_number: string | null
+  variant: string | null
+  condition: string | null
+  grading_company: string | null
+  grade: string | null
+  cert_number: string | null
+  external_ref: string | null
   storage_location: string | null
   notes: string | null
   is_archived: boolean
   created_at: string
   stats: ProductStats
+  /** Current free-source quote, separate from cost and realized profit. */
+  market_estimate: MarketEstimate | null
+}
+
+/** A possible existing product for a human reuse/create decision during a rip. */
+export interface ProductCandidate {
+  id: string
+  name: string
+  game: Taxonomy
+  product_type: Taxonomy
+  set_id: string | null
+  set_name: string | null
+  collector_number: string | null
+  variant: string | null
+  language: string | null
+  condition: string | null
+  grading_company: string | null
+  grade: string | null
+  cert_number: string | null
+  external_ref: string | null
+  image_url: string | null
+  storage_location: string | null
+  notes: string | null
+  quantity_on_hand: number
+  match_score: number
+  matched_fields: string[]
 }
 
 export interface ProductDetail extends Product {
@@ -641,13 +745,17 @@ export interface VaultHolding {
   days_held: number | null
   /** How long it sat in the Store before being moved here. The loophole guard. */
   days_in_store_first: number | null
+  /** Current free-source quote, separate from the manual Vault valuation above. */
+  market_estimate: MarketEstimate | null
 }
 
 /** One card a photo turned up. Empty strings mean the model would not say. */
 export interface ReadCard {
   name: string
   set_name: string
+  collector_number: string
   variant: string
+  language: string
 }
 
 export interface ReadResult {
@@ -745,8 +853,15 @@ export interface NewProduct {
   game_id: string
   product_type_id: string
   set_name?: string | null
+  collector_number?: string | null
+  variant?: string | null
   /** Drives the case and box size suggestions: a Japanese case is 20 boxes, not six. */
   language?: string | null
+  condition?: string | null
+  grading_company?: string | null
+  grade?: string | null
+  cert_number?: string | null
+  external_ref?: string | null
   storage_location?: string | null
   notes?: string | null
   initial_purchase?: {
@@ -848,6 +963,54 @@ export const api = {
   }) => request<ProductPage>(`/api/v1/products${query(params)}`),
 
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),
+
+  productCandidates: (input: {
+    game_id: string
+    name: string
+    set_name?: string
+    collector_number?: string
+    variant?: string
+    language?: string
+  }) =>
+    request<ProductCandidate[]>(
+      `/api/v1/products/candidates${query(input)}`,
+    ),
+
+  pricingMappings: (productId?: string) =>
+    request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId })}`),
+
+  pricingCatalogCategories: () =>
+    request<TCGCSVCategory[]>('/api/v1/pricing/catalog/categories'),
+
+  pricingCatalogGroups: (categoryId: number) =>
+    request<TCGCSVGroup[]>(`/api/v1/pricing/catalog/groups${query({ category_id: categoryId })}`),
+
+  pricingCatalogProducts: (input: {
+    category_id: number
+    group_id: number
+    q?: string
+    limit?: number
+  }) =>
+    request<TCGCSVProduct[]>(`/api/v1/pricing/catalog/products${query(input)}`),
+
+  createPricingMapping: (input: CatalogMappingCreateInput) =>
+    request<CatalogMapping>('/api/v1/pricing/mappings', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, provider: 'tcgcsv' }),
+    }),
+
+  updatePricingMapping: (id: string, changes: Partial<CatalogMappingDraft> & {
+    match_status?: CatalogMapping['match_status']
+  }) =>
+    request<CatalogMapping>(`/api/v1/pricing/mappings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  refreshPricing: () =>
+    request<PricingRefresh>('/api/v1/pricing/refresh', {
+      method: 'POST',
+    }),
 
   createProduct: (product: NewProduct) =>
     request<ProductDetail>('/api/v1/products', {

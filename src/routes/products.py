@@ -15,6 +15,8 @@ from src.models.taxonomy import Game, ProductType
 from src.routes.money import resolve_funding
 from src.schemas.product import (
     EMPTY_STATS,
+    NAME_MAX_LENGTH,
+    ProductCandidateRead,
     ProductCreate,
     ProductDetail,
     ProductList,
@@ -24,6 +26,8 @@ from src.schemas.product import (
 )
 from src.services import history, inventory, ledger, sets
 from src.services import money as money_service
+from src.services.pricing import current_estimates
+from src.services.product_matching import ProductIdentity, find_candidates
 from src.services.search import escape_like
 
 router = APIRouter()
@@ -179,8 +183,10 @@ def list_products(
 
     # Cost basis and profit are only ever wanted for what is on screen.
     stats_by_product = inventory.product_stats(db, [item.id for item in page])
+    estimates_by_product = current_estimates(db, [item.id for item in page])
     for item in page:
         item.stats = _stats_for(stats_by_product, item.id)
+        item.market_estimate = estimates_by_product.get(item.id)
 
     return ProductList(
         items=[ProductRead.model_validate(item, from_attributes=True) for item in page],
@@ -254,6 +260,64 @@ def create_product(
     return _detail(db, product)
 
 
+@router.get("/candidates", response_model=list[ProductCandidateRead])
+def product_candidates(
+    game_id: uuid.UUID = Query(description="Game identity to match exactly"),
+    name: str = Query(min_length=1, max_length=NAME_MAX_LENGTH),
+    set_name: str | None = Query(default=None, max_length=120),
+    collector_number: str | None = Query(default=None, max_length=40),
+    variant: str | None = Query(default=None, max_length=80),
+    language: str | None = Query(default=None, max_length=40),
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> list[ProductCandidateRead]:
+    """Suggest existing products; the caller must still explicitly reuse or create.
+
+    This is deliberately separate from product creation.  A camera suggestion can be
+    wrong, and a same-name card can be a different printing, so the API never silently
+    redirects a hit into an existing product.
+    """
+    matches = find_candidates(
+        db,
+        ProductIdentity(
+            game_id=game_id,
+            name=name,
+            set_name=set_name,
+            collector_number=collector_number,
+            variant=variant,
+            language=language,
+        ),
+    )
+    stats = inventory.product_stats(db, [match.product.id for match in matches])
+    return [
+        ProductCandidateRead(
+            id=match.product.id,
+            name=match.product.name,
+            game=match.product.game,
+            product_type=match.product.product_type,
+            set_id=match.product.set_id,
+            set_name=match.product.set_name,
+            collector_number=match.product.collector_number,
+            variant=match.product.variant,
+            language=match.product.language,
+            condition=match.product.condition,
+            grading_company=match.product.grading_company,
+            grade=match.product.grade,
+            cert_number=match.product.cert_number,
+            external_ref=match.product.external_ref,
+            image_url=match.product.image_url,
+            storage_location=match.product.storage_location,
+            notes=match.product.notes,
+            quantity_on_hand=stats.get(match.product.id).quantity_on_hand
+            if match.product.id in stats
+            else 0,
+            match_score=match.score,
+            matched_fields=list(match.matched_fields),
+        )
+        for match in matches
+    ]
+
+
 def _detail(db: Session, product: Product) -> ProductDetail:
     """Attach the derived figures to the ORM row as transient attributes.
 
@@ -262,6 +326,7 @@ def _detail(db: Session, product: Product) -> ProductDetail:
     """
     product.stats = _stats_for(inventory.product_stats(db, [product.id]), product.id)
     product.history = history.product_history(db, product.id)
+    product.market_estimate = current_estimates(db, [product.id]).get(product.id)
     return ProductDetail.model_validate(product, from_attributes=True)
 
 

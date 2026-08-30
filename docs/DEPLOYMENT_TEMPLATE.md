@@ -83,15 +83,23 @@ The frontend project id must match `FIREBASE_PROJECT_ID` exactly, or every reque
 
 ## Railway
 
-Root `railway.json` is intentionally service-neutral. Configure Railway services with the
-specific config file they need:
+This repository keeps root `railway.json` as the API-safe default so an existing service
+cannot silently lose its start command or migrations before dashboard configuration is
+changed. When enabling the second service, configure explicit paths:
 
-- API service: root `/railway.json` (this project only - see `GOTCHAS.md`)
-- Worker service: add a worker-specific Railway config only after the project has a real
-  worker entrypoint.
+- API service: `/railway.api.json` (migrations run before the API starts)
+- Daily pricing Cron: `/railway.pricing-refresh.json` (private, no healthcheck, exits after
+  one bounded refresh)
 
-Do not put API-only `startCommand` or `healthcheckPath` in root `railway.json` for multi-service
-repos. That can force workers to boot the web server or fail HTTP healthchecks.
+Never point the Cron service at root `railway.json`; doing so would boot the API, run
+migrations, and apply an HTTP healthcheck. After both dashboard paths are verified, root may
+be made service-neutral in a separate deployment change, but it is not required for the two
+explicitly configured services.
+
+The pricing Cron is authenticated by its private Railway service boundary and secret Neon
+`DATABASE_URL`; it does not expose a shared HTTP token or bypass Firebase membership on the
+public API. See [PRICING_REFRESH.md](PRICING_REFRESH.md) for variables, retries, overlap
+handling, and incident checks.
 
 Use bounded reads:
 

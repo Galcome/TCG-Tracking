@@ -17,7 +17,7 @@ import { gotoInventory, uniqueName } from './helpers'
 async function openDialog(page: import('@playwright/test').Page) {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
-  return page.locator('form')
+  return page.getByRole('dialog').locator('form')
 }
 
 test('the name writes itself from the set and the type', async ({ page }) => {

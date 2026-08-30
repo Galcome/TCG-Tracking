@@ -10,7 +10,7 @@ import { addProduct, gotoInventory, openProduct, rx, stat } from './helpers'
 
 async function moveAll(page: Page, to: string, quantity = 1) {
   await page.getByRole('button', { name: 'Move', exact: true }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Move to').selectOption(to)
   await dialog.getByLabel('How many').fill(String(quantity))
   await dialog.getByRole('button', { name: 'Move', exact: true }).click()
@@ -62,7 +62,7 @@ test('a sale is booked against the bucket it actually came from', async ({ page 
   await moveAll(page, 'store', 2)
 
   await page.getByRole('button', { name: 'Record sale' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Total received').fill('300.00')
   // Defaults to where the stock is, rather than silently saying Inventory.
   // The bucket chip reads "Store (2)"; anchoring on the count keeps this off the
@@ -80,7 +80,7 @@ test('a purchase can go straight to the Vault', async ({ page }) => {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   const name = `Straight to Vault ${Date.now().toString(36)}`
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Quantity').fill('2')

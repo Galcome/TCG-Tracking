@@ -6,7 +6,11 @@ import {
   api,
   BUCKET_LABELS,
   BUCKETS,
+  type CatalogMapping,
+  type CatalogMappingDraft,
   type GradingSubmission,
+  type Product,
+  type TCGCSVProduct,
   type Transaction,
 } from '../api'
 import {
@@ -42,6 +46,8 @@ import {
   Button,
   Card,
   Empty,
+  Field,
+  FIELD_CLASS,
   FifoNote,
   GameDot,
   RowAction,
@@ -61,6 +67,391 @@ type Dialog =
   | 'rip'
   | 'grade'
   | null
+
+const FREE_MARKET_PRICING_TYPES = new Set(['single', 'raw-single', 'booster-box', 'sealed-case'])
+
+const EMPTY_MAPPING: CatalogMappingDraft = {
+  external_product_id: '',
+  external_group_id: '',
+  external_category_id: '',
+  subtype_name: 'Normal',
+}
+
+function canUseFreeMarketPricing(product: Product): boolean {
+  if (!FREE_MARKET_PRICING_TYPES.has(product.product_type.slug)) return false
+  return !product.grading_company && !product.grade && !product.cert_number
+}
+
+function mappingDraft(mapping: CatalogMapping | null): CatalogMappingDraft {
+  if (!mapping) return EMPTY_MAPPING
+  return {
+    external_product_id: mapping.external_product_id,
+    external_group_id: mapping.external_group_id ?? '',
+    external_category_id: mapping.external_category_id ?? '',
+    subtype_name: mapping.subtype_name,
+  }
+}
+
+function PricingMappingEditor({ productId }: { productId: string }) {
+  const queryClient = useQueryClient()
+  const mappings = useQuery({
+    queryKey: ['pricingMappings', productId],
+    queryFn: () => api.pricingMappings(productId),
+  })
+  const mapping = mappings.data?.[0] ?? null
+  const [draftOverride, setDraftOverride] = useState<CatalogMappingDraft | null>(null)
+  const [refreshResult, setRefreshResult] = useState<string | null>(null)
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [submittedCatalogSearch, setSubmittedCatalogSearch] = useState<string | null>(null)
+  const [catalogDiscoveryEnabled, setCatalogDiscoveryEnabled] = useState(false)
+  const draft = draftOverride ?? mappingDraft(mapping)
+
+  const categoryId = Number(draft.external_category_id)
+  const groupId = Number(draft.external_group_id)
+  const categories = useQuery({
+    queryKey: ['pricingCatalogCategories'],
+    queryFn: api.pricingCatalogCategories,
+    enabled: catalogDiscoveryEnabled,
+  })
+  const groups = useQuery({
+    queryKey: ['pricingCatalogGroups', categoryId],
+    queryFn: () => api.pricingCatalogGroups(categoryId),
+    enabled: catalogDiscoveryEnabled && Number.isInteger(categoryId) && categoryId > 0,
+  })
+  const catalogProducts = useQuery({
+    queryKey: ['pricingCatalogProducts', categoryId, groupId, submittedCatalogSearch],
+    queryFn: () =>
+      api.pricingCatalogProducts({
+        category_id: categoryId,
+        group_id: groupId,
+        ...(submittedCatalogSearch ? { q: submittedCatalogSearch } : {}),
+        limit: 50,
+      }),
+    enabled:
+      submittedCatalogSearch !== null &&
+      Number.isInteger(categoryId) &&
+      categoryId > 0 &&
+      Number.isInteger(groupId) &&
+      groupId > 0,
+  })
+
+  const invalidatePricing = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['pricingMappings', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['product', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['products'] }),
+      queryClient.invalidateQueries({ queryKey: ['vaultHoldings'] }),
+    ])
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      mapping
+        ? api.updatePricingMapping(mapping.id, { ...draft, match_status: 'confirmed' })
+        : api.createPricingMapping({ product_id: productId, ...draft }),
+    onSuccess: async () => {
+      setDraftOverride(null)
+      await invalidatePricing()
+    },
+  })
+
+  const toggle = useMutation({
+    mutationFn: () =>
+      api.updatePricingMapping(mapping!.id, {
+        match_status: mapping!.match_status === 'disabled' ? 'confirmed' : 'disabled',
+      }),
+    onSuccess: invalidatePricing,
+  })
+
+  const refresh = useMutation({
+    mutationFn: api.refreshPricing,
+    onSuccess: async (result) => {
+      setRefreshResult(
+        `Checked ${result.attempted}: ${result.refreshed} refreshed, ${result.skipped} skipped, ` +
+          `${result.stale} stale, ${result.unavailable} unavailable.`,
+      )
+      await invalidatePricing()
+    },
+  })
+
+  if (mappings.isLoading) {
+    return <Skeleton className="h-48 w-full" />
+  }
+
+  if (mappings.isError) {
+    return (
+      <p className="rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+        {(mappings.error as Error).message}
+      </p>
+    )
+  }
+
+  const updateField = (field: keyof CatalogMappingDraft, value: string) => {
+    setDraftOverride((current) => ({ ...(current ?? draft), [field]: value }))
+  }
+  const updateCategory = (value: string) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_category_id: value,
+      external_group_id: '',
+      external_product_id: '',
+    }))
+    setSubmittedCatalogSearch(null)
+  }
+  const updateGroup = (value: string) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_group_id: value,
+      external_product_id: '',
+    }))
+    setSubmittedCatalogSearch(null)
+  }
+  const selectCatalogProduct = (product: TCGCSVProduct) => {
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_product_id: String(product.product_id),
+      subtype_name: product.subtypes[0] ?? 'Normal',
+    }))
+  }
+  const mutationError = save.error ?? toggle.error ?? refresh.error
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-(--color-muted)">
+          Free-source market estimate
+        </h2>
+        <span className="text-xs text-(--color-faint)">per unit · display only · CAD</span>
+      </div>
+      <Card>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            save.mutate()
+          }}
+        >
+          <p className="mb-4 text-sm text-(--color-muted)">
+            Confirm the exact TCGCSV printing before refreshing. This estimate never changes cost,
+            inventory, Vault value, or profit, and TCGCSV market prices are not condition-specific.
+          </p>
+          <div className="mb-5 rounded-lg border border-(--color-edge) bg-(--color-ink)/30 p-3">
+            <p className="text-xs text-(--color-faint)">
+              Find an exact provider listing here. Search is server-side and only fills the form;
+              you still have to confirm the mapping below. Slabs and condition-specific prices are
+              not supported by this free source.
+            </p>
+            {!catalogDiscoveryEnabled && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCatalogDiscoveryEnabled(true)}
+              >
+                Load free catalog options
+              </Button>
+            )}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Catalog category">
+                <select
+                  aria-label="Catalog category"
+                  value={draft.external_category_id ?? ''}
+                  onChange={(event) => updateCategory(event.target.value)}
+                  disabled={!catalogDiscoveryEnabled || categories.isLoading}
+                  className={FIELD_CLASS}
+                >
+                  <option value="">Choose a category</option>
+                  {draft.external_category_id &&
+                    !categories.data?.some(
+                      (category) => String(category.category_id) === draft.external_category_id,
+                    ) && (
+                      <option value={draft.external_category_id}>
+                        Current category ({draft.external_category_id})
+                      </option>
+                    )}
+                  {categories.data?.map((category) => (
+                    <option key={category.category_id} value={category.category_id}>
+                      {category.display_name} ({category.category_id})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Catalog group">
+                <select
+                  aria-label="Catalog group"
+                  value={draft.external_group_id ?? ''}
+                  onChange={(event) => updateGroup(event.target.value)}
+                  disabled={!catalogDiscoveryEnabled || !categoryId || groups.isLoading}
+                  className={FIELD_CLASS}
+                >
+                  <option value="">Choose a group</option>
+                  {draft.external_group_id &&
+                    !groups.data?.some(
+                      (group) => String(group.group_id) === draft.external_group_id,
+                    ) && (
+                      <option value={draft.external_group_id}>
+                        Current group ({draft.external_group_id})
+                      </option>
+                    )}
+                  {groups.data?.map((group) => (
+                    <option key={group.group_id} value={group.group_id}>
+                      {group.name} ({group.group_id})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-(--color-muted)">
+                  Search products in this group
+                </span>
+                <input
+                  aria-label="Search catalog products"
+                  value={catalogSearch}
+                  onChange={(event) => setCatalogSearch(event.target.value)}
+                  placeholder="Product or set name"
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={!categoryId || !groupId || catalogProducts.isFetching}
+                onClick={() => setSubmittedCatalogSearch(catalogSearch.trim())}
+              >
+                {catalogProducts.isFetching ? 'Searching…' : 'Find products'}
+              </Button>
+            </div>
+            {catalogProducts.isError && (
+              <p className="mt-2 text-xs text-(--color-loss)">
+                {(catalogProducts.error as Error).message}
+              </p>
+            )}
+            {catalogProducts.data && catalogProducts.data.length === 0 && (
+              <p className="mt-2 text-xs text-(--color-faint)">
+                No products matched. Try a shorter search or enter numeric IDs manually below.
+              </p>
+            )}
+            {catalogProducts.data && catalogProducts.data.length > 0 && (
+              <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-(--color-edge) p-2">
+                {catalogProducts.data.map((catalogProduct) => (
+                  <li
+                    key={catalogProduct.product_id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-1 py-1"
+                  >
+                    <span className="min-w-0 text-xs text-(--color-muted)">
+                      <span className="font-medium text-(--color-text)">
+                        {catalogProduct.name}
+                      </span>
+                      <span className="ml-1 text-(--color-faint)">
+                        · {catalogProduct.product_id}
+                        {catalogProduct.subtypes.length > 0
+                          ? ` · ${catalogProduct.subtypes.join(', ')}`
+                          : ''}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => selectCatalogProduct(catalogProduct)}
+                    >
+                      Use this listing
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Provider">
+              <select value="tcgcsv" disabled className={FIELD_CLASS}>
+                <option value="tcgcsv">TCGCSV</option>
+              </select>
+            </Field>
+            <Field label="Subtype / printing" hint="For example Normal or Holofoil.">
+              <input
+                required
+                value={draft.subtype_name}
+                onChange={(event) => updateField('subtype_name', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Category ID" hint="TCGCSV numeric category.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_category_id ?? ''}
+                onChange={(event) => updateField('external_category_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Group ID" hint="TCGCSV numeric group.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_group_id ?? ''}
+                onChange={(event) => updateField('external_group_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <Field label="Product ID" hint="TCGCSV numeric product.">
+              <input
+                required
+                inputMode="numeric"
+                pattern="[0-9]+"
+                value={draft.external_product_id}
+                onChange={(event) => updateField('external_product_id', event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </Field>
+          </div>
+
+          {mapping && (
+            <p className="mt-4 text-xs text-(--color-faint)">
+              Mapping is {mapping.match_status}. Saving confirms the identity again.
+            </p>
+          )}
+
+          {mutationError && (
+            <p className="mt-4 rounded-lg border border-(--color-loss)/40 bg-(--color-loss)/10 px-3 py-2 text-sm text-(--color-loss)">
+              {(mutationError as Error).message}
+            </p>
+          )}
+          {refreshResult && <p className="mt-4 text-xs text-(--color-muted)">{refreshResult}</p>}
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button type="submit" disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : mapping ? 'Save and confirm' : 'Confirm mapping'}
+            </Button>
+            {mapping && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => toggle.mutate()}
+                disabled={toggle.isPending}
+              >
+                {toggle.isPending
+                  ? 'Updating…'
+                  : mapping.match_status === 'disabled'
+                    ? 'Re-enable mapping'
+                    : 'Disable mapping'}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => refresh.mutate()}
+              disabled={!mapping || mapping.match_status !== 'confirmed' || refresh.isPending}
+            >
+              {refresh.isPending ? 'Refreshing…' : 'Refresh confirmed estimates'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </section>
+  )
+}
 
 /**
  * What this card has away at a grader.
@@ -265,6 +656,15 @@ export function ProductDetail() {
                 </span>
               )}
             </p>
+            {(item.collector_number || item.variant || item.language || item.grading_company) && (
+              <p className="mt-1 text-xs text-(--color-faint)">
+                {[item.collector_number, item.variant, item.language]
+                  .filter(Boolean)
+                  .join(' · ')}
+                {item.grading_company &&
+                  ` · ${item.grading_company}${item.grade ? ` ${item.grade}` : ''}`}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => setDialog('purchase')}>
@@ -341,7 +741,22 @@ export function ProductDetail() {
         <Stat label="Revenue" value={money(stats.gross_revenue)} />
         <Stat label="Cost of sales" value={money(stats.cost_of_sales)} />
         <Stat label="Average unit cost" value={money(stats.average_unit_cost, '—')} />
+        <Stat
+          label="Market estimate"
+          value={money(item.market_estimate?.value, '—')}
+          hint={
+            item.market_estimate
+              ? `${item.market_estimate.provider} · ${item.market_estimate.status}${
+                  item.market_estimate.captured_on
+                    ? ` · ${shortDate(item.market_estimate.captured_on)}`
+                    : ''
+                } · per unit, display only`
+              : 'No confirmed free-source mapping'
+          }
+        />
       </div>
+
+      {canUseFreeMarketPricing(item) && <PricingMappingEditor productId={item.id} />}
 
       {Number(stats.cost_written_off) > 0 && (
         <p className="text-sm text-(--color-muted)">

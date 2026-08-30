@@ -13,7 +13,7 @@ async function addVaulted(page: Page, name: string, total: string) {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
@@ -48,7 +48,7 @@ test('the Vault is measured on what it gained, not how fast it moves', async ({ 
   await expect(row.getByText('not valued')).toBeVisible()
 
   await row.getByRole('button', { name: 'Value it' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Per unit, today').fill('160.00')
   await expect(dialog.getByText(/never becomes cost basis/)).toBeVisible()
   await dialog.getByRole('button', { name: 'Save it' }).click()
