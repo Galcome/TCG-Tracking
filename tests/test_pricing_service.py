@@ -278,6 +278,50 @@ def test_tcgcsv_catalog_discovery_caches_provider_payloads_until_ttl_expires():
     assert calls == [pricing.TCGCSV_CATEGORIES_URL, pricing.TCGCSV_CATEGORIES_URL]
 
 
+def test_tcgcsv_catalog_rejects_a_request_when_all_provider_slots_are_busy():
+    class BusySlots:
+        def acquire(self, timeout):
+            assert timeout == pricing.HTTP_TIMEOUT_SECONDS
+            return False
+
+        def release(self):
+            raise AssertionError("a slot that was not acquired must not be released")
+
+    provider = pricing.TCGCSVProvider(lambda *_args, **_kwargs: b"unused")
+    provider._catalog_slots = BusySlots()
+
+    expect_pricing_error(
+        lambda: provider._get_catalog(pricing.TCGCSV_CATEGORIES_URL), "busy"
+    )
+
+
+def test_tcgcsv_catalog_request_window_resets_after_a_day():
+    clock = [100.0]
+    provider = pricing.TCGCSVProvider(
+        lambda *_args, **_kwargs: b"unused",
+        clock=lambda: clock[0],
+    )
+    provider._catalog_request_count = pricing.MAX_CATALOG_REQUESTS_PER_DAY
+
+    clock[0] += pricing.CATALOG_CACHE_SECONDS
+    provider._reserve_catalog_request()
+
+    assert provider._catalog_request_window_started == clock[0]
+    assert provider._catalog_request_count == 1
+
+
+def test_tcgcsv_catalog_waiter_timeout_reports_a_bounded_failure():
+    class StuckEvent:
+        def wait(self, timeout):
+            assert timeout == pricing.HTTP_TIMEOUT_SECONDS * 3
+            return False
+
+    provider = pricing.TCGCSVProvider(lambda *_args, **_kwargs: b"unused")
+    provider._catalog_inflight[("categories",)] = pricing._CatalogFlight(StuckEvent())
+
+    expect_pricing_error(provider.categories, "timed out waiting")
+
+
 def test_tcgcsv_catalog_cache_and_daily_provider_work_are_strictly_bounded():
     provider = pricing.TCGCSVProvider(
         lambda _url, **_kwargs: b'{"success": true, "results": []}',
@@ -393,6 +437,24 @@ def test_tcgcsv_catalog_caps_subtypes_and_rejects_oversized_product_indexes():
         {}
     ] * (pricing.MAX_CATALOG_INDEX_PRODUCTS + 1)
     expect_pricing_error(lambda: provider.products(3, 3170), "too large")
+
+
+def test_tcgcsv_product_discovery_rejects_a_busy_price_slot():
+    class BusySlots:
+        def acquire(self, timeout):
+            assert timeout == pricing.HTTP_TIMEOUT_SECONDS
+            return False
+
+        def release(self):
+            raise AssertionError("a slot that was not acquired must not be released")
+
+    provider = pricing.TCGCSVProvider(lambda *_args, **_kwargs: b"unused")
+    provider._get_catalog = lambda _url: [
+        {"productId": 1, "categoryId": 3, "groupId": 3170, "name": "Card"}
+    ]
+    provider._catalog_slots = BusySlots()
+
+    expect_pricing_error(lambda: provider.products(3, 3170), "busy")
 
 
 def test_tcgcsv_catalog_discovery_skips_invalid_and_nonmatching_rows_and_honors_limit():

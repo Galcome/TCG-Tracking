@@ -50,7 +50,7 @@ async function buy(page: Page, total: string): Promise<string> {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill(total)
@@ -98,7 +98,7 @@ test('drawing from the joint account settles part of what you are owed', async (
   const jointBefore = await balance(page, 'Joint account')
 
   await page.getByRole('button', { name: 'Move money' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Out of').selectOption({ label: 'Joint account' })
   await dialog.getByLabel('Into').selectOption({ label: mine })
   await dialog.getByLabel('How much').fill('3000.00')
@@ -136,7 +136,7 @@ test('an opening balance carries the spreadsheet over', async ({ page }) => {
   const card = page.getByRole('listitem').filter({ hasText: mine }).first()
   await card.getByRole('button', { name: 'Adjust' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   // Labelled in the account's own terms - nobody should have to reason about which way
   // cash notionally travelled to produce the balance they want.
   await expect(dialog.getByRole('button', { name: 'Owed more' })).toBeVisible()
@@ -181,7 +181,7 @@ test('voiding a transfer puts both balances back', async ({ page }) => {
   const note = uniqueName('Void drill')
 
   await page.getByRole('button', { name: 'Move money' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Out of').selectOption({ label: mine })
   await dialog.getByLabel('Into').selectOption({ label: 'Joint account' })
   await dialog.getByLabel('How much').fill('750.00')
@@ -199,7 +199,7 @@ test('voiding a transfer puts both balances back', async ({ page }) => {
   const row = page.getByRole('row').filter({ hasText: note })
   await expect(row).toBeVisible({ timeout: 10_000 })
   await row.getByRole('button', { name: 'Void' }).click()
-  const voidDialog = page.locator('form')
+  const voidDialog = page.getByRole('dialog').locator('form')
   await voidDialog.getByLabel('Reason').fill('wrong way round')
   await voidDialog.getByRole('button', { name: 'Void it' }).click()
   await expect(voidDialog).toBeHidden()
@@ -214,7 +214,7 @@ test('correcting what a purchase cost moves the money with it', async ({ page })
 
   await openProduct(page, name)
   await page.getByRole('row', { name: /Purchase/ }).getByRole('button', { name: 'Edit' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Total paid').fill('300.00')
   await dialog.getByRole('button', { name: 'Save' }).click()
   await expect(dialog).toBeHidden()
@@ -231,7 +231,7 @@ test('a purchase can be paid for out of the joint account instead', async ({ pag
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(uniqueName('Joint Box'))
   await dialog.getByLabel('Quantity').fill('1')
   await dialog.getByLabel('Total paid').fill('400.00')

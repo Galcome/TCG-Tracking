@@ -89,6 +89,11 @@ def test_upload_receive_wrapper_rejects_missing_or_falsified_lengths():
         while (message := await receive()).get("type") == "http.request":
             if not message.get("more_body"):
                 break
+        # A multipart parser may ask again after the first over-limit chunk. The wrapper
+        # must keep returning disconnect rather than allowing the underlying receive
+        # callable to produce another body (or raising StopIteration in this harness).
+        if message.get("type") == "http.disconnect":
+            assert (await receive()).get("type") == "http.disconnect"
         await send(
             {
                 "type": "http.response.start",

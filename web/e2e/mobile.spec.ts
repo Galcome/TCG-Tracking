@@ -43,7 +43,7 @@ test('a product can be added on a phone and shows up in the card list', async ({
   await page.goto('/')
   await page.getByRole('button', { name: 'Add product' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Quantity').fill('2')
   await dialog.getByLabel('Total paid').fill('300.00')

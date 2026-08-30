@@ -12,7 +12,7 @@ import { addProduct, gotoInventory, openProduct, rx, stat } from './helpers'
 /** Move stock between buckets from the product page. */
 async function moveStock(page: Page, options: { quantity: number; from: string; to: string }) {
   await page.getByRole('button', { name: 'Move', exact: true }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
 
   await dialog.getByLabel('Move from').selectOption(options.from)
   await dialog.getByLabel('Move to').selectOption(options.to)
@@ -86,7 +86,7 @@ test('voiding a move puts the stock back where it was', async ({ page }) => {
   await moveStock(page, { quantity: 2, from: 'inventory', to: 'vault' })
 
   await page.getByRole('row', { name: /Move/ }).getByRole('button', { name: 'Void' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Reason').fill('wrong pile')
   await dialog.getByRole('button', { name: 'Void it' }).click()
   await expect(dialog).toBeHidden()

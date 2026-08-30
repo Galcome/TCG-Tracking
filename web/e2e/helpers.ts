@@ -55,7 +55,7 @@ export async function addProduct(
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Product type').selectOption({ label: options.type ?? 'Booster Box' })
   await dialog.getByLabel('Quantity').fill(String(options.quantity))
@@ -118,7 +118,7 @@ export async function recordSale(
   options: { quantity: number; total: string; channel?: string; platformFees?: string },
 ) {
   await page.getByRole('button', { name: 'Record sale' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
 
   await dialog.getByLabel('Quantity').fill(String(options.quantity))
   await dialog.getByLabel('Total received').fill(options.total)

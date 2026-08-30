@@ -19,7 +19,7 @@ async function addProduct(
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   // Tier is grouped by product type, so a rollup spec that left everything at the default
   // was comparing one tier against itself.
@@ -43,7 +43,7 @@ test('the tier view shows the spread, not just the average', async ({ page }) =>
   ] as const) {
     await openProduct(page, name)
     await page.getByRole('button', { name: 'Record sale' }).first().click()
-    const dialog = page.locator('form')
+    const dialog = page.getByRole('dialog').locator('form')
     await dialog.getByLabel('Total received').fill(price)
     await dialog.getByRole('button', { name: 'Record sale' }).click()
     await expect(dialog).toBeHidden()
@@ -64,7 +64,7 @@ test('a set is shown as three figures and never one', async ({ page }) => {
 
   await openProduct(page, sold)
   await page.getByRole('button', { name: 'Record sale' }).first().click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Total received').fill('180.00')
   await dialog.getByRole('button', { name: 'Record sale' }).click()
   await expect(dialog).toBeHidden()
@@ -87,7 +87,7 @@ test('a case shows what it returned all-in', async ({ page }) => {
 
   await openProduct(page, caseName)
   await page.getByRole('button', { name: 'Crack open' }).click()
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Boxes per case').fill('6')
   await dialog.getByLabel('Name').fill(boxName)
   await dialog.getByRole('button', { name: 'Crack it open' }).click()

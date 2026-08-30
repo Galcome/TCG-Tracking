@@ -15,7 +15,7 @@ async function addBox(page: Page, total: string): Promise<string> {
   await gotoInventory(page)
   await page.getByRole('button', { name: 'Add product' }).first().click()
 
-  const dialog = page.locator('form')
+  const dialog = page.getByRole('dialog').locator('form')
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByLabel('Product type').selectOption({ label: 'Booster Box' })
   await dialog.getByLabel('Quantity').fill('1')
@@ -27,7 +27,7 @@ async function addBox(page: Page, total: string): Promise<string> {
 }
 
 function ripDialog(page: Page) {
-  return page.locator('form').filter({ has: page.getByLabel('Hit 1 name') })
+  return page.getByRole('dialog').locator('form').filter({ has: page.getByLabel('Hit 1 name') })
 }
 
 test('the big hit carries most of the box', async ({ page }) => {
