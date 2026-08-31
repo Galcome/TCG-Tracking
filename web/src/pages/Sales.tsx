@@ -2,9 +2,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Download, Pencil } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { api, MARKETPLACES, saleAsTransaction, type Period, type SaleRow } from '../api'
+import { api, MARKETPLACES, saleAsTransaction, type SaleRow } from '../api'
 import { PageHeader, initials, type PageActions } from '../components/AppShell'
 import { EditTransactionDialog, VoidDialog } from '../components/forms'
+import { PeriodSelector, usePeriodPreference } from '../components/period-selector'
 import {
   Card,
   Empty,
@@ -17,13 +18,6 @@ import {
 } from '../components/ui'
 import { downloadCsv, percentCell, UNKNOWN } from '../csv'
 import { money, shortDate, signedMoney, toneFor } from '../format'
-
-const PERIODS: { value: Period; label: string }[] = [
-  { value: 'all', label: 'All time' },
-  { value: 'ytd', label: 'Year' },
-  { value: 'mtd', label: 'Month' },
-  { value: '30d', label: '30 days' },
-]
 
 /** Server-side label for sales with no channel recorded. Not a stored value. */
 const UNSPECIFIED = 'Unspecified'
@@ -48,7 +42,7 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   // gets fixed on.
   const [editing, setEditing] = useState<SaleRow | null>(null)
   const [voiding, setVoiding] = useState<SaleRow | null>(null)
-  const [period, setPeriod] = useState<Period>('all')
+  const [period, setPeriod] = usePeriodPreference()
   const [search, setSearch] = useState('')
   const [marketplace, setMarketplace] = useState('')
   const [seller, setSeller] = useState('')
@@ -156,22 +150,7 @@ export function Sales({ onRecordSale, onAddProduct }: PageActions) {
   return (
     <div className="space-y-6">
       <PageHeader title="Sales" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
-        <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
-          {PERIODS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setPeriod(option.value)}
-              className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
-                period === option.value
-                  ? 'bg-(--color-accent) font-medium text-(--color-ink)'
-                  : 'text-(--color-muted) hover:text-(--color-text)'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <PeriodSelector value={period} onChange={setPeriod} />
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

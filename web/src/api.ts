@@ -764,7 +764,7 @@ export interface ReadResult {
   cards: ReadCard[]
 }
 
-export type Period = 'all' | 'ytd' | 'mtd' | '30d'
+export type Period = 'all' | 'ytd' | 'mtd' | '30d' | '60d' | '90d'
 
 /**
  * A pot money sits in, or a person money is owed to.

@@ -232,6 +232,35 @@ def test_periods_only_count_sales_inside_them(client, make_product):
     assert recent["realized_profit"] == "100.00"
 
 
+def test_longer_periods_include_their_full_rolling_windows(client, make_product):
+    product = make_product()
+    buy(client, product["id"], 3, "300.00")
+    sell(client, product["id"], 1, "200.00", on=TODAY - timedelta(days=45))
+    sell(client, product["id"], 1, "200.00", on=TODAY - timedelta(days=75))
+
+    thirty = client.get("/api/v1/dashboard", params={"period": "30d"}).json()
+    sixty = client.get("/api/v1/dashboard", params={"period": "60d"}).json()
+    ninety = client.get("/api/v1/dashboard", params={"period": "90d"}).json()
+
+    assert thirty["sale_count"] == 0
+    assert sixty["sale_count"] == 1
+    assert ninety["sale_count"] == 2
+
+
+@pytest.mark.parametrize(("period", "days"), [("30d", 30), ("60d", 60), ("90d", 90)])
+def test_rolling_period_cutoff_spans_exactly_its_label(client, make_product, period, days):
+    product = make_product()
+    buy(client, product["id"], 2, "200.00", on=TODAY - timedelta(days=days))
+    sell(client, product["id"], 1, "200.00", on=TODAY - timedelta(days=days - 1))
+    sell(client, product["id"], 1, "200.00", on=TODAY - timedelta(days=days))
+
+    dashboard = client.get("/api/v1/dashboard", params={"period": period}).json()
+    by_game = client.get("/api/v1/reports/by-game", params={"period": period}).json()
+
+    assert dashboard["sale_count"] == 1
+    assert by_game[0]["sale_count"] == 1
+
+
 def test_inventory_at_cost_ignores_the_period(client, make_product):
     """A date filter cannot change what is physically on the shelf today."""
     product = make_product()
@@ -247,9 +276,10 @@ def test_an_unknown_period_is_rejected(client):
     assert client.get("/api/v1/dashboard", params={"period": "forever"}).status_code == 422
 
 
-@pytest.mark.parametrize("period", ["all", "ytd", "mtd", "30d"])
+@pytest.mark.parametrize("period", ["all", "ytd", "mtd", "30d", "60d", "90d"])
 def test_every_documented_period_works(client, period):
     assert client.get("/api/v1/dashboard", params={"period": period}).status_code == 200
+    assert client.get("/api/v1/reports/by-game", params={"period": period}).status_code == 200
 
 
 def test_period_start_boundaries():
@@ -257,7 +287,9 @@ def test_period_start_boundaries():
     assert reporting.period_start("all", today) is None
     assert reporting.period_start("ytd", today) == date(2026, 1, 1)
     assert reporting.period_start("mtd", today) == date(2026, 7, 1)
-    assert reporting.period_start("30d", today) == date(2026, 6, 28)
+    assert reporting.period_start("30d", today) == date(2026, 6, 29)
+    assert reporting.period_start("60d", today) == date(2026, 5, 30)
+    assert reporting.period_start("90d", today) == date(2026, 4, 30)
 
 
 # --------------------------------------------------------------------------- groups

@@ -122,7 +122,7 @@ def _filters(
     )
 
 
-PeriodQuery = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$")
+PeriodQuery = Query(default=reporting.PERIOD_ALL, pattern=reporting.PERIOD_PATTERN)
 
 
 @router.get("/dashboard", response_model=DashboardRead)

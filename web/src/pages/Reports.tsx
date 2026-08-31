@@ -8,23 +8,16 @@ import {
   type AgingLot,
   type GroupBy,
   type GroupRow,
-  type Period,
   type Product,
   type ReportFilters,
 } from '../api'
 import { downloadCsv, percentCell, UNKNOWN } from '../csv'
 import { PageHeader, type PageActions } from '../components/AppShell'
+import { PeriodSelector, usePeriodPreference } from '../components/period-selector'
 import { SetReport, TierReport } from '../components/rollups'
 import { VaultReport } from '../components/vault-report'
 import { Card, Empty, FifoNote, GameDot, Skeleton, gameColour } from '../components/ui'
 import { money, moneyCompact, percent, shortDate, signedMoney, toneFor } from '../format'
-
-const PERIODS: { value: Period; label: string }[] = [
-  { value: 'all', label: 'All time' },
-  { value: 'ytd', label: 'Year' },
-  { value: 'mtd', label: 'Month' },
-  { value: '30d', label: '30 days' },
-]
 
 const GROUPS: { value: GroupBy; label: string; noun: string }[] = [
   { value: 'game', label: 'Game', noun: 'game' },
@@ -49,7 +42,7 @@ function slugOf(label: string): string {
 }
 
 export function Reports({ onRecordSale, onAddProduct }: PageActions) {
-  const [period, setPeriod] = useState<Period>('all')
+  const [period, setPeriod] = usePeriodPreference()
   const [groupBy, setGroupBy] = useState<GroupBy>('game')
   const [sort, setSort] = useState<SortKey>('profit')
   const [filters, setFilters] = useState<ReportFilters>({})
@@ -166,22 +159,7 @@ export function Reports({ onRecordSale, onAddProduct }: PageActions) {
   return (
     <div className="space-y-5">
       <PageHeader title="Reports" onRecordSale={onRecordSale} onAddProduct={onAddProduct}>
-        <div className="flex gap-1 rounded-full border border-(--color-edge) bg-(--color-surface)/70 p-[3px]">
-          {PERIODS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setPeriod(option.value)}
-              className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
-                period === option.value
-                  ? 'bg-(--color-accent) font-medium text-(--color-ink)'
-                  : 'text-(--color-muted) hover:text-(--color-text)'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <PeriodSelector value={period} onChange={setPeriod} />
       </PageHeader>
 
       {exportError && (
