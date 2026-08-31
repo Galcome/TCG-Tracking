@@ -31,6 +31,7 @@ GoogleService-Info.plist
 # Native signing artifacts - never commit keys, certificates, or export profiles.
 *.jks
 *.keystore
+*.p8
 *.p12
 *.mobileprovision
 *.provisionprofile
