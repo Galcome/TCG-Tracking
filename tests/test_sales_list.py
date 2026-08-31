@@ -207,8 +207,25 @@ def test_period_filters_the_ledger(client, make_product):
     assert client.get("/api/v1/sales", params={"period": "30d"}).json()["total"] == 1
 
 
+@pytest.mark.parametrize(("period", "days"), [("30d", 30), ("60d", 60), ("90d", 90)])
+def test_rolling_period_cutoff_filters_the_ledger_exactly(client, make_product, period, days):
+    product = make_product()
+    buy(client, product["id"], 2, "200.00", on=TODAY - timedelta(days=days))
+    sell(client, product["id"], 1, "150.00", on=TODAY - timedelta(days=days - 1))
+    sell(client, product["id"], 1, "160.00", on=TODAY - timedelta(days=days))
+
+    body = client.get("/api/v1/sales", params={"period": period}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["amount"] == "150.00"
+
+
 def test_an_unknown_period_is_rejected(client):
     assert client.get("/api/v1/sales", params={"period": "forever"}).status_code == 422
+
+
+@pytest.mark.parametrize("period", ["all", "ytd", "mtd", "30d", "60d", "90d"])
+def test_every_documented_sales_period_works(client, period):
+    assert client.get("/api/v1/sales", params={"period": period}).status_code == 200
 
 
 def test_filters_combine(client, make_product):

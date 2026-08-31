@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -37,7 +37,11 @@ PERIOD_ALL = "all"
 PERIOD_YTD = "ytd"
 PERIOD_MTD = "mtd"
 PERIOD_30D = "30d"
-PERIODS = (PERIOD_ALL, PERIOD_YTD, PERIOD_MTD, PERIOD_30D)
+PERIOD_60D = "60d"
+PERIOD_90D = "90d"
+PERIODS = (PERIOD_ALL, PERIOD_YTD, PERIOD_MTD, PERIOD_30D, PERIOD_60D, PERIOD_90D)
+PERIOD_PATTERN = rf"^({'|'.join(PERIODS)})$"
+ROLLING_PERIOD_DAYS = {PERIOD_30D: 30, PERIOD_60D: 60, PERIOD_90D: 90}
 
 #: Display label for sales with no marketplace recorded. Not a stored value.
 UNSPECIFIED_MARKETPLACE = "Unspecified"
@@ -53,8 +57,10 @@ def period_start(period: str, today: date | None = None) -> date | None:
         return date(today.year, 1, 1)
     if period == PERIOD_MTD:
         return date(today.year, today.month, 1)
-    if period == PERIOD_30D:
-        return today.fromordinal(today.toordinal() - 30)
+    if days := ROLLING_PERIOD_DAYS.get(period):
+        # The start and today are both included by the report queries. Subtracting the
+        # full label value would therefore make "60 days" span 61 calendar dates.
+        return today - timedelta(days=days - 1)
     return None
 
 

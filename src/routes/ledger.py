@@ -304,7 +304,7 @@ def list_sales(
     marketplace: str | None = Query(default=None, max_length=120),
     sold_by_member_id: uuid.UUID | None = Query(default=None),
     game: str | None = Query(default=None, max_length=60, description="Game slug"),
-    period: str = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$"),
+    period: str = Query(default=reporting.PERIOD_ALL, pattern=reporting.PERIOD_PATTERN),
     limit: int = Query(default=DEFAULT_SALE_LIMIT, ge=1, le=MAX_SALE_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
