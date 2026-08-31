@@ -28,6 +28,17 @@ railway_vars.txt
 google-services.json
 GoogleService-Info.plist
 
+# Native signing artifacts - never commit keys, certificates, or export profiles.
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+*.provisionprofile
+**/keystore.properties
+**/signing.properties
+web/ios/ExportOptions.plist
+
 # MCP server config - contains real API tokens
 .mcp.json
 web/.mcp.json
