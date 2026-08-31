@@ -50,6 +50,8 @@ export default defineConfig(({ mode }) => ({
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
       },
       // The icon PNGs are already covered by the shell glob above. Avoid adding
       // the same files a second time through manifest-icon auto inclusion.

@@ -18,6 +18,8 @@ assert.match(capacitor, /iosScheme: ['"]capacitor['"]/)
 assert.doesNotMatch(capacitor, /\burl\s*:/)
 assert.match(vite, /disable: mode === ['"]mobile['"]/)
 assert.match(vite, /runtimeCaching/)
+assert.match(vite, /clientsClaim: true/)
+assert.match(vite, /skipWaiting: true/)
 assert.match(main, /!Capacitor\.isNativePlatform\(\)/)
 assert.match(main, /import\.meta\.env\.MODE !== ['"]mobile['"] /)
 

@@ -17,6 +17,7 @@
     "mobile:run:ios": "cap run ios",
     "generate:pwa-assets": "pwa-assets-generator",
     "test:mobile-config": "node scripts/check-mobile-foundation.mjs",
+    "test:mobile-bundle": "node scripts/check-mobile-bundle.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
