@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "TCG Investments",
+    "slug": "tcg-investments",
+    "version": "0.1.0",
+    "scheme": "tcginvestments",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.galcome.tcgtracking"
+    },
+    "android": {
+      "package": "com.galcome.tcgtracking",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0e1a"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
