@@ -100,3 +100,37 @@ telemetry, signing/assets and cutover remain explicit release gates.
 - Next major slice: Money account/posting/transfer/adjustment screens, then transformations,
   grading, pricing/Vault, reports/CSV and shared dashboard period preferences. None of these
   pending rows are waived, and the production website still serves `web/dist`.
+
+## 2026-09-09 Money checkpoint
+
+Money owns separate cash/owed/store-credit account summaries, movement filtering and paging,
+transfers, balance adjustments and independent-movement voids. Purchase/sale-linked money
+must be corrected through its source transaction, never voided on the Money screen alone.
+
+The current backend has a deliberate wire exception: transfers use decimal-dollar strings,
+but `AdjustmentCreate.amount` is signed **integer cents**, bounded to 100,000,000,000 cents.
+The new client must parse adjustment input exactly (digit splitting/BigInt before bounded
+Number conversion), never `Number(dollars) * 100`. Backend membership, sign conversion and
+ledger arithmetic remain unchanged. Movement offset already exists server-side; only the
+new app's typed client needs its optional offset parameter exposed.
+
+Implemented and connected the Money route, account cards, transfer/adjustment/void forms,
+offset-aware filters and movement history. Linked purchase/sale entries have no independent
+void action. Raw posting cash-flow signs are labelled separately from member amounts owed.
+
+Validation: 31 app unit tests passed; typecheck, ESLint and ruff passed. Eight Expo browser
+tests passed, with a further focused pass proving that voiding the $19.99 adjustment restores
+the original balance after a $0.29 transfer and reversal. Android/iOS JavaScript exports
+passed. These are bundle checks, not installed-device acceptance. Independent review found
+no High issues and caught negative store-credit wording; corrected with positive/zero/negative
+unit coverage. Terra confirmed the fix and independently reran 31 unit tests, typecheck
+and lint successfully; no remaining finding in that targeted scope.
+
+The Money browser run uses `tcg_expo_money_e2e` on the same loopback-only test container,
+separate from the legacy Vite suite's `tcg_expo_test_e2e`. This prevents either suite's reset
+from affecting the other. The 111-test Vite regression run was still in progress at this
+checkpoint; do not infer a final pass from intermediate progress. No production data changed.
+
+Next implementation milestone: crack/rip/grading workflows and their photo/lineage adapters.
+Full Reports/Vault/pricing controls, split funding/proceeds UI, CSV, shared 60/90-day periods,
+native device/release gates and cutover remain open. The rewrite is not production-ready.

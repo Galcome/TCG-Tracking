@@ -18,7 +18,7 @@ export default function ProtectedLayout() {
     <View style={{ flex: 1, flexDirection: isDesktop ? 'row' : 'column' }}>
       <View style={{ padding: 16, gap: 18, width: isDesktop ? 220 : '100%', borderColor: colors.edge, borderRightWidth: isDesktop ? 1 : 0, borderBottomWidth: isDesktop ? 0 : 1 }}>
         <Copy>TCG Investments</Copy><Copy muted>{member.data?.display_name ?? 'Checking membership…'}</Copy>
-        <Row>{([{ href: '/', label: 'Dashboard' }, { href: '/inventory', label: 'Inventory' }, { href: '/sales', label: 'Sales' }] as const).map(link =>
+        <Row>{([{ href: '/', label: 'Dashboard' }, { href: '/inventory', label: 'Inventory' }, { href: '/sales', label: 'Sales' }, { href: '/money', label: 'Money' }] as const).map(link =>
           <Button key={link.href} label={(path === link.href ? '• ' : '') + link.label} onPress={() => router.push(link.href)} disabled={!member.data} />)}</Row>
         <Button label="Sign out" onPress={() => { void signOut().catch(setActionError); }} />
       </View>

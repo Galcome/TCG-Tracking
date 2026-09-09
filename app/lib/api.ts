@@ -1151,7 +1151,7 @@ export function createApi(request: ApiRequest) { return {
 
   accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
 
-  movements: (params: { account_id?: string; kind?: MovementKind; limit?: number }) =>
+  movements: (params: { account_id?: string; kind?: MovementKind; limit?: number; offset?: number }) =>
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
 
   /** Paying a partner back, putting cash in, and settling up are all this one call. */
@@ -1167,9 +1167,10 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(transfer),
     }),
 
-  /** `amount` is signed, in the account's own terms: +5000 on a member means owed $5,000. */
+  /** Signed integer cents in the account's own terms: +5000 adds $50 owed to a member. */
   createMoneyAdjustment: (adjustment: {
     account_id: string
+    /** This endpoint uniquely accepts signed integer cents, not decimal dollars. */
     amount: number
     occurred_on?: string
     notes?: string | null
