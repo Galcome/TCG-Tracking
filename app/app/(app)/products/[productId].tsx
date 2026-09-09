@@ -3,12 +3,14 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Button, Card, Copy, ErrorNotice, Loading, Page, Row } from '../../../components/ui';
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
+import { RecordSaleDialog } from '../../../components/sale-form';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
   const api = useApi();
   const [form, setForm] = useState<Omit<ProductFormsProps, 'onClose' | 'product'> | null>(null);
+  const [selling, setSelling] = useState(false);
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
   return <Page title={p?.name ?? 'Product'}>
@@ -21,6 +23,8 @@ export default function ProductDetail() {
         { mode: 'move', label: 'Move stock' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
           <Button key={action.mode} label={action.label} onPress={() => setForm({ mode: action.mode })} />)}</Row>
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
+      <Button label="Record sale" onPress={() => setSelling(true)} />
+      {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>

@@ -25,6 +25,7 @@ import {
 } from '../lib/product-drafts'
 import { todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { SetField } from './set-field'
 
 export interface ProductFormsProps {
   /** The product being edited or the product receiving a ledger operation. */
@@ -265,7 +266,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
         tax: tax || undefined,
         fees: fees || undefined,
         source: optionalText(source),
-        funding: fundedBy ? [{ account_id: fundedBy }] : undefined,
+        funding: fundedBy ? [{ account_id: fundedBy }] : [],
       },
     })
   }
@@ -296,7 +297,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
         />
       </Row>
       <Field label="Name" value={name} onChangeText={setName} autoFocus placeholder="Product name" />
-      <Field label="Set" value={setLabel} onChangeText={setSetLabel} placeholder="Set name" />
+      <SetField game={games.data?.find(game => game.id === effectiveGameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />
       <Row>
         <Field label="Collector number" value={collectorNumber} onChangeText={setCollectorNumber} placeholder="123/204" />
         <Field label="Variant" value={variant} onChangeText={setVariant} placeholder="Holo, alternate art" />
@@ -374,7 +375,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
       purchase_date: purchaseDate,
       source: optionalText(source),
       notes: optionalText(notes),
-      funding: fundedBy ? [{ account_id: fundedBy }] : undefined,
+      funding: fundedBy ? [{ account_id: fundedBy }] : [],
     })
   }
 
@@ -475,7 +476,7 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
         <Choice label="Game" value={gameId} options={(games.data ?? []).map((game) => option(game.id, game.name))} onChange={setGameId} />
         <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={setProductTypeId} />
       </Row>
-      <Field label="Set" value={setLabel} onChangeText={setSetLabel} />
+      <SetField game={games.data?.find(game => game.id === gameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />
       <Row>
         <Field label="Collector number" value={collectorNumber} onChangeText={setCollectorNumber} />
         <Field label="Variant" value={variant} onChangeText={setVariant} />

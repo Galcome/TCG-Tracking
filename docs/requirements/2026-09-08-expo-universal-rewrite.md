@@ -2,7 +2,8 @@
 
 ## Production intent and status
 
-Live app. Reviewed migration plan dated 2026-09-08. Application implementation is pending.
+Live app. Reviewed migration plan dated 2026-09-08. Application implementation is in progress
+on `feature/expo-universal-app`; see [checkpoint evidence](expo-parity-tracker.md).
 Joseph owns product decisions and production cutover approval; Astra owns technical acceptance.
 The existing website must continue serving throughout development of the replacement.
 
@@ -70,7 +71,8 @@ PR73 and PR74 also remain open. Their user-approved requirements belong in the p
 
 ## Implementation sequence and acceptance
 
-All implementation stages are pending. Each slice records changed files, tests, evidence and
+Stages 1-4 have an implemented foundation; full parity and device acceptance remain open.
+Each slice records changed files, tests, evidence and
 remaining limitations so subsequent agents can continue without re-exploring the repository.
 
 | Stage | Deliverable | Acceptance gate |

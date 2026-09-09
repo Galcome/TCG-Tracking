@@ -73,8 +73,30 @@ slice. Do not claim device authentication acceptance based only on bundle compil
 - Terra's independent **forms** review was blocked by its usage limit. Root integration and
   browser checks completed; do not treat that as independent review acceptance.
 
-Still incomplete in this slice: set-record suggestions/derived names, combined identity and
+Still incomplete at the first checkpoint: set-record suggestions/derived names, combined identity and
 purchase editing convenience, product deletion, pricing mapping UI, global actions, the full
 Dashboard, Sales/Money and remaining matrix rows. A route or form does not mean full parity.
 Sales is the next bounded implementation assignment. Real-device auth/relaunch, Google native,
 telemetry, signing/assets and cutover remain explicit release gates.
+
+## Sales and correction follow-up
+
+- Added Sales navigation, product-level recording, paginated/filterable Sales, server-side
+  fee/FIFO previews, edit/void actions and account/store-credit proceeds. No CSV or shared
+  60/90-day preference yet; only current backend-supported periods are offered.
+- Added game-slug-scoped set selection with explicit suggestions and “did you mean” correction.
+  Free-text entry remains available; no suggestion silently overwrites product identity.
+- Independent review resumed after the usage reset. It caught an omitted-funding semantic
+  mismatch: no-account purchases must send `[]`, not omit the field. Corrected and verified
+  by both payload and unchanged member-balance assertions. The set picker UUID/slug mismatch
+  was also corrected and verified by selecting a real seeded set and reading back identity.
+- Expanded the browser journey to purchase edits, adjustment/void restoration, $25 sale
+  profit, and actual store-credit balances ($75 after sale, $0 after void). Seven browser
+  tests passed after these corrections. Screenshots are local ignored verification artifacts.
+- Sales seller/proceeds default received a further independent review finding. Corrected:
+  untouched proceeds follow the selected seller; explicit account/store/no-account choices
+  remain fixed. Terra verified both this and the game-slug fix with no remaining targeted
+  findings, and independently ran 24 passing unit tests. Broader device/parity gates remain.
+- Next major slice: Money account/posting/transfer/adjustment screens, then transformations,
+  grading, pricing/Vault, reports/CSV and shared dashboard period preferences. None of these
+  pending rows are waived, and the production website still serves `web/dist`.
