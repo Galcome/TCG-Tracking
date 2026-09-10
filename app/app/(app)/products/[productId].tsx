@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button, Card, Copy, ErrorNotice, Loading, Page, Row } from '../../../components/ui';
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
 import { RecordSaleDialog } from '../../../components/sale-form';
+import { ProductOperations } from '../../../components/product-operations';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
 export default function ProductDetail() {
@@ -25,6 +26,7 @@ export default function ProductDetail() {
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
       <Button label="Record sale" onPress={() => setSelling(true)} />
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
+      <ProductOperations key={p.id} product={p} />
       {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>

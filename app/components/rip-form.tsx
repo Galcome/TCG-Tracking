@@ -1,0 +1,532 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+
+import { useApi } from '../context/AppContext'
+import {
+  BUCKET_LABELS,
+  BUCKETS,
+  type Api,
+  type Bucket,
+  type ProductCandidate,
+  type ProductDetail,
+} from '../lib/api'
+import {
+  buildRipPayload,
+  emptyRipConfirmationKey,
+  filledRipHits,
+  firstRipValidationError,
+  ripCandidateIdentity,
+  ripHitProductType,
+  ripIdentityKey,
+  validateRipDraft,
+  type RipDraft,
+  type RipHitChoice,
+  type RipHitDraft,
+  type RipValidation,
+} from '../lib/rip-drafts'
+import { todayIso } from '../lib/format'
+import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
+
+export interface RipDialogProps {
+  product: ProductDetail
+  onClose: () => void
+}
+
+type IdentityField = 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'
+
+let nextHitKey = 1
+
+function emptyHit(bucket: Bucket = 'inventory'): RipHitDraft {
+  return {
+    key: nextHitKey++,
+    productId: '',
+    name: '',
+    setName: '',
+    collectorNumber: '',
+    variant: '',
+    language: '',
+    choice: 'undecided',
+    selectedProductName: '',
+    quantity: '1',
+    value: '',
+    bucket,
+  }
+}
+
+function candidateIdentitySummary(candidate: ProductCandidate): string {
+  return [
+    candidate.set_name,
+    candidate.collector_number,
+    candidate.variant,
+    candidate.language,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+interface HitIdentityChooserProps {
+  api: Api
+  row: RipHitDraft
+  index: number
+  gameId: string
+  newProductTypeLabel: string
+  busy: boolean
+  onFieldChange: (field: IdentityField, value: string) => void
+  onQuantityChange: (value: string) => void
+  onValueChange: (value: string) => void
+  onRemove: () => void
+  canRemove: boolean
+  onChoice: (choice: RipHitChoice, candidate?: ProductCandidate) => void
+}
+
+function HitIdentityChooser({
+  api,
+  row,
+  index,
+  gameId,
+  newProductTypeLabel,
+  busy,
+  onFieldChange,
+  onQuantityChange,
+  onValueChange,
+  onRemove,
+  canRemove,
+  onChoice,
+}: HitIdentityChooserProps) {
+  const key = ripIdentityKey(row)
+  const [searchedKey, setSearchedKey] = useState('')
+  const candidates = useQuery({
+    queryKey: ['productCandidates', gameId, row.key, key],
+    queryFn: () => api.productCandidates(ripCandidateIdentity(row, gameId)),
+    enabled: !busy && row.name.trim().length > 0 && searchedKey === key,
+  })
+
+  const fields: [IdentityField, string][] = [
+    ['setName', 'Set'],
+    ['collectorNumber', 'Collector number'],
+    ['variant', 'Variant'],
+    ['language', 'Language'],
+  ]
+
+  function search() {
+    if (searchedKey === key) {
+      void candidates.refetch()
+    } else {
+      setSearchedKey(key)
+    }
+  }
+
+  const createdAndRetained = row.choice === 'create' && Boolean(row.productId)
+
+  return (
+    <Card>
+      <Row>
+        <Field
+          label={`Hit ${index + 1} name`}
+          value={row.name}
+          onChangeText={(value) => onFieldChange('name', value)}
+          editable={!busy}
+          autoFocus={index === 0}
+          placeholder="Card name"
+        />
+        <Field
+          label={`Hit ${index + 1} value`}
+          value={row.value}
+          onChangeText={onValueChange}
+          editable={!busy}
+          keyboardType="decimal-pad"
+          placeholder="0.00"
+        />
+        <Field
+          label={`Hit ${index + 1} quantity`}
+          value={row.quantity}
+          onChangeText={onQuantityChange}
+          editable={!busy}
+          keyboardType="number-pad"
+          placeholder="1"
+        />
+        <Button
+          label={`Remove hit ${index + 1}`}
+          disabled={busy || !canRemove}
+          onPress={onRemove}
+        />
+      </Row>
+      <Row>
+        {fields.map(([field, label]) => (
+          <Field
+            key={field}
+            label={`Hit ${index + 1} ${label}`}
+            value={row[field]}
+            onChangeText={(value) => onFieldChange(field, value)}
+            editable={!busy}
+            placeholder={label}
+          />
+        ))}
+      </Row>
+      <Row>
+        <Button
+          label={candidates.isFetching ? 'Searching existing products…' : 'Find existing product'}
+          disabled={busy || !row.name.trim() || candidates.isFetching}
+          onPress={search}
+        />
+        <Button
+          label="Create new product"
+          disabled={busy}
+          onPress={() => onChoice('create')}
+        />
+      </Row>
+      {row.choice === 'reuse' ? (
+        <Copy muted>Reusing {row.selectedProductName || 'the selected product'}.</Copy>
+      ) : row.choice === 'create' ? (
+        <Copy muted>
+          {createdAndRetained
+            ? `New product ready: ${row.selectedProductName || row.productId}. Retry will reuse it.`
+            : `A new ${newProductTypeLabel} product will be created when this rip is saved.`}
+        </Copy>
+      ) : (
+        <Copy muted>Choose Reuse or Create new product before saving.</Copy>
+      )}
+      {searchedKey === key && candidates.isError ? (
+        <ErrorNotice error={candidates.error} retry={() => { void candidates.refetch() }} />
+      ) : null}
+      {searchedKey === key && candidates.data && candidates.data.length === 0 ? (
+        <Copy muted>No strong match found. Choose Create new product if this is new.</Copy>
+      ) : null}
+      {searchedKey === key && candidates.data && candidates.data.length > 0 ? (
+        <Card>
+          <Copy muted>Review a candidate, then explicitly choose whether to reuse it.</Copy>
+          {candidates.data.map((candidate) => (
+            <Card key={candidate.id}>
+              <Copy>
+                {candidate.name}
+                {candidateIdentitySummary(candidate) ? ` · ${candidateIdentitySummary(candidate)}` : ''}
+              </Copy>
+              <Copy muted>
+                {candidate.product_type.name} · {candidate.quantity_on_hand} in stock · score {candidate.match_score}
+              </Copy>
+              <Button
+                label={`Reuse ${candidate.name}`}
+                disabled={busy}
+                onPress={() => onChoice('reuse', candidate)}
+              />
+            </Card>
+          ))}
+        </Card>
+      ) : null}
+    </Card>
+  )
+}
+
+interface RipSheetProps {
+  title: string
+  onClose: () => void
+  onSubmit: () => void
+  submitLabel: string
+  busy: boolean
+  error?: unknown
+  validation: RipValidation
+  children: React.ReactNode
+}
+
+function RipSheet({
+  title,
+  onClose,
+  onSubmit,
+  submitLabel,
+  busy,
+  error,
+  validation,
+  children,
+}: RipSheetProps) {
+  const firstError = firstRipValidationError(validation)
+  return (
+    <Sheet title={title} open onClose={busy ? () => undefined : onClose} dismissDisabled={busy}>
+      {children}
+      {firstError ? <ErrorNotice error={new Error(firstError)} /> : null}
+      {error ? <ErrorNotice error={error} /> : null}
+      <Button label={busy ? 'Saving…' : submitLabel} onPress={onSubmit} disabled={busy} />
+    </Sheet>
+  )
+}
+
+function option(value: string, label: string) {
+  return { value, label }
+}
+
+function bucketLabel(bucket: Bucket, count: number): string {
+  return `${BUCKET_LABELS[bucket]} (${count})`
+}
+
+/**
+ * Manual-only rip entry. Photo adapters intentionally do not belong in this bounded slice;
+ * every identity, reuse/create decision, estimate and write remains human-controlled.
+ */
+export function RipDialog({ product, onClose }: RipDialogProps) {
+  const api = useApi()
+  const queryClient = useQueryClient()
+  const productTypes = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
+
+  const held = product.stats.by_bucket
+  const [fromBucket, setFromBucket] = useState<Bucket>(
+    BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
+  )
+  const [sourceQuantity, setSourceQuantity] = useState('1')
+  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const [rows, setRows] = useState<RipHitDraft[]>([emptyHit()])
+  const [validation, setValidation] = useState<RipValidation>({})
+  const [emptyConfirmedKey, setEmptyConfirmedKey] = useState<string | null>(null)
+
+  const draft = useMemo<RipDraft>(() => ({
+    sourceProductId: product.id,
+    sourceQuantity,
+    fromBucket,
+    occurredOn,
+    hits: rows,
+  }), [fromBucket, occurredOn, product.id, rows, sourceQuantity])
+  const filled = filledRipHits(rows)
+  const emptyKey = emptyRipConfirmationKey(draft)
+  const emptyConfirmationShown = filled.length === 0 && emptyConfirmedKey === emptyKey
+
+  const run = useMutation({
+    mutationFn: async (submitted: RipDraft) => {
+      const resolvedRows: RipHitDraft[] = []
+      for (const row of filledRipHits(submitted.hits)) {
+        let productId = row.productId
+        if (row.choice === 'create' && !productId) {
+          const type = ripHitProductType(productTypes.data)
+          if (!type) throw new Error('Single or Raw Single product types are unavailable; cannot create a hit.')
+          const created = await api.createProduct({
+            name: row.name.trim(),
+            game_id: product.game.id,
+            product_type_id: type.id,
+            set_name: row.setName.trim() || product.set_name || null,
+            collector_number: row.collectorNumber.trim() || null,
+            variant: row.variant.trim() || null,
+            language: row.language.trim() || product.language || null,
+          })
+          productId = created.id
+          // Keep the committed identity in the form before the next operation. If the rip
+          // itself fails, retrying uses this id and cannot create a duplicate product.
+          setRows((current) => current.map((item) => item.key === row.key
+            ? {
+                ...item,
+                productId,
+                selectedProductName: created.name,
+                selectedProductTypeSlug: type.slug,
+              }
+            : item))
+          // Product creation is a real partial commit, so refresh lists immediately even if
+          // the subsequent rip write fails.
+          await queryClient.invalidateQueries()
+        }
+        if (!productId) throw new Error('Choose an existing product or Create new product for every hit.')
+        resolvedRows.push({ ...row, productId })
+      }
+
+      const resolvedDraft: RipDraft = {
+        ...submitted,
+        hits: submitted.hits.map((row) => {
+          const resolved = resolvedRows.find((item) => item.key === row.key)
+          return resolved ?? row
+        }),
+      }
+      const payload = buildRipPayload(resolvedDraft, product, { productTypes: productTypes.data })
+      if (!payload) throw new Error('Complete all rip fields before saving.')
+      return api.ripOpen(payload)
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries()
+      onClose()
+    },
+  })
+
+  function submit() {
+    setValidation({})
+    const errors = validateRipDraft(draft, product, { productTypes: productTypes.data })
+    if (Object.keys(errors).length > 0) {
+      setValidation(errors)
+      return
+    }
+    if (filled.length === 0 && emptyConfirmedKey !== emptyKey) {
+      setEmptyConfirmedKey(emptyKey)
+      return
+    }
+    run.mutate(draft)
+  }
+
+  function changeSourceBucket(next: Bucket) {
+    if (run.isPending) return
+    setEmptyConfirmedKey(null)
+    setFromBucket(next)
+  }
+
+  function changeSourceQuantity(next: string) {
+    setEmptyConfirmedKey(null)
+    setSourceQuantity(next)
+  }
+
+  function changeDate(next: string) {
+    setEmptyConfirmedKey(null)
+    setOccurredOn(next)
+  }
+
+  function updateIdentity(key: number | string, field: IdentityField, value: string) {
+    setEmptyConfirmedKey(null)
+    setRows((current) => current.map((row) => row.key === key
+      ? {
+          ...row,
+          [field]: value,
+          // A changed identity invalidates any old reuse/create identity. This also clears
+          // an inline-created id so a new identity cannot silently reuse it.
+          productId: '',
+          choice: 'undecided',
+          selectedProductName: '',
+          selectedProductTypeSlug: undefined,
+        }
+      : row))
+  }
+
+  function updateChoice(key: number | string, choice: RipHitChoice, candidate?: ProductCandidate) {
+    if (run.isPending) return
+    setRows((current) => current.map((row) => row.key === key
+      ? {
+          ...row,
+          choice,
+          productId: candidate?.id ?? (choice === 'reuse' ? '' : row.productId),
+          selectedProductName: candidate?.name ?? (choice === 'create' && row.productId ? row.selectedProductName : ''),
+          selectedProductTypeSlug: candidate?.product_type.slug,
+        }
+      : row))
+    setEmptyConfirmedKey(null)
+  }
+
+  function updateValue(key: number | string, value: string) {
+    setEmptyConfirmedKey(null)
+    setRows((current) => current.map((row) => row.key === key ? { ...row, value } : row))
+  }
+
+  function updateQuantity(key: number | string, quantity: string) {
+    setEmptyConfirmedKey(null)
+    setRows((current) => current.map((row) => row.key === key ? { ...row, quantity } : row))
+  }
+
+  function addRow() {
+    if (run.isPending) return
+    setEmptyConfirmedKey(null)
+    setRows((current) => [...current, emptyHit(current[0]?.bucket ?? 'inventory')])
+  }
+
+  function removeRow(key: number | string) {
+    if (run.isPending) return
+    setEmptyConfirmedKey(null)
+    setRows((current) => current.filter((row) => row.key !== key))
+  }
+
+  const lookupError = productTypes.error
+  const lookupPending = productTypes.isPending
+  const currentBucket = rows[0]?.bucket ?? 'inventory'
+
+  return (
+    <RipSheet
+      title={`Rip open — ${product.name}`}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel={filled.length === 0
+        ? (emptyConfirmationShown ? 'Confirm bulk write-off' : 'Review bulk write-off')
+        : 'Log the hits'}
+      busy={run.isPending}
+      error={run.error ?? lookupError}
+      validation={validation}
+    >
+      {lookupPending ? <Loading /> : null}
+      <Card>
+        <Copy>{product.name}</Copy>
+        <Copy muted>
+          {product.game.name} · {product.product_type.name} · {held[fromBucket] ?? 0} in {BUCKET_LABELS[fromBucket]}
+        </Copy>
+        <Copy muted>
+          The API assigns FIFO cost and writes off unlogged bulk. This form never calculates
+          cost, profit or any other financial amount.
+        </Copy>
+      </Card>
+
+      <Row>
+        <Field
+          label="How many"
+          value={sourceQuantity}
+          onChangeText={changeSourceQuantity}
+          editable={!run.isPending}
+          keyboardType="number-pad"
+          autoFocus
+        />
+        <Field
+          label="Date"
+          value={occurredOn}
+          onChangeText={changeDate}
+          editable={!run.isPending}
+          placeholder="YYYY-MM-DD"
+          keyboardType="numbers-and-punctuation"
+        />
+      </Row>
+
+      <Choice
+        label="Ripped out of"
+        value={fromBucket}
+        options={BUCKETS.map((bucket) => option(bucket, bucketLabel(bucket, held[bucket] ?? 0)))}
+        onChange={(value) => changeSourceBucket(value as Bucket)}
+      />
+
+      <Choice
+        label="Where hits go"
+        value={currentBucket}
+        options={BUCKETS.map((bucket) => option(bucket, BUCKET_LABELS[bucket]))}
+        onChange={(value) => {
+          if (run.isPending) return
+          setEmptyConfirmedKey(null)
+          setRows((current) => current.map((row) => ({ ...row, bucket: value as Bucket })))
+        }}
+      />
+
+      <Copy muted>
+        Add only the cards worth tracking. Every entered value is a dated estimate for the
+        server&apos;s proportional allocation; it never becomes cost basis or profit.
+      </Copy>
+      {rows.map((row, index) => (
+        <HitIdentityChooser
+          key={row.key}
+          api={api}
+          row={row}
+          index={index}
+          gameId={product.game.id}
+          newProductTypeLabel={ripHitProductType(productTypes.data)?.name ?? 'Single or Raw Single'}
+          busy={run.isPending}
+          onFieldChange={(field, value) => updateIdentity(row.key, field, value)}
+          onQuantityChange={(value) => updateQuantity(row.key, value)}
+          onValueChange={(value) => updateValue(row.key, value)}
+          onRemove={() => removeRow(row.key)}
+          canRemove={rows.length > 1 && !(row.choice === 'create' && Boolean(row.productId))}
+          onChoice={(choice, candidate) => updateChoice(row.key, choice, candidate)}
+        />
+      ))}
+      <Button label="Add another hit" disabled={run.isPending} onPress={addRow} />
+
+      {emptyConfirmationShown ? (
+        <Card>
+          <Copy>Confirm complete bulk write-off</Copy>
+          <Copy muted>
+            No hit products are entered. Recording this rip consumes {sourceQuantity} unit
+            {sourceQuantity === '1' ? '' : 's'} from {BUCKET_LABELS[fromBucket]} and writes the
+            complete FIFO source cost off as bulk.
+          </Copy>
+          <Button
+            label="Confirm rip and write off as bulk"
+            disabled={run.isPending}
+            onPress={submit}
+          />
+        </Card>
+      ) : null}
+    </RipSheet>
+  )
+}
+
+export default RipDialog

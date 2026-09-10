@@ -19,9 +19,9 @@ foundation owner until its interface is stable.
 | Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Pending |
 | Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Pending |
 | Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Pending |
-| Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Pending |
-| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Pending |
-| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Pending |
+| Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
+| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual quantity/identity/retry verified; photos and preview pending |
+| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void verified; valuations and API concurrency guards pending |
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
@@ -40,9 +40,11 @@ foundation owner until its interface is stable.
 
 ## Current assignment
 
-Foundation: new `app/`, Expo Router, environment checks, theme/shell, Firebase platform
-adapters, session/query isolation, typed transport and protected member/dashboard vertical
-slice. Do not claim device authentication acceptance based only on bundle compilation.
+Latest checkpoint: isolated `app/` now includes foundation, inventory/stock, Sales, Money,
+manual transformations and grading. Next: photo adapters, grading/Vault valuations, pricing
+controls, reports/exports and dashboard preferences, with the API grading integrity follow-on
+below kept as a separate release-blocking concern. Do not claim device authentication or
+workflow acceptance based only on bundle compilation. Full parity is not yet achieved.
 
 ## 2026-09-08 checkpoint
 
@@ -128,9 +130,58 @@ and lint successfully; no remaining finding in that targeted scope.
 
 The Money browser run uses `tcg_expo_money_e2e` on the same loopback-only test container,
 separate from the legacy Vite suite's `tcg_expo_test_e2e`. This prevents either suite's reset
-from affecting the other. The 111-test Vite regression run was still in progress at this
-checkpoint; do not infer a final pass from intermediate progress. No production data changed.
+from affecting the other. The legacy Vite regression run subsequently completed: all 111
+tests passed (exit 0). No production data changed.
 
 Next implementation milestone: crack/rip/grading workflows and their photo/lineage adapters.
 Full Reports/Vault/pricing controls, split funding/proceeds UI, CSV, shared 60/90-day periods,
 native device/release gates and cutover remain open. The rewrite is not production-ready.
+
+## 2026-09-09 Transformation and grading checkpoint
+
+This slice adds manual cracking/ripping and grading send/return/void flows to the isolated
+Expo client. Product history shows the server's source/output costs, inherited purchase date,
+bulk write-off, grading status and days away, with linked products and audited reversals.
+Inline product creation must retain successful child IDs after a later operation fails,
+and refresh cached lists even after a partial write. Identity edits must invalidate a reuse
+choice; no candidate is silently selected and no client computes authoritative ledger cost.
+
+Photo capture/upload adapters, before/after grading valuations, live rip allocation preview,
+and a recursive lineage report remain explicit follow-ons, not completed parity. Manual rip
+values are human-entered estimates, never AI-generated prices or realized profit. No changes
+to backend, production Hosting, authentication or deployment are part of this slice.
+
+Implemented manual case/box and generic-container cracking, explicit rip identity decisions
+(candidate reuse or inline creation), per-hit quantity and decimal per-unit estimates, and
+grading send/return/cancellation. New-child retries reuse the successful child ID; product
+lists refresh even when only identity creation succeeded. Generic containers require an
+explicit output type/count rather than inventing a box-size default. Duplicate rip rows for
+the same product/bucket are refused with guidance to use quantity instead of client-side
+averaging. A no-hit rip requires a separate complete bulk-write-off confirmation.
+
+Independent review caught and drove fixes for generic-container support, selected-type
+name suggestions, partial-create cache refresh, rip quantities, and grading availability/date
+guards. Sending subtracts outstanding same-product/bucket submissions; returning rejects a
+date before send, already-completed submissions, or insufficient stock in the original bucket.
+The mutation re-reads stock/submissions before writing. Terra independently re-verified the
+corrections with no remaining P1/P2 in that bounded scope. Cross-client integrity remains the
+explicit backend gate below, not a waived finding.
+
+Validation: 51 unit tests, TypeScript and ESLint pass. All 13 Expo browser tests pass against
+the loopback disposable database. They cover exact $900.01 split cost and inherited dates,
+$150.01 across two rip copies (not estimated profit), $590.59 grading cost including fees,
+existing-slab reuse with no child creation, cancellation, whole-chain undo, and deliberately
+rejected crack/rip/return requests followed by retries with only one child creation. Existing
+Sales/Money/auth/responsive tests remain in this run. Android and iOS Hermes JavaScript
+exports also pass; these are not installed-device acceptance. The unchanged Vite suite previously
+completed all 111 tests. Backend and production data were not modified.
+
+### Release-blocking backend follow-on discovered during review
+
+`src/routes/grading.py` checks stock when sending but does not subtract other outstanding
+submissions. Its return path lacks a fresh stock/date check, and the shared transformation
+writer can represent negative stock. Client guards reduce accidental repeats but **cannot
+enforce integrity across simultaneous clients**. Before release, separately harden the API
+with transactional concurrency protection for send/return, cumulative outstanding quantities,
+current-bucket stock and chronology validation, plus concurrency/regression tests. Keep this
+separate from the frontend-only rewrite; do not mistake the new UI checks for a server fix.

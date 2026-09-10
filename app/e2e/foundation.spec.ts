@@ -1,4 +1,223 @@
 import { test, expect, type Page } from '@playwright/test';
+test('grading can cancel an unreturned submission and reuse an existing graded product', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const create = async (name: string, slug: string) => {
+    const response = await request.post(API + '/api/v1/products', { data: {
+      name, game_id: games[0].id, product_type_id: types.find((t: { slug: string }) => t.slug === slug).id,
+      ...(slug === 'single' ? { initial_purchase: { quantity: 1, amount: '10.29', funding: [] } }
+        : { grading_company: 'PSA', grade: '10' }),
+    } });
+    expect(response.ok()).toBeTruthy();
+    return response.json();
+  };
+  const source = await create('Expo existing-target raw card', 'single');
+  const child = await create('Expo existing slab target', 'graded-card');
+  const send = async () => {
+    const response = await request.post(API + '/api/v1/grading', { data: { product_id: source.id, grading_company: 'PSA' } });
+    expect(response.ok()).toBeTruthy();
+    return response.json();
+  };
+  const cancelled = await send();
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  await page.getByRole('button', { name: 'Void grading submission', exact: true }).click();
+  await page.getByLabel('Reason', { exact: true }).fill('Cancelled before shipment');
+  await page.getByRole('button', { name: 'Cancel submission', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const rows = await (await request.get(API + '/api/v1/grading?product_id=' + source.id)).json();
+  expect(rows.find((s: { id: string }) => s.id === cancelled.id).status).toBe('voided');
+  await send();
+  await page.reload();
+  await page.getByRole('button', { name: 'Record grading return', exact: true }).click();
+  await page.getByLabel('Grade', { exact: true }).fill('10');
+  await page.getByRole('button', { name: /^Graded card:/ }).click();
+  await page.getByRole('button', { name: 'Use an existing graded card', exact: true }).click();
+  await page.getByLabel('Find an existing graded card', { exact: true }).fill(child.name);
+  await page.getByRole('button', { name: new RegExp('^' + child.name) }).click();
+  let childCreates = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
+  await page.getByRole('button', { name: 'Record it', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(childCreates).toBe(0);
+  const output = await (await request.get(API + '/api/v1/products/' + child.id)).json();
+  expect(output.stats.remaining_cost).toBe('10.29');
+  expect(output.stats.quantity_on_hand).toBe(1);
+});
+test('manual rip retains confirmed identity after a rejected write and never invents profit', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Expo rip box', game_id: games[0].id,
+    product_type_id: types.find((t: { slug: string }) => t.slug === 'booster-box').id,
+    initial_purchase: { quantity: 1, amount: '150.01', purchase_date: '2025-01-02', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const source = await created.json();
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  await page.getByRole('button', { name: 'Rip open', exact: true }).click();
+  await page.getByLabel('Hit 1 name', { exact: true }).fill('Expo manually identified hit');
+  await page.getByLabel('Hit 1 value', { exact: true }).fill('500.29');
+  await page.getByLabel('Hit 1 quantity', { exact: true }).fill('2');
+  await page.getByLabel('Hit 1 Set', { exact: true }).fill('Rip set');
+  await page.getByLabel('Hit 1 Collector number', { exact: true }).fill('042');
+  await page.getByLabel('Hit 1 Variant', { exact: true }).fill('Reverse holo');
+  await page.getByLabel('Hit 1 Language', { exact: true }).fill('Japanese');
+  await page.getByRole('button', { name: 'Create new product', exact: true }).click();
+  let childCreates = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
+  const ripUrl = API + '/api/v1/transformations/rip';
+  await page.route(ripUrl, route => route.fulfill({ status: 409, contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Temporary rip test rejection' }) }), { times: 1 });
+  await page.getByRole('button', { name: 'Log the hits', exact: true }).click();
+  await expect(page.getByText('Temporary rip test rejection', { exact: true })).toBeVisible();
+  const ripping = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === ripUrl);
+  await page.getByRole('button', { name: 'Log the hits', exact: true }).click();
+  const response = await ripping;
+  expect(response.ok()).toBeTruthy();
+  const transformation = await response.json();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(childCreates).toBe(1);
+  expect(transformation.inherited_purchase_date).toBe('2025-01-02');
+  const child = await (await request.get(API + '/api/v1/products/' + transformation.outputs[0].product_id)).json();
+  expect(child).toMatchObject({ set_name: 'Rip set', collector_number: '042', variant: 'Reverse holo', language: 'Japanese' });
+  expect(child.stats.remaining_cost).toBe('150.01');
+  expect(child.stats.quantity_on_hand).toBe(2);
+  expect(child.stats.realized_profit).toBe('0.00');
+});
+test('grading retains stock until return and carries exact fees plus card identity', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Expo grading card', game_id: games[0].id,
+    product_type_id: types.find((t: { slug: string }) => t.slug === 'single').id,
+    set_name: 'Grading set', collector_number: '042', language: 'Japanese', variant: 'Foil',
+    initial_purchase: { quantity: 1, amount: '560.01', purchase_date: '2025-01-02', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const source = await created.json();
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  await expect(page.getByRole('button', { name: 'Crack open', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Rip open', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Send to grading', exact: true }).click();
+  await page.getByLabel('Grading, postage and insurance', { exact: true }).fill('30.29');
+  await page.getByRole('button', { name: 'Send it', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('On hand 1', { exact: true })).toBeVisible();
+  const readSubmissions = async () => (await request.get(API + '/api/v1/grading?product_id=' + source.id)).json();
+  const submission = (await readSubmissions())[0];
+  expect(submission.status).toBe('out');
+  expect(submission.fees).toBe('30.29');
+  await expect(page.getByRole('button', { name: 'Send to grading', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Record grading return', exact: true }).click();
+  await page.getByLabel('Grade', { exact: true }).fill('10');
+  await page.getByLabel('Cert number', { exact: true }).fill('CERT-EXPO-042');
+  await page.getByLabel('Anything else it cost', { exact: true }).fill('0.29');
+  await expect(page.getByLabel('Now called', { exact: true })).toHaveValue('Expo grading card — PSA 10');
+  let childCreates = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
+  const returnUrl = API + '/api/v1/grading/' + submission.id + '/return';
+  await page.route(returnUrl, route => route.fulfill({ status: 409, contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Temporary grading test rejection' }) }), { times: 1 });
+  await page.getByRole('button', { name: 'Record it', exact: true }).click();
+  await expect(page.getByText('Temporary grading test rejection', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry return', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(childCreates).toBe(1);
+  expect((await readSubmissions())[0].status).toBe('returned');
+  const transformations = await (await request.get(API + '/api/v1/transformations?product_id=' + source.id)).json();
+  const transformation = transformations.find((t: { kind: string }) => t.kind === 'grade');
+  expect(transformation.inherited_purchase_date).toBe('2025-01-02');
+  const child = await (await request.get(API + '/api/v1/products/' + transformation.outputs[0].product_id)).json();
+  expect(child.stats.remaining_cost).toBe('590.59');
+  expect(child.stats.quantity_on_hand).toBe(1);
+  expect(child).toMatchObject({ collector_number: '042', language: 'Japanese', variant: 'Foil', cert_number: 'CERT-EXPO-042', grade: '10' });
+});
+test('crack form validates the split and carries exact cost into inline-created boxes', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Expo split case', game_id: games[0].id,
+    product_type_id: types.find((t: { slug: string }) => t.slug === 'sealed-case').id,
+    set_name: 'Journey set', language: 'English',
+    initial_purchase: { quantity: 1, amount: '900.01', purchase_date: '2025-01-02', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const source = await created.json();
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  await page.getByRole('button', { name: 'Crack open', exact: true }).click();
+  await page.getByLabel('Boxes per case', { exact: true }).fill('6');
+  await page.getByLabel('Child name', { exact: true }).fill('Expo inline split boxes');
+  await page.getByLabel('Store', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Crack it open', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  expect((await (await request.get(API + '/api/v1/products/' + source.id)).json()).stats.quantity_on_hand).toBe(1);
+  await page.getByRole('textbox', { name: 'Inventory', exact: true }).fill('1');
+  await page.getByLabel('Vault', { exact: true }).fill('1');
+  let childCreates = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
+  await page.route(API + '/api/v1/transformations/crack', route => route.fulfill({
+    status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'Temporary crack test rejection' }),
+  }), { times: 1 });
+  const creation = page.waitForRequest(r => r.method() === 'POST' && r.url() === API + '/api/v1/products');
+  await page.getByRole('button', { name: 'Crack it open', exact: true }).click();
+  expect((await creation).postDataJSON().initial_purchase).toBeUndefined();
+  await expect(page.getByText('Temporary crack test rejection', { exact: true })).toBeVisible();
+  const cracking = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/transformations/crack');
+  await page.getByRole('button', { name: 'Crack it open', exact: true }).click();
+  const response = await cracking;
+  expect(response.ok()).toBeTruthy();
+  expect(childCreates).toBe(1);
+  const transformed = await response.json();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(transformed.inherited_purchase_date).toBe('2025-01-02');
+  const child = await (await request.get(API + '/api/v1/products/' + transformed.outputs[0].product_id)).json();
+  expect(child.stats.by_bucket).toMatchObject({ inventory: 1, store: 4, vault: 1 });
+  expect(child.stats.remaining_cost).toBe('900.01');
+  expect(child.set_name).toBe('Journey set');
+  expect(child.language).toBe('English');
+  expect(child.product_type.slug).toBe('booster-box');
+});
+test('transformation history links outputs and reverses the whole cost chain', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const create = async (name: string, slug: string, purchase = false) => {
+    const response = await request.post(API + '/api/v1/products', { data: {
+      name, game_id: games[0].id, product_type_id: types.find((t: { slug: string }) => t.slug === slug).id,
+      ...(purchase ? { initial_purchase: { quantity: 1, amount: '900.01', purchase_date: '2025-01-02', funding: [] } } : {}),
+    } });
+    expect(response.ok()).toBeTruthy();
+    return response.json();
+  };
+  const source = await create('Expo lineage case', 'sealed-case', true);
+  const child = await create('Expo lineage boxes', 'booster-box');
+  const response = await request.post(API + '/api/v1/transformations/crack', { data: {
+    product_id: source.id, quantity: 1, occurred_on: '2026-01-02',
+    outputs: [{ product_id: child.id, quantity: 4, bucket: 'store' }, { product_id: child.id, quantity: 2, bucket: 'vault' }],
+  } });
+  expect(response.ok()).toBeTruthy();
+  const transformation = await response.json();
+  expect(transformation.inherited_purchase_date).toBe('2025-01-02');
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  const history = page.getByRole('group', { name: 'Transformation ' + transformation.id, exact: true });
+  await expect(history.getByText('Inherited purchase date 2025-01-02 · Bulk write-off $0.00', { exact: true })).toBeVisible();
+  await history.getByRole('button', { name: 'Output: ' + child.name, exact: true }).first().click();
+  await expect(page.getByText('Cost $900.01', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo crack', exact: true }).click();
+  await page.getByLabel('Reason', { exact: true }).fill('Reverse complete case opening');
+  await page.getByRole('button', { name: 'Undo transformation', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Cost $0.00', { exact: true })).toBeVisible();
+  const restored = await (await request.get(API + '/api/v1/products/' + source.id)).json();
+  expect(restored.stats.quantity_on_hand).toBe(1);
+  expect(restored.stats.remaining_cost).toBe('900.01');
+  const output = await (await request.get(API + '/api/v1/products/' + child.id)).json();
+  expect(output.stats.quantity_on_hand).toBe(0);
+});
 test('money adjustments use exact cents and transfer void restores both balances', async ({ page, request }) => {
   await signIn(page);
   await page.getByRole('button', { name: 'Money', exact: true }).click();
