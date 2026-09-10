@@ -5,6 +5,7 @@ import { Button, Card, Copy, ErrorNotice, Loading, Page, Row } from '../../../co
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
 import { RecordSaleDialog } from '../../../components/sale-form';
 import { ProductOperations } from '../../../components/product-operations';
+import { RecordValuationDialog } from '../../../components/valuation-form';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
 export default function ProductDetail() {
@@ -12,6 +13,7 @@ export default function ProductDetail() {
   const api = useApi();
   const [form, setForm] = useState<Omit<ProductFormsProps, 'onClose' | 'product'> | null>(null);
   const [selling, setSelling] = useState(false);
+  const [valuing, setValuing] = useState(false);
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
   return <Page title={p?.name ?? 'Product'}>
@@ -26,6 +28,8 @@ export default function ProductDetail() {
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
       <Button label="Record sale" onPress={() => setSelling(true)} />
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
+      <Button label="Record valuation" onPress={() => setValuing(true)} />
+      {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
       <ProductOperations key={p.id} product={p} />
       {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>

@@ -23,7 +23,7 @@ foundation owner until its interface is stable.
 | Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual quantity/identity/retry verified; photos and preview pending |
 | Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void verified; valuations and API concurrency guards pending |
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Pending |
-| Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Pending |
+| Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: Vault and manual valuations implemented; reports/CSV pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
 
@@ -185,3 +185,31 @@ enforce integrity across simultaneous clients**. Before release, separately hard
 with transactional concurrency protection for send/return, cumulative outstanding quantities,
 current-bucket stock and chronology validation, plus concurrency/regression tests. Keep this
 separate from the frontend-only rewrite; do not mistake the new UI checks for a server fix.
+
+## 2026-09-09 Manual valuation and Vault slice (in progress)
+
+Add a dedicated Vault route and product/Vault manual valuation entry using the existing
+authenticated endpoints. Valuations are dated, per-unit CAD estimates, including zero; an
+unvalued holding stays unknown rather than falling back to cost. Slabs remain manually
+valued. The Vault API's `value` is per unit, while `cost` and `appreciation` describe the
+holding; display these server fields with explicit labels and do not recalculate them.
+Provider market quotes remain a separate per-unit display and never replace manual values.
+
+Keep the baseline annual manual-review indicator (older than 365 days) distinct from market
+quote freshness. No scheduler, pricing provider, backend, auth or deployment changes in this
+slice. Inline pre/post-grading valuation prompts, photo adapters, reports/exports and shared
+60/90-day preferences remain tracked follow-ons.
+
+Implemented `/vault` with local search, explicit manual/provider cards, quantities, server
+cost/appreciation, holding age and Store history, annual review indicators, error/retry/empty
+states, and product links. Product detail and Vault both open the reusable valuation form.
+Its inputs start blank for value, retain exact decimal strings, and use a synchronous submit
+guard as well as pending UI guards. Only the valuation endpoint is written.
+
+Independent review found no P1/P2 in this bounded slice. Typecheck, ESLint and 55 unit tests
+pass. All 15 Expo browser tests pass, including manual zero/older-date semantics, rejected
+write recovery, market/manual separation, local search, report retry, and overflow checks at
+390/768/1536 pixels. Android and iOS Hermes exports pass. Screenshot inspection confirmed the
+Vault cards reflow without horizontal overflow; compact-navigation polish remains part of the
+shared shell work rather than this report slice. No production data, Vite source, backend,
+authentication or deployment setup changed.

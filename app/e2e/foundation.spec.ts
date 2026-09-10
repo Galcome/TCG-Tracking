@@ -1,4 +1,90 @@
 import { test, expect, type Page } from '@playwright/test';
+test('Vault keeps market quotes separate from unknown manual value and recovers from read errors', async ({ page }) => {
+  const name = 'Vault quote separation fixture';
+  let reads = 0;
+  await page.route(API + '/api/v1/reports/vault', route => {
+    reads++;
+    return route.fulfill({ status: reads === 1 ? 403 : 200, contentType: 'application/json', body: JSON.stringify(reads === 1
+      ? { detail: 'Vault report temporarily unavailable' }
+      : [{ product_id: '11111111-1111-4111-8111-111111111111', product_name: name, units: 2, cost: '10.00',
+        value: null, valued_on: null, days_since_valued: null, appreciation: null, appreciation_pct: null,
+        annualised: null, days_held: 700, days_in_store_first: 30,
+        market_estimate: { value: '99.99', captured_on: '2025-01-02', status: 'stale', provider: 'tcgcsv', source_revision: 'test' } }]) });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Vault', exact: true }).click();
+  await expect(page.getByText('Vault report temporarily unavailable', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  const holding = page.getByRole('group', { name, exact: true });
+  await expect(holding.getByText('Not valued', { exact: true })).toBeVisible();
+  await expect(holding.getByText('$99.99', { exact: true })).toBeVisible();
+  await expect(holding.getByText('Stale', { exact: true })).toBeVisible();
+  await expect(holding.getByText('tcgcsv', { exact: true })).toBeVisible();
+  await page.getByLabel('Search Vault holdings', { exact: true }).fill('no matching holding');
+  await expect(page.getByText('No Vault holdings match that search.', { exact: true })).toBeVisible();
+  await page.getByLabel('Search Vault holdings', { exact: true }).fill('');
+  for (const width of [390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(holding).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.screenshot({ path: 'output/playwright/expo-vault-' + width + '.png', fullPage: true });
+  }
+});
+test('Vault manual valuations preserve zero, dated estimates and accounting for slabs', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Expo manually valued Vault slabs', game_id: games[0].id,
+    product_type_id: types.find((t: { slug: string }) => t.slug === 'graded-card').id,
+    grading_company: 'PSA', grade: '10', cert_number: 'VAULT-042',
+    initial_purchase: { quantity: 2, amount: '10.00', bucket: 'vault', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const product = await created.json();
+  const readHolding = async () => (await (await request.get(API + '/api/v1/reports/vault')).json())
+    .find((row: { product_id: string }) => row.product_id === product.id);
+  expect((await readHolding()).value).toBeNull();
+  await signIn(page);
+  await page.getByRole('button', { name: 'Vault', exact: true }).click();
+  const holding = page.getByRole('group', { name: product.name, exact: true });
+  await expect(holding).toBeVisible();
+  await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
+  await expect(page.getByLabel('Value per unit (CAD)', { exact: true })).toHaveValue('');
+  await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('19.99');
+  await page.getByLabel('As at', { exact: true }).fill('2025-06-02');
+  await page.getByLabel('Note', { exact: true }).fill('Manual slab estimate, no price feed');
+  await page.route(API + '/api/v1/valuations', route => route.fulfill({ status: 409, contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Temporary valuation test rejection' }) }), { times: 1 });
+  await page.getByRole('button', { name: 'Save valuation', exact: true }).click();
+  await expect(page.getByText('Temporary valuation test rejection', { exact: true })).toBeVisible();
+  expect((await readHolding()).value).toBeNull();
+  const valuation = page.waitForRequest(r => r.method() === 'POST' && r.url() === API + '/api/v1/valuations');
+  await page.getByRole('button', { name: 'Save valuation', exact: true }).click();
+  expect((await valuation).postDataJSON()).toMatchObject({ product_id: product.id, value: '19.99', captured_on: '2025-06-02' });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await readHolding()).toMatchObject({ units: 2, value: '19.99', cost: '10.00', appreciation: '29.98', valued_on: '2025-06-02' });
+  await expect(holding.getByText(/19\.99/)).toBeVisible();
+  // Zero is an explicit estimate, never "not valued"; the latest dated snapshot wins.
+  await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
+  await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('0.00');
+  await page.getByLabel('As at', { exact: true }).fill('2025-06-03');
+  await page.getByRole('button', { name: 'Save valuation', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await readHolding()).toMatchObject({ value: '0.00', cost: '10.00', appreciation: '-10.00', valued_on: '2025-06-03' });
+  const older = await request.post(API + '/api/v1/valuations', { data: {
+    product_id: product.id, value: '99.99', captured_on: '2025-06-01', notes: 'Older estimate',
+  } });
+  expect(older.ok()).toBeTruthy();
+  expect((await readHolding()).value).toBe('0.00');
+  await page.goto('/products/' + product.id);
+  await expect(page.getByRole('button', { name: 'Record valuation', exact: true })).toBeVisible();
+  await expect(page.getByText('Cost $10.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Profit $0.00', { exact: true })).toBeVisible();
+  const after = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(after.stats.quantity_on_hand).toBe(2);
+  expect(after.stats.remaining_cost).toBe('10.00');
+  expect(after.stats.realized_profit).toBe('0.00');
+});
 test('grading can cancel an unreturned submission and reuse an existing graded product', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
@@ -156,7 +242,7 @@ test('crack form validates the split and carries exact cost into inline-created 
   await expect(page.getByRole('alert')).toBeVisible();
   expect((await (await request.get(API + '/api/v1/products/' + source.id)).json()).stats.quantity_on_hand).toBe(1);
   await page.getByRole('textbox', { name: 'Inventory', exact: true }).fill('1');
-  await page.getByLabel('Vault', { exact: true }).fill('1');
+  await page.getByRole('textbox', { name: 'Vault', exact: true }).fill('1');
   let childCreates = 0;
   page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
   await page.route(API + '/api/v1/transformations/crack', route => route.fulfill({
