@@ -21,7 +21,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-sharing",
+      ["expo-image-picker", {
+        "photosPermission": "Allow TCG Investments to select card photos for identity suggestions.",
+        "cameraPermission": "Allow TCG Investments to photograph cards for identity suggestions.",
+        "microphonePermission": false
+      }]
     ],
     "experiments": {
       "typedRoutes": true

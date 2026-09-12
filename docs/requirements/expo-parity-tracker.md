@@ -6,7 +6,8 @@ requirements in addition to that baseline. Current production build remains `web
 
 ## Workflow inventory
 
-Status means verified parity, not just that a route exists. All feature rows begin pending.
+Status means verified parity, not just that a route exists. Checkpoints below record evidence;
+partial rows retain their explicit unfinished flows and device/release gates.
 Each implementation task owns its screen/forms and tests; shared primitives stay with the
 foundation owner until its interface is stable.
 
@@ -17,13 +18,13 @@ foundation owner until its interface is stable.
 | Inventory | Search/game/stock/bucket filters, paging, accessible bucket colours, aligned counts, estimate source/date/status | `buckets.spec.ts`, `bucket-journey.spec.ts`; PR73 | Pending |
 | Products | Add/edit/archive/delete safeguards; taxonomy, set suggestions, language/collector/variant/slab identity; history | `add-product.spec.ts`, `sets.spec.ts`, `ledger.spec.ts` | Pending |
 | Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Pending |
-| Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Pending |
+| Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows and CSV verified; split proceeds and device acceptance pending |
 | Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Pending |
 | Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
 | Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual quantity/identity/retry verified; photos and preview pending |
 | Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void verified; valuations and API concurrency guards pending |
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Pending |
-| Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: Vault and manual valuations implemented; reports/CSV pending |
+| Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
 
@@ -322,3 +323,62 @@ The React checklist was applied. Lineage, CSV/native sharing, pricing controls, 
 remaining grading valuations, compact shell/dashboard polish and native release acceptance
 remain open, along with the existing transactional grading API release blocker. No backend,
 legacy Vite source, authentication, production deployment or production data changed.
+
+## 2026-09-12 CSV, lineage and photo checkpoint
+
+Added grouped/inventory/Sales CSV exports with every page collected, explicit filter scope,
+UTF-8 BOM, quoted cells and spreadsheet-formula neutralization. Incomplete, duplicate or
+changing pages refuse a misleading partial download. Unknown amounts stay blank, zero stays
+explicit, and export-only unit cost/ROI use exact integer-cents arithmetic, never ledger inputs.
+Browser downloads and native sharing use separate platform adapters. Android chooser completion
+does not prove the recipient has read the file: successful shares remain cached for 24-hour
+next-export cleanup of only our named files; failed shares remove their owned file immediately.
+Native file reading/sharing and denied/unavailable/cancel behavior still need device acceptance.
+
+Product lineage shows server root cost, realized profit, remaining cost, write-offs and ROI
+without adding overlapping Tier totals. Flattened preorder cards cap indentation, preserving
+deep-tree readability at mobile widths. No-hit complete write-offs remain visible even without
+children or sales. Root also replaced the shared floating-point CAD formatter with the existing
+exact string formatter, so precision improvements now cover all screens, not only Reports.
+
+Photo-assisted Rip uses existing authenticated backend identity recognition, not a new AI SDK
+or client provider credentials. Five-photo batches upload sequentially; prior suggestions survive
+a later failure, manual input is preserved, and set/collector/variant/language are editable.
+No suggestion sets a value, selects a reuse/create decision or writes inventory. Permission denial,
+reader failure and cancellation retain manual entry; no microphone permission is requested.
+
+Validation before Dashboard/pricing additions: 22 browser tests passed; the additional photo
+multipart/manual-preservation/no-write browser test passed. Typecheck, ESLint and 84 current
+unit tests passed. Native exports passed before the photo addition; final expanded browser/native
+checks are recorded in the next checkpoint. Expo-compatible SDK patch updates were applied,
+and `expo install --check` then passed. Audit retains 14 moderate transitive advisories;
+no forced major upgrade/downgrade was applied. Independent review remains blocked by the
+agent-thread limit; root self-review and the React checklist do not replace that gate.
+
+Pricing/Dashboard expanded checks, split funding/proceeds, grading valuation prompts,
+compact shell, backend transactional grading integrity, native device/release acceptance and
+approved cutover remain open. Existing production continues serving `web/dist`; no push,
+deployment, production data changes or live website switch occurred.
+
+### Expanded Dashboard/pricing validation
+
+Dashboard now includes period purchases/cost-of-sales/average sale, scoped game performance
+and recent sales. Lifetime invested/cash/store-credit/fees and bulk write-offs are explicitly
+separate; backend inspection confirmed bulk write-offs ignore the selected period. No client
+subtracts overlapping amounts or turns unrealized estimates into profit.
+
+Product pricing controls provide bounded catalogue discovery or manual exact IDs, explicit
+printing confirmation, enable/disable and global all-confirmed refresh with honest status/errors.
+Eligibility mirrors the server's strict free raw-card/box/case boundary; slabs stay manual.
+Mutation inputs are snapshots, synchronous guards prevent duplicate submissions, and selecting
+a listing only fills a draft. Provider requests remain on the existing authenticated backend.
+
+All 25 browser tests passed (exit 0), including actual mapping create/disable/re-enable with
+unchanged $10.01 ledger cost/stock, intercepted provider-failure display, precise large Dashboard
+values, multipart photo suggestions and prior CSV/lineage/accounting/auth journeys. The first
+expanded run had 24 passes and one fixture failure: Dashboard's new game query consumed the
+rejection intended for Reports. Scoping that fixture to the Reports route fixed the test, without
+changing retry behavior. Android/iOS Hermes exports passed with photo/pricing included;
+these are not installed app builds. SDK compatibility check passed. No Android devices were
+listed by `adb devices -l`; real-device acceptance remains open. Independent review still
+cannot start at the agent-thread limit. No push, deployment or production cutover occurred.

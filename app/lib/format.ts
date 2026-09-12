@@ -1,7 +1,5 @@
-export function money(value: string | null | undefined, fallback = 'Unknown') {
-  if (value === null || value === undefined) return fallback;
-  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(Number(value));
-}
+import { reportMoney } from './reports'
+export const money = reportMoney
 export function percent(value: number | null | undefined) {
   return value == null ? 'Unknown' : (value * 100).toFixed(1) + '%';
 }

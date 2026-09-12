@@ -9,6 +9,7 @@ import {
   type Bucket,
   type ProductCandidate,
   type ProductDetail,
+  type ReadCard,
 } from '../lib/api'
 import {
   buildRipPayload,
@@ -26,6 +27,7 @@ import {
 } from '../lib/rip-drafts'
 import { todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
+import { PhotoReader } from './photo-reader'
 
 export interface RipDialogProps {
   product: ProductDetail
@@ -224,6 +226,7 @@ interface RipSheetProps {
   submitLabel: string
   busy: boolean
   error?: unknown
+  uploadBusy?: boolean
   validation: RipValidation
   children: React.ReactNode
 }
@@ -235,6 +238,7 @@ function RipSheet({
   submitLabel,
   busy,
   error,
+  uploadBusy,
   validation,
   children,
 }: RipSheetProps) {
@@ -244,7 +248,7 @@ function RipSheet({
       {children}
       {firstError ? <ErrorNotice error={new Error(firstError)} /> : null}
       {error ? <ErrorNotice error={error} /> : null}
-      <Button label={busy ? 'Saving…' : submitLabel} onPress={onSubmit} disabled={busy} />
+      <Button label={busy ? 'Saving…' : submitLabel} onPress={onSubmit} disabled={busy || uploadBusy} />
     </Sheet>
   )
 }
@@ -258,8 +262,7 @@ function bucketLabel(bucket: Bucket, count: number): string {
 }
 
 /**
- * Manual-only rip entry. Photo adapters intentionally do not belong in this bounded slice;
- * every identity, reuse/create decision, estimate and write remains human-controlled.
+ * Photo suggestions and manual entry share human-controlled identity and save decisions.
  */
 export function RipDialog({ product, onClose }: RipDialogProps) {
   const api = useApi()
@@ -273,6 +276,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
   const [sourceQuantity, setSourceQuantity] = useState('1')
   const [occurredOn, setOccurredOn] = useState(todayIso())
   const [rows, setRows] = useState<RipHitDraft[]>([emptyHit()])
+  const [photoBusy, setPhotoBusy] = useState(false)
   const [validation, setValidation] = useState<RipValidation>({})
   const [emptyConfirmedKey, setEmptyConfirmedKey] = useState<string | null>(null)
 
@@ -341,6 +345,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
   })
 
   function submit() {
+    if (run.isPending || photoBusy) return
     setValidation({})
     const errors = validateRipDraft(draft, product, { productTypes: productTypes.data })
     if (Object.keys(errors).length > 0) {
@@ -426,6 +431,20 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
   const lookupPending = productTypes.isPending
   const currentBucket = rows[0]?.bucket ?? 'inventory'
 
+  function appendPhotoCards(cards: ReadCard[]) {
+    if (!cards.length) return
+    setEmptyConfirmedKey(null)
+    setRows((current) => {
+      const blank = current.length === 1 && current[0].choice === 'undecided' && !current[0].productId &&
+        !current[0].name && !current[0].setName && !current[0].collectorNumber && !current[0].variant && !current[0].language && !current[0].value && current[0].quantity === '1'
+      const bucket = current[0]?.bucket ?? 'inventory'
+      return [...(blank ? [] : current), ...cards.map((card) => ({
+        ...emptyHit(bucket), name: card.name, setName: card.set_name, collectorNumber: card.collector_number,
+        variant: card.variant, language: card.language,
+      }))]
+    })
+  }
+
   return (
     <RipSheet
       title={`Rip open — ${product.name}`}
@@ -435,6 +454,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
         ? (emptyConfirmationShown ? 'Confirm bulk write-off' : 'Review bulk write-off')
         : 'Log the hits'}
       busy={run.isPending}
+      uploadBusy={photoBusy}
       error={run.error ?? lookupError}
       validation={validation}
     >
@@ -491,6 +511,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
         Add only the cards worth tracking. Every entered value is a dated estimate for the
         server&apos;s proportional allocation; it never becomes cost basis or profit.
       </Copy>
+      <PhotoReader disabled={run.isPending} onCards={appendPhotoCards} onBusy={setPhotoBusy} />
       {rows.map((row, index) => (
         <HitIdentityChooser
           key={row.key}
@@ -520,7 +541,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
           </Copy>
           <Button
             label="Confirm rip and write off as bulk"
-            disabled={run.isPending}
+            disabled={run.isPending || photoBusy}
             onPress={submit}
           />
         </Card>

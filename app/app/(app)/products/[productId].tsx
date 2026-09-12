@@ -5,6 +5,8 @@ import { Button, Card, Copy, ErrorNotice, Loading, Page, Row } from '../../../co
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
 import { RecordSaleDialog } from '../../../components/sale-form';
 import { ProductOperations } from '../../../components/product-operations';
+import { LineageReport } from '../../../components/lineage-report';
+import { PricingControls } from '../../../components/pricing-controls';
 import { RecordValuationDialog } from '../../../components/valuation-form';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
@@ -30,7 +32,9 @@ export default function ProductDetail() {
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       <Button label="Record valuation" onPress={() => setValuing(true)} />
       {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
+      <PricingControls product={p} />
       <ProductOperations key={p.id} product={p} />
+      <LineageReport productId={p.id} />
       {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>

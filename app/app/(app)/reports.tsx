@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
 import { PeriodSelector } from '../../components/period-selector'
+import { CsvButton } from '../../components/csv-button'
 import { AgingReport, AttentionReport, SetReport, TierReport } from '../../components/report-rollups'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
@@ -19,6 +20,7 @@ import {
 import { percent } from '../../lib/format'
 import { usePeriodPreference } from '../../lib/period-preference'
 import type { GroupBy, GroupRow, ReportFilters, Taxonomy } from '../../lib/api'
+import { collectPages, groupCsv, inventoryCsv } from '../../lib/csv'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <Text accessibilityRole="header" style={styles.sectionTitle}>{children}</Text>
@@ -300,6 +302,12 @@ export default function Reports() {
       <ReportFilterBar value={filters} onChange={setFilters} />
       <GroupSelector value={groupBy} onChange={setGroupBy} />
       <SortSelector value={sort} onChange={setSort} />
+      <Row>
+        <CsvButton label="Export grouped CSV" disabled={!rows.data?.length || rows.isFetching || Boolean(rows.error)}
+          create={() => groupCsv(`tcg-by-${groupBy}`, sorted)} />
+        <CsvButton label="Export all inventory CSV"
+          create={async () => inventoryCsv(await collectPages((offset, limit) => api.products({ stock: 'in', offset, limit })))} />
+      </Row>
       <ErrorNotice error={rows.error} retry={() => { void rows.refetch() }} />
       {rows.isPending ? <Loading /> : null}
       {rows.data ? <PerformanceReport rows={sorted} groupBy={groupBy} noun={group.noun} /> : null}
@@ -310,7 +318,7 @@ export default function Reports() {
       <AgingReport />
       <AttentionReport />
       <Card>
-        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. Tier results show lifetime trading; set holdings, stock aging, and data attention include current positions. These sections are independent of the selected period and filters. Lineage and CSV remain follow-on work.</Copy>
+        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. Tier results show lifetime trading; set holdings, stock aging, and data attention include current positions. These sections are independent of the selected period and filters. Grouped CSV follows the selected filters and sorting; inventory CSV includes all in-stock products across buckets.</Copy>
       </Card>
     </Page>
   )

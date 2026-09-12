@@ -33,11 +33,26 @@ static export on 5373. It refuses to reuse running servers. It uses real databas
 behavior and Firebase's real browser SDK with intercepted identity-service test fixtures;
 it does not prove production Google configuration or genuine native authentication.
 The Metro cache is cleared to prevent previous environment values entering test builds.
+The test export is isolated in `dist-e2e`; ordinary `dist` exports cannot replace it.
+
+CSV exports download in the browser and use a temporary cache file with the native share
+sheet on Android/iOS. See [Expo FileSystem](https://docs.expo.dev/versions/latest/sdk/filesystem/)
+and [Expo Sharing](https://docs.expo.dev/versions/latest/sdk/sharing/). Temporary files are
+removed immediately on failure. Successful shares remain cached so Android recipients
+can finish reading; files older than 24 hours are pruned on the next export (or by OS
+cache eviction). Native sharing/unavailable-device behavior needs device
+acceptance; a successful JavaScript export does not prove those operating-system flows.
 
 `expo-checks.yml` runs isolated compilation and browser checks. It has no deployment or
 distribution step. Fixture bundles are deliberately not published as release artifacts.
 
 ## Native release gates
+
+Rip photo entry uses the existing authenticated vision API for editable identity suggestions
+only. Browser selection and native camera/library adapters cap selection at five photos;
+the API enforces the 6 MiB limit even when native file size is unavailable. Permission
+denial, cancellation and reader failure leave manual entry available. No microphone
+permission is requested. Native photo permission/camera/library behavior needs device acceptance.
 
 EAS profiles retain Household's current local app-version policy. Before distribution,
 reconcile the package/bundle ID, Firebase registrations, native Google credential flow,

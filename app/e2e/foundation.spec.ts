@@ -1,4 +1,205 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+test('pricing requires explicit printing confirmation and keeps mapping writes out of the ledger', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: { name: 'Pricing confirmation card', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } });
+  expect(created.ok()).toBeTruthy();
+  const product = await created.json();
+  await page.route(API + '/api/v1/pricing/refresh', route => route.fulfill({ json: {
+    attempted: 1, refreshed: 0, skipped: 0, stale: 1, unavailable: 0, errors: ['Provider unavailable test fixture'],
+  } }));
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  const controls = page.getByRole('group', { name: 'Pricing controls', exact: true });
+  await controls.getByRole('button', { name: 'Confirm mapping', exact: true }).click();
+  await expect(controls.getByText('Product ID is required.', { exact: true })).toBeVisible();
+  await controls.getByLabel('Category ID', { exact: true }).fill('3');
+  await controls.getByLabel('Group ID', { exact: true }).fill('123');
+  await controls.getByLabel('Product ID', { exact: true }).fill('456');
+  await controls.getByLabel('Subtype / printing', { exact: true }).fill('Reverse Holofoil');
+  const save = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/pricing/mappings');
+  await controls.getByRole('button', { name: 'Confirm mapping', exact: true }).click();
+  expect((await save).ok()).toBeTruthy();
+  await expect(controls.getByText('Mapping is confirmed. Saving confirms the identity again.', { exact: true })).toBeVisible();
+  await controls.getByRole('button', { name: 'Disable mapping', exact: true }).click();
+  await expect(controls.getByRole('button', { name: 'Re-enable mapping', exact: true })).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Refresh all confirmed estimates', exact: true })).toBeDisabled();
+  await controls.getByRole('button', { name: 'Re-enable mapping', exact: true }).click();
+  await expect(controls.getByRole('button', { name: 'Disable mapping', exact: true })).toBeVisible();
+  await controls.getByRole('button', { name: 'Refresh all confirmed estimates', exact: true }).click();
+  await expect(controls.getByText(/Provider unavailable test fixture/)).toBeVisible();
+  const latest = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(latest.stats.remaining_cost).toBe('10.01');
+  expect(latest.stats.quantity_on_hand).toBe(1);
+});
+
+test('dashboard separates period trading from lifetime cash and preserves exact cents', async ({ page }) => {
+  await page.route(API + '/api/v1/dashboard?*', route => route.fulfill({ json: {
+    realized_profit: '90071992547409.91', roi: null, inventory_at_cost: '10.01', total_invested: '20.01',
+    purchases_in_period: '0.29', cost_of_sales: '0.00', cost_written_off: '3.01', total_sales: '0.00',
+    average_sale: null, units_in_stock: 1, sale_count: 0, sales_missing_cost: 0, undated_sales: 1,
+    products_with_negative_stock: 0, net_proceeds: '5.00', fees_paid: '1.01', store_credit: '2.00',
+    cash_received: '3.00', cash_balance: '-17.01',
+  } }));
+  await signIn(page);
+  await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
+  await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
+  await expect(page.getByText('Recent sales · selected period', { exact: true })).toBeVisible();
+  for (const width of [390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+});
+
+test('photo suggestions preserve identity and manual input without creating inventory', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: { name: 'Photo suggestion box', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'booster-box').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } });
+  expect(created.ok()).toBeTruthy();
+  const product = await created.json();
+  await page.route(API + '/api/v1/vision/status', route => route.fulfill({ json: { available: true, cards: [] } }));
+  let uploads = 0;
+  await page.route(API + '/api/v1/vision/cards', route => {
+    uploads++;
+    expect(route.request().headers()['content-type']).toContain('multipart/form-data; boundary=');
+    expect(route.request().postDataBuffer()?.toString()).toContain('name="photo"');
+    return route.fulfill({ json: { available: true, cards: [{ name: 'Photo card', set_name: 'Photo set',
+      collector_number: '001/100', variant: 'Reverse Holo', language: 'Japanese' }] } });
+  });
+  let writes = 0;
+  page.on('request', req => { if (req.method() === 'POST' && /\/products$|\/transformations\/rip$/.test(req.url())) writes++; });
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  await page.getByRole('button', { name: 'Rip open', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Hit 1 name', exact: true }).fill('Manual card retained');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Choose photos', exact: true }).click();
+  await (await chooser).setFiles({ name: 'cards.png', mimeType: 'image/png', buffer: Buffer.from('fixture image') });
+  await expect(page.getByRole('textbox', { name: 'Hit 2 name', exact: true })).toHaveValue('Photo card');
+  await expect(page.getByRole('textbox', { name: 'Hit 1 name', exact: true })).toHaveValue('Manual card retained');
+  await expect(page.getByRole('textbox', { name: 'Hit 2 Set', exact: true })).toHaveValue('Photo set');
+  await expect(page.getByRole('textbox', { name: 'Hit 2 Collector number', exact: true })).toHaveValue('001/100');
+  await expect(page.getByRole('textbox', { name: 'Hit 2 Variant', exact: true })).toHaveValue('Reverse Holo');
+  await expect(page.getByRole('textbox', { name: 'Hit 2 Language', exact: true })).toHaveValue('Japanese');
+  await expect(page.getByRole('textbox', { name: 'Hit 2 value', exact: true })).toHaveValue('');
+  expect(uploads).toBe(1);
+  expect(writes).toBe(0);
+});
+test('lineage retries independently and keeps deep trees readable without changing ledger cost', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: { name: 'CSV lineage root', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } });
+  expect(created.ok()).toBeTruthy();
+  const product = await created.json();
+  let reads = 0;
+  const tree = [{ product_id: product.id, product_name: 'Depth 1 fixture', depth: 1, quantity_produced: 1, cost: '10.01', children: [
+    { product_id: product.id, product_name: 'Depth 2 fixture', depth: 2, quantity_produced: 1, cost: '10.01', children: [
+      { product_id: product.id, product_name: 'Depth 3 fixture', depth: 3, quantity_produced: 1, cost: '0.00', children: [
+        { product_id: product.id, product_name: 'Depth 4 fixture', depth: 4, quantity_produced: 1, cost: null, children: [] },
+      ] },
+    ] },
+  ] }];
+  await page.route(API + '/api/v1/reports/lineage/' + product.id, route => {
+    reads++;
+    return route.fulfill({ status: reads === 1 ? 403 : 200, contentType: 'application/json', body: JSON.stringify(reads === 1
+      ? { detail: 'Lineage read test rejection' }
+      : { product_id: product.id, product_name: product.name, cost: '10.01', realized_profit: '0.00', remaining_cost: '10.01',
+        written_off: '0.00', roi: null, units_sold: 0, units_remaining: 1, tree }) });
+  });
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  const lineage = page.getByRole('group', { name: 'Lineage report', exact: true });
+  await expect(lineage.getByText('Lineage read test rejection', { exact: true })).toBeVisible();
+  await lineage.getByRole('button', { name: 'Try again', exact: true }).click();
+  const deepest = lineage.getByRole('group', { name: 'Lineage node: Depth 4 fixture', exact: true });
+  await expect(deepest.getByText('Unknown', { exact: true })).toBeVisible();
+  await expect(lineage.getByRole('group', { name: 'Lineage node: Depth 3 fixture', exact: true }).getByText('$0.00', { exact: true })).toBeVisible();
+  for (const width of [390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    const heading = deepest.getByRole('button', { name: 'Depth 4 fixture', exact: true });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeInViewport();
+    const box = await heading.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.screenshot({ path: 'output/playwright/expo-lineage-' + width + '.png', fullPage: true });
+  }
+  const after = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(after.stats.remaining_cost).toBe('10.01');
+});
+test('inventory CSV downloads every page and refuses a failed follow-up page', async ({ page }) => {
+  let fail = false;
+  const offsets: number[] = [];
+  const rows = Array.from({ length: 201 }, (_, index) => ({ id: 'csv-product-' + index, name: 'CSV product ' + index,
+    set_name: null, language: null, game: { name: 'Pokémon' }, product_type: { name: 'Single' },
+    stats: { quantity_on_hand: 1, by_bucket: { inventory: 1, store: 0, vault: 0 }, average_unit_cost: '0.00', remaining_cost: '0.00', realized_profit: '0.00' } }));
+  await page.route(API + '/api/v1/products?*', route => {
+    const url = new URL(route.request().url());
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    offsets.push(offset);
+    if (fail && offset > 0) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ detail: 'Export page failure fixture' }) });
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: rows.slice(offset, offset + limit), total: rows.length, offset, limit }) });
+  });
+  const downloads: string[] = [];
+  page.on('download', download => downloads.push(download.suggestedFilename()));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Reports', exact: true }).click();
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export all inventory CSV', exact: true }).click();
+  const download = await downloaded;
+  const path = await download.path();
+  const body = await readFile(path!, 'utf8');
+  expect(body.startsWith('\ufeff"product"')).toBeTruthy();
+  expect(body.split('\r\n')).toHaveLength(202);
+  expect(body).toContain('"CSV product 200"');
+  expect(offsets).toEqual([0, 200]);
+  fail = true;
+  await page.getByRole('button', { name: 'Export all inventory CSV', exact: true }).click();
+  await expect(page.getByText('Export page failure fixture', { exact: true })).toBeVisible();
+  expect(downloads).toHaveLength(1);
+});
+test('sales CSV keeps filters, all pages, unknown values and explicit zero', async ({ page }) => {
+  const requests: URL[] = [];
+  const rows = Array.from({ length: 201 }, (_, index) => ({ id: 'csv-sale-' + index, product_id: 'product',
+    product: { id: 'product', name: index === 0 ? '=CSV formula fixture' : 'CSV sale fixture ' + index,
+      set_name: null, language: null, game: { name: 'Pokémon' }, product_type: { name: 'Single' } },
+    quantity: 1, amount: '1.00', platform_fees: '0.00', payment_fees: '0.00', shipping_paid: '0.00', net_proceeds: '1.00',
+    cost_basis: index === 0 ? null : '0.00', realized_profit: index === 0 ? null : '0.00', has_unknown_cost: index === 0,
+    days_held_weighted: index === 0 ? null : 0, sale_date: null, sold_by_member_id: null, marketplace: 'CSV channel', notes: null, status: 'active' }));
+  await page.route(API + '/api/v1/sales?*', route => {
+    const url = new URL(route.request().url());
+    requests.push(url);
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: rows.slice(offset, offset + limit), total: rows.length, offset, limit }) });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Sales', exact: true }).click();
+  await page.getByLabel('Search by product', { exact: true }).fill('CSV sale fixture');
+  await expect.poll(() => requests.some(url => url.searchParams.get('q') === 'CSV sale fixture')).toBeTruthy();
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export sales CSV', exact: true }).click();
+  const path = await (await downloaded).path();
+  const body = await readFile(path!, 'utf8');
+  const lines = body.split('\r\n');
+  expect(lines).toHaveLength(202);
+  expect(lines[1]).toContain('"\'=CSV formula fixture"');
+  expect(lines[1].split(',').slice(14, 19)).toEqual(['""', '""', '""', '""', '""']);
+  expect(lines[2].split(',').slice(14, 19)).toEqual(['"0.00"', '"0.00"', '"0.00"', '""', '"0"']);
+  const exportRequests = requests.filter(url => url.searchParams.get('limit') === '200');
+  expect(exportRequests.map(url => url.searchParams.get('offset'))).toEqual(['0', '200']);
+  expect(exportRequests.every(url => url.searchParams.get('period') === '60d' && url.searchParams.get('q') === 'CSV sale fixture')).toBeTruthy();
+});
 test('Reports rollups show honest empty states without invented values', async ({ page }) => {
   for (const path of ['by-tier', 'by-set', 'aging']) {
     await page.route(API + '/api/v1/reports/' + path, route => route.fulfill({ contentType: 'application/json', body: '[]' }));
@@ -92,6 +293,8 @@ test('Reports filters requests, preserves unknown and zero, and retries failed r
   const urls: URL[] = [];
   await page.route(API + '/api/v1/reports/by-*', route => {
     const url = new URL(route.request().url());
+    // Dashboard now reads game performance too; inject this failure in Reports only.
+    if (new URL(page.url()).pathname !== '/reports') return route.fulfill({ json: [] });
     if (url.pathname.endsWith('by-month')) return route.fulfill({ contentType: 'application/json', body: '[]' });
     urls.push(url);
     if (!failed) {

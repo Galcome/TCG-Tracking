@@ -5,6 +5,7 @@ import { View } from 'react-native'
 
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
 import { PeriodSelector } from '../../components/period-selector'
+import { CsvButton } from '../../components/csv-button'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
 import { RecordSaleDialog } from '../../components/sale-form'
 import { useApi } from '../../context/AppContext'
@@ -15,6 +16,7 @@ import {
 } from '../../lib/api'
 import { usePeriodPreference } from '../../lib/period-preference'
 import { money } from '../../lib/format'
+import { collectPages, salesCsv } from '../../lib/csv'
 
 const UNSPECIFIED = 'Unspecified'
 const PAGE_SIZE = 50
@@ -138,6 +140,10 @@ export default function Sales({ onRecordSale }: SalesProps = {}) {
     <Page title="Sales">
       <Row>
         {onRecordSale ? <Button label="Record sale" onPress={onRecordSale} /> : <Button label="Record sale" onPress={() => setRecording(true)} />}
+        <CsvButton label="Export sales CSV" disabled={!hydrated || sales.isFetching || Boolean(sales.error) || searchInput.trim() !== search}
+          create={async () => salesCsv(await collectPages((pageOffset, limit) => api.sales({ period,
+            q: search || undefined, marketplace: marketplace || undefined, sold_by_member_id: seller || undefined,
+            offset: pageOffset, limit })), memberNames)} />
         <PeriodSelector
           value={period}
           onChange={(value) => {
