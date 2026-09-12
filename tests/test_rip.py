@@ -168,6 +168,21 @@ def test_hit_quantity_weights_cost_but_keeps_a_per_unit_value(client, make_produ
     assert snapshot.value_cents == 1000
 
 
+def test_fifo_source_cost_comes_from_the_lot_consumed_not_the_average(
+    client, make_product
+):
+    box = make_product("Mixed Lot Rip Box")
+    hit = make_product("Mixed Lot Rip Hit")
+    buy(client, box["id"], 1, "10.00")
+    buy(client, box["id"], 1, "100.00")
+
+    response = rip(client, box["id"], [{"product_id": hit["id"], "value": "50.00"}])
+
+    assert response.status_code == 201, response.text
+    assert response.json()["source_cost"] == "10.00"
+    assert response.json()["outputs"][0]["cost"] == "10.00"
+
+
 # ---------------------------------------------------------------------------- bulk
 
 
@@ -378,6 +393,7 @@ def test_a_ripped_box_of_unknown_cost_writes_nothing_off(client, make_product, d
 
     assert response.json()["source_cost"] is None
     assert response.json()["bulk_cost"] == "0.00"
+    assert response.json()["outputs"][0]["cost"] is None
     assert db.scalar(select(func.count()).select_from(PriceSnapshot)) >= 1
 
 

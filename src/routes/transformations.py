@@ -26,8 +26,7 @@ from src.models.transformation import (
 )
 from src.schemas.ledger import VoidRequest
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
-from src.services import inventory, transformations
-from src.services.money import proportional_split
+from src.services import transformations
 
 router = APIRouter()
 
@@ -255,39 +254,17 @@ class RipRequest(BaseModel):
         return self
 
 
-def _hit_costs(db: Session, payload: RipRequest) -> list[int]:
-    """Each hit's share of the box, in proportion to what it is thought to be worth.
+def _hit_costs(payload: RipRequest) -> list[transformations.RipCostSpec]:
+    """Pass rip estimates and explicit decisions to the FIFO-backed service.
 
-    Anything given an explicit `cost` keeps it and the rest share what is left. Hits with
-    no value at all fall back to an even split: a box has to land somewhere, and refusing
-    to record a rip because nobody put a number on it would be the wrong trade.
+    This deliberately does not inspect inventory or derive a cost. The source may span
+    multiple lots, so only the locked consuming adjustment can provide the authoritative
+    cost after the transformation starts.
     """
-    if not payload.hits:
-        return []
-
-    stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
-    unit_cost = stats.average_unit_cost_cents if stats else None
-    total = (unit_cost or 0) * payload.quantity
-
-    explicit = [hit.cost for hit in payload.hits]
-    if all(value is not None for value in explicit):
-        return [value or 0 for value in explicit]
-
-    remaining = max(total - sum(value for value in explicit if value is not None), 0)
-    open_rows = [index for index, value in enumerate(explicit) if value is None]
-    # A hit's value is a per-unit estimate (and is stored that way below), while the
-    # allocated transformation cost belongs to the whole output row.  Account for
-    # quantity here so two $10 copies carry the same weight as one $20 copy.
-    weights = [payload.hits[index].value * payload.hits[index].quantity for index in open_rows]
-    if not any(weights):
-        weights = [1] * len(open_rows)
-
-    shared = proportional_split(weights, remaining)
-
-    costs = [value or 0 for value in explicit]
-    for index, share in zip(open_rows, shared):
-        costs[index] = share
-    return costs
+    return [
+        transformations.RipCostSpec(quantity=hit.quantity, value=hit.value, cost=hit.cost)
+        for hit in payload.hits
+    ]
 
 
 @router.post("/rip", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
@@ -342,7 +319,7 @@ def rip_open(
                 detail="A box cannot be a hit out of itself",
             )
 
-    costs = _hit_costs(db, payload)
+    rip_policy = _hit_costs(payload)
 
     record = transformations.transform(
         db,
@@ -356,7 +333,7 @@ def rip_open(
             )
             for hit in payload.hits
         ],
-        costs=costs,
+        rip_policy=rip_policy,
         occurred_on=payload.occurred_on,
         member_id=member.id,
         notes=payload.notes,
