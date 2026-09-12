@@ -476,5 +476,8 @@ calculation was introduced. React checklist informed the shared component/query 
 
 TypeScript, ESLint and 86 unit tests passed. All 29 browser tests passed, including exact
 large monthly spending, zero revenue, negative one-cent profit and 390/768/1536-width checks.
-Android and iOS Hermes exports passed again. Independent targeted review is pending.
+Android and iOS Hermes exports passed again. Independent targeted review found no concrete
+P1/P2 issues and confirmed per-UID query-cache isolation, exact decimal formatting and
+period-independent fetching. Runtime profile metadata remains unavailable; broader rewrite
+and native acceptance are not implied by this bounded review.
 The authoritative rip preview design is recorded in [its decision record](2026-09-12-rip-fifo-preview.md).
