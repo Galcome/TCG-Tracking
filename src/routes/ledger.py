@@ -414,6 +414,7 @@ def create_sale(
     db: Session = Depends(db_session),
 ) -> Sale:
     _require_product(db, payload.product_id)
+    ledger.lock_products(db, [payload.product_id])
     _guard_oversell(db, payload.product_id, payload.quantity, payload.allow_oversell)
 
     sale = Sale(
@@ -641,6 +642,7 @@ def create_move(
     is unaffected by anything here.
     """
     _require_product(db, payload.product_id)
+    ledger.lock_products(db, [payload.product_id])
 
     stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
     available = stats.by_bucket.get(payload.from_bucket, 0) if stats else 0

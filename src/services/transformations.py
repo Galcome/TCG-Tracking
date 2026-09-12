@@ -25,6 +25,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -155,6 +156,13 @@ def transform(
     A source whose cost is genuinely unknown produces outputs whose cost is unknown too.
     Spreading a zero would say the boxes were free, which is a different claim.
     """
+    ledger.lock_products(db, [source_product_id, *(output.product_id for output in outputs)])
+    available = available_in_bucket(db, source_product_id, source_bucket)
+    if source_quantity > available:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{source_bucket} holds {available}, so {source_quantity} cannot be transformed",
+        )
     record = Transformation(
         kind=kind,
         source_product_id=source_product_id,
@@ -282,6 +290,12 @@ def void(
     The rows stay. A voided transformation is the explanation for stock reappearing, and
     the audit trail is what makes the mistake recoverable rather than just gone.
     """
+    output_ids = db.scalars(
+        select(TransformationOutput.product_id).where(
+            TransformationOutput.transformation_id == record.id
+        )
+    ).all()
+    ledger.lock_products(db, [record.source_product_id, *output_ids])
     record.status = STATUS_VOIDED
     record.void_reason = reason
 
@@ -294,9 +308,7 @@ def void(
             consuming.void_reason = reason
 
     for output in db.scalars(
-        select(TransformationOutput).where(
-            TransformationOutput.transformation_id == record.id
-        )
+        select(TransformationOutput).where(TransformationOutput.transformation_id == record.id)
     ):
         if output.purchase_id is None:  # pragma: no cover - always set on create
             continue

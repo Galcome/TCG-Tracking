@@ -11,6 +11,7 @@ the database, handing them over, and writing the answer back.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from typing import Any, Literal
 
 from sqlalchemy import delete, select
@@ -29,9 +30,7 @@ from src.models.ledger import (
 from src.models.product import Product
 from src.services.costing import Event, allocate
 
-EntityKind = Literal[
-    "purchase", "sale", "adjustment", "move", "money_movement", "transformation"
-]
+EntityKind = Literal["purchase", "sale", "adjustment", "move", "money_movement", "transformation"]
 
 #: Which table an event id came from, so allocations land in the right FK column.
 _SourceKind = Literal["purchase", "sale", "adjustment_supply", "adjustment_consumer"]
@@ -93,13 +92,23 @@ def load_events(
     return events, sources
 
 
+def lock_products(db: Session, product_ids: Iterable[uuid.UUID]) -> None:
+    """Serialize related stock operations in one consistent UUID order."""
+    db.execute(
+        select(Product.id)
+        .where(Product.id.in_(set(product_ids)))
+        .order_by(Product.id)
+        .with_for_update()
+    )
+
+
 def recompute_product(db: Session, product_id: uuid.UUID) -> None:
     """Rebuild this product's cost allocations from its complete history.
 
     Takes a row lock on the product first so two concurrent writes cannot interleave and
     produce allocations from two different views of history.
     """
-    db.execute(select(Product.id).where(Product.id == product_id).with_for_update())
+    lock_products(db, [product_id])
 
     events, sources = load_events(db, product_id)
     result = allocate(events)

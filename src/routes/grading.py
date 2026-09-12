@@ -14,7 +14,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
@@ -25,7 +25,7 @@ from src.models.product import Product
 from src.models.transformation import TRANSFORM_GRADE
 from src.schemas.ledger import VoidRequest
 from src.schemas.money import MoneyIn, MoneyOut
-from src.services import transformations
+from src.services import ledger, transformations
 
 router = APIRouter()
 
@@ -129,7 +129,19 @@ def submit(
     if db.get(Product, payload.product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    ledger.lock_products(db, [payload.product_id])
     available = transformations.available_in_bucket(db, payload.product_id, payload.bucket)
+    outstanding = int(
+        db.scalar(
+            select(func.coalesce(func.sum(GradingSubmission.quantity), 0)).where(
+                GradingSubmission.product_id == payload.product_id,
+                GradingSubmission.bucket == payload.bucket,
+                GradingSubmission.status == GRADING_OUT,
+            )
+        )
+        or 0
+    )
+    available = max(available - outstanding, 0)
     if payload.quantity > available:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -190,9 +202,12 @@ def take_back(
     """
     record = db.get(GradingSubmission, submission_id)
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    ledger.lock_products(db, [record.product_id, payload.graded_product_id])
+    db.execute(
+        select(GradingSubmission.id).where(GradingSubmission.id == record.id).with_for_update()
+    )
+    db.refresh(record)
     if record.status != GRADING_OUT:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -206,6 +221,18 @@ def take_back(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The graded card has to be a different product from the raw one",
+        )
+
+    if payload.returned_on < record.sent_on:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The return date cannot be before the send date",
+        )
+    available = transformations.available_in_bucket(db, record.product_id, record.bucket)
+    if record.quantity > available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{record.bucket} holds {available}, so {record.quantity} cannot be returned",
         )
 
     fees = record.fees_cents + payload.extra_fees
@@ -253,9 +280,12 @@ def void_submission(
     """Cancel a submission that never should have existed. Nothing moved, so nothing undoes."""
     record = db.get(GradingSubmission, submission_id)
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    ledger.lock_products(db, [record.product_id])
+    db.execute(
+        select(GradingSubmission.id).where(GradingSubmission.id == record.id).with_for_update()
+    )
+    db.refresh(record)
     if record.status != GRADING_OUT:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
