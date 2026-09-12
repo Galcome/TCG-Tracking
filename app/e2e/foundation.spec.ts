@@ -670,6 +670,54 @@ test('grading can cancel an unreturned submission and reuse an existing graded p
   expect(output.stats.remaining_cost).toBe('10.29');
   expect(output.stats.quantity_on_hand).toBe(1);
 });
+test('rip previews unsaved hits using FIFO and ignores late allocations without writing stock', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Preview FIFO box', game_id: games[0].id,
+    product_type_id: types.find((t: { slug: string }) => t.slug === 'booster-box').id,
+    initial_purchase: { quantity: 1, amount: '10.01', purchase_date: '2025-01-01', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const source = await created.json();
+  const bought = await request.post(API + '/api/v1/purchases', { data: {
+    product_id: source.id, quantity: 1, amount: '100.00', purchase_date: '2025-01-02', funding: [],
+  } });
+  expect(bought.ok()).toBeTruthy();
+  let childCreates = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === API + '/api/v1/products') childCreates++; });
+  let releaseOld!: () => void;
+  const oldGate = new Promise<void>(resolve => { releaseOld = resolve; });
+  await page.route(API + '/api/v1/transformations/rip/preview', async route => {
+    if (route.request().postDataJSON().hits[0]?.cost !== '3.00') return route.continue();
+    const response = await route.fetch();
+    await oldGate;
+    await route.fulfill({ response });
+  });
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  await page.getByRole('button', { name: 'Rip open', exact: true }).click();
+  await page.getByLabel('Hit 1 name', { exact: true }).fill('Unsaved preview hit');
+  await expect(page.getByText('Allocated cost: $10.01', { exact: true })).toBeVisible();
+  const oldRequest = page.waitForRequest(r => r.url() === API + '/api/v1/transformations/rip/preview'
+    && r.postDataJSON().hits[0]?.cost === '3.00');
+  await page.getByLabel('Hit 1 cost override', { exact: true }).fill('3.00');
+  await oldRequest;
+  await page.getByLabel('Hit 1 cost override', { exact: true }).fill('4.00');
+  await expect(page.getByText('Allocated cost: $4.00', { exact: true })).toBeVisible();
+  const oldResponse = page.waitForResponse(r => r.url() === API + '/api/v1/transformations/rip/preview'
+    && r.request().postDataJSON().hits[0]?.cost === '3.00');
+  releaseOld();
+  await oldResponse;
+  await expect(page.getByText('Allocated cost: $4.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Allocated cost: $3.00', { exact: true })).toHaveCount(0);
+  expect(childCreates).toBe(0);
+  const unchanged = await (await request.get(API + '/api/v1/products/' + source.id)).json();
+  expect(unchanged.stats.quantity_on_hand).toBe(2);
+  expect(unchanged.stats.remaining_cost).toBe('110.01');
+  await page.getByRole('dialog', { name: 'Rip open — Preview FIFO box', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
+});
+
 test('manual rip retains confirmed identity after a rejected write and never invents profit', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
