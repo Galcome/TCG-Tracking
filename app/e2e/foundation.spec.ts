@@ -173,6 +173,46 @@ test('pricing requires explicit printing confirmation and keeps mapping writes o
   expect(latest.stats.quantity_on_hand).toBe(1);
 });
 
+test('catalog discovery fills an unconfirmed draft and never changes stock or cost', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const created = await request.post(API + '/api/v1/products', { data: {
+    name: 'Discovery raw card', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] },
+  } });
+  expect(created.ok()).toBeTruthy();
+  const product = await created.json();
+  await page.route(API + '/api/v1/pricing/catalog/categories', route => route.fulfill({ json: [
+    { category_id: 3, name: 'Pokemon', display_name: 'Pokémon' },
+  ] }));
+  await page.route(API + '/api/v1/pricing/catalog/groups?*', route => route.fulfill({ json: [
+    { group_id: 123, category_id: 3, name: 'Discovery set', abbreviation: null, published_on: null },
+  ] }));
+  await page.route(API + '/api/v1/pricing/catalog/products?*', route => route.fulfill({ json: [
+    { product_id: 456, category_id: 3, group_id: 123, name: 'Discovery provider card', clean_name: null,
+      image_url: null, url: null, subtypes: ['Reverse Holofoil', 'Normal'] },
+  ] }));
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  const controls = page.getByRole('group', { name: 'Pricing controls', exact: true });
+  await controls.getByRole('button', { name: 'Load free catalog options', exact: true }).click();
+  await controls.getByRole('button', { name: 'Catalog category: Choose a category', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Catalog category', exact: true }).getByRole('button', { name: 'Pokémon (3)', exact: true }).click();
+  await controls.getByRole('button', { name: 'Catalog group: Choose a group', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Catalog group', exact: true }).getByRole('button', { name: 'Discovery set (123)', exact: true }).click();
+  await controls.getByLabel('Search catalog products', { exact: true }).fill('Discovery');
+  await controls.getByRole('button', { name: 'Find products', exact: true }).click();
+  await controls.getByRole('button', { name: 'Use this listing', exact: true }).click();
+  await expect(controls.getByLabel('Product ID', { exact: true })).toHaveValue('456');
+  await expect(controls.getByLabel('Subtype / printing', { exact: true })).toHaveValue('Reverse Holofoil');
+  const mappings = await (await request.get(API + '/api/v1/pricing/mappings?product_id=' + product.id)).json();
+  expect(mappings).toEqual([]);
+  const latest = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(latest.stats.remaining_cost).toBe('10.01');
+  expect(latest.stats.quantity_on_hand).toBe(1);
+});
+
 test('dashboard separates period trading from lifetime cash and preserves exact cents', async ({ page }) => {
   await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
     month: '2026-09-01', spent: '90071992547409.92', revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
