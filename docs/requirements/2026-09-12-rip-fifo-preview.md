@@ -1,6 +1,7 @@
 # Rip FIFO allocation and preview
 
-Status: approved rewrite follow-on; allocation integrity fix in progress, preview not implemented.
+Status: allocation integrity and authenticated preview implemented locally; final regression
+and native release acceptance remain open.
 Production remains the existing Vite website. No deployment or cutover is authorized here.
 
 ## Integrity prerequisite
@@ -57,3 +58,25 @@ stock before Save in browser tests. Native device acceptance remains a separate 
 
 Architecture was delegated read-only to the existing architecture agent with bounded context;
 implementation ownership remains isolated from the grading concurrency follow-up.
+
+## Implementation checkpoint
+
+The shared policy is integrated in `82f80d2`, backend preview in `30ec4b2`, and Expo preview
+in `e3f07dd`. Explicit overrides exceeding known consumed cost return 422. Unknown source
+keeps every output and bulk unknown, even when an override is entered. The API returns
+nullable unknown bulk; the existing persistence column is unchanged and source-cost null
+remains available to identify that case. No schema migration was introduced.
+
+`3239296` additionally preserves unknown inherited basis when FIFO loads a marked derived
+purchase whose lineage share is null. Non-null purchase accounting columns no longer cause
+that placeholder zero to become fabricated downstream sale profit. Ordinary zero-cost
+purchases remain known zero. Actual crack/rip-to-sale tests cover unknown basis/profit.
+
+Backend-only stacks are retained separately: `fix/rip-fifo-integrity` depends on the grading
+transaction-lock foundation, and `feature/rip-allocation-preview` adds only the backend
+preview. These local branches do not carry the universal frontend or change Hosting.
+
+Focused policy/rip/preview tests passed (52), plus two downstream unknown-cost sale tests.
+Independent bounded backend and frontend reviews found no remaining P1/P2 issues. Runtime
+profile metadata was unavailable. Expo TypeScript/ESLint and 89 unit tests passed; Android/iOS
+Hermes exports passed. Final browser/API coverage evidence belongs in the parity tracker.

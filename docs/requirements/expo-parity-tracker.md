@@ -21,11 +21,11 @@ foundation owner until its interface is stable.
 | Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows, CSV and split proceeds verified; device acceptance pending |
 | Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Partial: browser account/movement and split funding/proceeds verified; device acceptance pending |
 | Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
-| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual and browser photo suggestions verified; native photos and allocation preview pending |
-| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void and optional valuations verified; concurrency review follow-ups in progress |
-| Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: controls/unit guards and real mapping writes verified; expanded discovery/device acceptance pending |
+| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual/photo and authoritative allocation preview implemented; expanded browser run and native acceptance pending |
+| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: browser operations/valuations and seven PostgreSQL races verified; native acceptance pending |
+| Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: mapping/discovery no-write browser checks verified; native acceptance pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
-| Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
+| Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Partial: browser adapters and native exports verified; operating-system/device acceptance pending |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
 
 ## Acceptance evidence
@@ -43,8 +43,8 @@ foundation owner until its interface is stable.
 
 Latest checkpoint: isolated `app/` includes inventory/stock, Sales/Money with splits,
 transformations, grading/Vault valuations, browser photo suggestions, pricing, reports/CSV,
-shared periods and compact navigation. Next: independent concurrency review fixes,
-authoritative rip allocation preview, Dashboard trend and native release preparation.
+shared periods, compact navigation, monthly trend and authoritative rip allocation preview.
+Next: final guard coverage/browser regression and native release preparation.
 Keep backend integrity fixes isolated and release-blocking. Do not claim device authentication or
 workflow acceptance based only on bundle compilation. Full parity is not yet achieved.
 
