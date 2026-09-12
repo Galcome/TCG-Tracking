@@ -1,17 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui';
+import { Card, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui';
+import { PeriodSelector } from '../../components/period-selector';
 import { useApi } from '../../context/AppContext';
-import { type Period } from '../../lib/api';
+import { usePeriodPreference } from '../../lib/period-preference';
 import { money, percent } from '../../lib/format';
 export default function Dashboard() {
   const api = useApi();
-  const [period, setPeriod] = useState<Period>('mtd');
-  const dashboard = useQuery({ queryKey: ['dashboard', period], queryFn: () => api.dashboard(period) });
+  const { period, setPeriod, hydrated } = usePeriodPreference();
+  const dashboard = useQuery({ queryKey: ['dashboard', period], queryFn: () => api.dashboard(period), enabled: hydrated });
   const data = dashboard.data;
   return <Page title="Dashboard">
-    <Choice label="Reporting period" value={period} onChange={v => setPeriod(v as Period)}
-      options={[{ value: 'all', label: 'All time' }, { value: 'ytd', label: 'This year' }, { value: 'mtd', label: 'This month' }, { value: '30d', label: '30 days' }]} />
+    <PeriodSelector value={period} onChange={setPeriod} />
     <ErrorNotice error={dashboard.error} retry={() => { void dashboard.refetch(); }} />
     {dashboard.isPending && <Loading />}
     {data && <><Row>

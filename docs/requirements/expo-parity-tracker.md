@@ -213,3 +213,34 @@ write recovery, market/manual separation, local search, report retry, and overfl
 Vault cards reflow without horizontal overflow; compact-navigation polish remains part of the
 shared shell work rather than this report slice. No production data, Vite source, backend,
 authentication or deployment setup changed.
+
+## 2026-09-12 Shared reporting-period checkpoint
+
+Cherry-picked the approved configurable-period work from PR #74 locally as `f386948`;
+the PR itself remains unmerged. The API and legacy web client support All/YTD/MTD and
+30/60/90 days, with a 60-day default. Focused backend reporting/sales validation passed
+93 tests. Legacy web tracked-source ESLint, typecheck and build passed; the broad lint
+command also scanned unrelated untracked Capacitor-generated files, which were preserved.
+
+Expo Dashboard and Sales now share an AsyncStorage-backed preference with the same six
+choices. Queries wait for hydration. Invalid saved values fall back safely, storage failures
+retain the in-session choice, and serialized writes wait for invalid-value cleanup so rapid
+changes cannot leave an older selection on disk. This is a device/browser-local preference,
+not an account-synchronized setting.
+
+Validation: TypeScript, ESLint and all 61 unit tests passed. All 16 Expo browser tests passed
+against the disposable loopback database, including default 60 days, shared navigation state
+and reload persistence. The React checklist was applied. No installed-device acceptance or
+independent review is claimed for this slice.
+
+Token-conscious delegation used fresh bounded implementation contexts. Both period and
+Reports agents then hit the account usage limit (reported reset September 15, 07:14).
+The partial period implementation was integrated and its hydration race/test timing fixed
+locally; no replacement agents were launched into the same limit. Reports produced no screen,
+and its unfinished navigation link was removed. Resume with a bounded Reports implementation
+and consolidated independent review when delegation is available.
+
+Reports/CSV, pricing controls, photo adapters, remaining grading valuation prompts, shared
+shell/dashboard polish and native release gates remain open. The transactional grading API
+integrity gate above remains release-blocking. No push, deployment, cutover or production data
+changes occurred; the existing website stays on its current deployed implementation.

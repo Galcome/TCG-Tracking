@@ -4,23 +4,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { View } from 'react-native'
 
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
+import { PeriodSelector } from '../../components/period-selector'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
 import { RecordSaleDialog } from '../../components/sale-form'
 import { useApi } from '../../context/AppContext'
 import {
   MARKETPLACES,
   saleAsTransaction,
-  type Period,
   type SaleRow,
 } from '../../lib/api'
+import { usePeriodPreference } from '../../lib/period-preference'
 import { money } from '../../lib/format'
-
-const PERIODS: { value: Period; label: string }[] = [
-  { value: 'all', label: 'All time' },
-  { value: 'ytd', label: 'This year' },
-  { value: 'mtd', label: 'This month' },
-  { value: '30d', label: '30 days' },
-]
 
 const UNSPECIFIED = 'Unspecified'
 const PAGE_SIZE = 50
@@ -94,7 +88,7 @@ function SaleRowCard({
 
 export default function Sales({ onRecordSale }: SalesProps = {}) {
   const api = useApi()
-  const [period, setPeriod] = useState<Period>('all')
+  const { period, setPeriod, hydrated } = usePeriodPreference()
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [marketplace, setMarketplace] = useState('')
@@ -127,6 +121,7 @@ export default function Sales({ onRecordSale }: SalesProps = {}) {
       limit: PAGE_SIZE,
       offset,
     }),
+    enabled: hydrated,
   })
 
   const rows = sales.data?.items ?? []
@@ -143,12 +138,10 @@ export default function Sales({ onRecordSale }: SalesProps = {}) {
     <Page title="Sales">
       <Row>
         {onRecordSale ? <Button label="Record sale" onPress={onRecordSale} /> : <Button label="Record sale" onPress={() => setRecording(true)} />}
-        <Choice
-          label="Period"
+        <PeriodSelector
           value={period}
-          options={PERIODS}
           onChange={(value) => {
-            setPeriod(value as Period)
+            setPeriod(value)
             setOffset(0)
           }}
         />

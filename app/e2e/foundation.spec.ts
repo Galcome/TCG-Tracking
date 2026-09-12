@@ -1,4 +1,20 @@
 import { test, expect, type Page } from '@playwright/test';
+test('reporting period defaults to 60 days and stays shared across navigation and reload', async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByRole('button', { name: 'Reporting period: 60 days', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reporting period: 60 days', exact: true }).click();
+  await page.getByRole('button', { name: '90 days', exact: true }).click();
+  await page.getByRole('button', { name: 'Sales', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Reporting period: 90 days', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reporting period: 90 days', exact: true }).click();
+  await page.getByRole('button', { name: '30 days', exact: true }).click();
+  await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
+  // The persistence assertion waits for AsyncStorage's asynchronous write before reload.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('tcg-tracking:period'))).toBe('30d');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
+});
 test('Vault keeps market quotes separate from unknown manual value and recovers from read errors', async ({ page }) => {
   const name = 'Vault quote separation fixture';
   let reads = 0;
