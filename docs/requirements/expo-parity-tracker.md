@@ -244,3 +244,39 @@ Reports/CSV, pricing controls, photo adapters, remaining grading valuation promp
 shell/dashboard polish and native release gates remain open. The transactional grading API
 integrity gate above remains release-blocking. No push, deployment, cutover or production data
 changes occurred; the existing website stays on its current deployed implementation.
+
+## 2026-09-12 Bounded Reports checkpoint
+
+Added the Expo Reports route and navigation with grouped performance by game, product,
+type, set, channel and seller; game/set/type filters; profit/ROI/profit-per-day/hold-time
+sorting; stock-age bands; return-versus-time rankings; and month summaries. Grouped requests
+use the shared hydrated period preference. Monthly trends deliberately use the independent
+all-time endpoint and are labeled as independent of the selected period. No combined totals
+across realized profit, unrealized holdings or lineage are invented.
+
+Integration and independent review drove corrections for unknown-last sorting and exact CAD
+display. Reports uses a string-only money formatter so even `90071992547409.91` retains its
+last cent; null stays unknown and zero stays explicit. Other screens' pre-existing shared
+`Number`-based formatter remains a separately tracked precision follow-on, not fixed here.
+Financial sorting compares monetary decimal strings without floating-point conversion.
+
+Validation: 67 unit tests, TypeScript and ESLint passed. All 17 Expo browser tests passed,
+including filtered request propagation/clearing, read rejection and retry, exact large-value
+rendering, unknown/zero sorting, the period shared across Dashboard/Sales/Reports and reload,
+and overflow checks at 390/768/1536 pixels. Screenshot inspection confirmed responsive report
+controls. Terra independently re-reviewed the precision correction with no remaining P1/P2
+in this bounded slice; the React checklist was applied.
+Android and iOS Hermes JavaScript exports passed in separate output directories; these are
+not APK/device acceptance or evidence of native sign-in persistence.
+
+The named coder profile was unavailable; explicit Luna/max with fresh bounded context was
+used instead, followed by Terra review. An initial browser run was stopped after an overlapping
+plain export replaced the test-configured `app/dist` and disabled sign-in. The final build/run
+was serialized and passed. Future exports must use distinct output directories or coordinate
+with browser runs; do not treat an overwritten test bundle as an application-auth regression.
+
+Tier/set-holding/aging/attention/lineage reports, CSV/platform sharing, pricing controls,
+photo adapters, remaining grading valuation prompts, compact shell/dashboard polish and
+native release acceptance remain open. The transactional grading API integrity gate remains
+release-blocking. No backend, legacy Vite source, auth, deployment or production data changed.
+No push or production cutover occurred.

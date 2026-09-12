@@ -1,4 +1,62 @@
 import { test, expect, type Page } from '@playwright/test';
+test('Reports filters requests, preserves unknown and zero, and retries failed reads', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const game = games[0];
+  const type = types.find((item: { slug: string }) => item.slug === 'single');
+  const setId = '22222222-2222-4222-8222-222222222222';
+  await page.route(API + '/api/v1/sets?*', route => route.fulfill({ contentType: 'application/json',
+    body: JSON.stringify({ items: [{ id: setId, game_id: game.id, name: 'Report fixture set', released_on: null, uses: 0 }], did_you_mean: null }) }));
+  const base = { revenue: '0.00', cost_of_sales: '0.00', inventory_at_cost: '10.01',
+    units_in_stock: 1, sale_count: 1, sales_missing_cost: 0, units_sold: 1, units_purchased: 2,
+    units_by_age: { d0_30: 0, d31_90: 1, d91_180: 0, d180_plus: 0 } };
+  let failed = false;
+  const urls: URL[] = [];
+  await page.route(API + '/api/v1/reports/by-*', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('by-month')) return route.fulfill({ contentType: 'application/json', body: '[]' });
+    urls.push(url);
+    if (!failed) {
+      failed = true;
+      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ detail: 'Report read test rejection' }) });
+    }
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      { ...base, key: 'unknown', label: 'Unknown report fixture', realized_profit: '90071992547409.91', roi: null, avg_days_held: null, sell_through: null, profit_per_day: null },
+      { ...base, key: 'zero', label: 'Zero report fixture', realized_profit: '0.00', roi: 0, avg_days_held: 0, sell_through: 0, profit_per_day: '0.00' },
+    ]) });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Reports', exact: true }).click();
+  await expect(page.getByText('Report read test rejection', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  const unknown = page.getByRole('group', { name: 'Unknown report fixture', exact: true });
+  const zero = page.getByRole('group', { name: 'Zero report fixture', exact: true });
+  await expect(unknown.getByText('Unknown', { exact: true })).toHaveCount(4);
+  await expect(unknown.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(zero.getByText('0d', { exact: true })).toBeVisible();
+  await expect(zero.getByText('0.0%', { exact: true })).toHaveCount(2);
+  await expect(zero.getByText('$0.00', { exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Filter by game: All games', exact: true }).click();
+  await page.getByRole('button', { name: game.name, exact: true }).click();
+  await page.getByRole('button', { name: 'Filter by set: All sets', exact: true }).click();
+  await page.getByRole('button', { name: 'Report fixture set', exact: true }).click();
+  await page.getByRole('button', { name: 'Filter by product type: All types', exact: true }).click();
+  await page.getByRole('button', { name: type.name, exact: true }).click();
+  await page.getByRole('button', { name: 'Channel', exact: true }).click();
+  await expect.poll(() => urls.some(url => url.pathname.endsWith('by-marketplace') &&
+    url.searchParams.get('game_id') === game.id && url.searchParams.get('set_id') === setId &&
+    url.searchParams.get('product_type_id') === type.id && url.searchParams.get('period') === '60d')).toBeTruthy();
+  await page.getByRole('button', { name: 'Days held', exact: true }).click();
+  await expect(page.getByRole('group').first()).toHaveAttribute('aria-label', 'Zero report fixture');
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect.poll(() => urls.some(url => url.pathname.endsWith('by-marketplace') &&
+    !url.searchParams.has('game_id') && !url.searchParams.has('set_id') && !url.searchParams.has('product_type_id'))).toBeTruthy();
+  for (const width of [390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.screenshot({ path: 'output/playwright/expo-reports-' + width + '.png', fullPage: true });
+  }
+});
 test('reporting period defaults to 60 days and stays shared across navigation and reload', async ({ page }) => {
   await signIn(page);
   await expect(page.getByRole('button', { name: 'Reporting period: 60 days', exact: true })).toBeVisible();
@@ -8,6 +66,8 @@ test('reporting period defaults to 60 days and stays shared across navigation an
   await expect(page.getByRole('button', { name: 'Reporting period: 90 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Reporting period: 90 days', exact: true }).click();
   await page.getByRole('button', { name: '30 days', exact: true }).click();
+  await page.getByRole('button', { name: 'Reports', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
   // The persistence assertion waits for AsyncStorage's asynchronous write before reload.
