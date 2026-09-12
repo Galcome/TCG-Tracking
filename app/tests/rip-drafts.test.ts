@@ -4,14 +4,18 @@ import test from 'node:test'
 import type { ProductDetail, Taxonomy } from '../lib/api'
 import {
   buildRipPayload,
+  buildRipPreviewPayload,
   emptyRipConfirmationKey,
   firstRipValidationError,
+  isRipPreviewCurrent,
   ripCandidateIdentity,
   ripDate,
   ripHitProductType,
   ripIdentityKey,
   ripInteger,
   ripMoney,
+  ripPreviewKey,
+  validateRipPreviewDraft,
   validateRipDraft,
   type RipDraft,
   type RipHitDraft,
@@ -152,6 +156,67 @@ test('payload preserves decimal strings and sends no client cost calculation', (
 
   const blankValue = buildRipPayload(draft({ hits: [hit({ value: '' })] }), product)
   assert.equal(blankValue?.hits[0]?.value, '0')
+
+  const explicitCost = buildRipPayload(draft({ hits: [hit({ cost: '0.00' })] }), product)
+  assert.equal(explicitCost?.hits[0]?.cost, '0.00')
+})
+
+test('preview payload allows unresolved identities and omits blank cost overrides', () => {
+  const unresolved = buildRipPreviewPayload(draft({ hits: [hit({
+    productId: '',
+    choice: 'create',
+    selectedProductName: '',
+    name: 'Unresolved hit',
+    value: '0012.50',
+    cost: '',
+  })] }))
+  assert.deepEqual(unresolved, {
+    product_id: 'box-1',
+    quantity: 1,
+    from_bucket: 'inventory',
+    occurred_on: '2026-09-09',
+    hits: [{ key: '1', quantity: 1, value: '0012.50' }],
+  })
+
+  const knownZero = buildRipPreviewPayload(draft({ hits: [hit({ cost: '0.00', value: '0.00' })] }))
+  assert.deepEqual(knownZero?.hits[0], { key: '1', quantity: 1, value: '0.00', cost: '0.00' })
+})
+
+test('preview validation checks money and quantities but not identity decisions', () => {
+  const unresolved = draft({ hits: [hit({
+    productId: '',
+    choice: 'undecided',
+    selectedProductName: '',
+    name: 'Unresolved hit',
+    quantity: '0',
+    value: '12.345',
+    cost: '-1.00',
+  })] })
+  const errors = validateRipPreviewDraft(unresolved)
+  assert.equal(errors['hit0.quantity'], 'Enter a whole number from 1 to 10,000.')
+  assert.equal(errors['hit0.value'], 'Use digits with up to two decimal places.')
+  assert.equal(errors['hit0.cost'], 'Use digits with up to two decimal places.')
+  assert.equal(errors['hit0.choice'], undefined)
+  assert.equal(errors['hit0.productId'], undefined)
+
+  const valid = validateRipPreviewDraft(draft({ hits: [hit({
+    productId: '',
+    choice: 'create',
+    selectedProductName: '',
+    name: 'Unresolved hit',
+    quantity: '1',
+    value: '0',
+    cost: '0',
+  })] }))
+  assert.deepEqual(valid, {})
+})
+
+test('preview identity includes every request field and guards stale responses', () => {
+  const input = buildRipPreviewPayload(draft())!
+  const changed = buildRipPreviewPayload(draft({ hits: [hit({ value: '13.50' })] }))!
+  assert.notEqual(ripPreviewKey(input), ripPreviewKey(changed))
+  assert.equal(isRipPreviewCurrent(input, input), true)
+  assert.equal(isRipPreviewCurrent(input, changed), false)
 })
 
 test('empty rip confirmation changes when source facts change and carries no money', () => {

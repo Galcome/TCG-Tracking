@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { View } from 'react-native'
 
 import { useApi } from '../context/AppContext'
+import { colors } from '../context/ThemeContext'
 import {
   BUCKET_LABELS,
   BUCKETS,
@@ -10,22 +12,28 @@ import {
   type ProductCandidate,
   type ProductDetail,
   type ReadCard,
+  type RipPreview,
 } from '../lib/api'
 import {
+  buildRipPreviewPayload,
   buildRipPayload,
   emptyRipConfirmationKey,
   filledRipHits,
   firstRipValidationError,
+  isRipPreviewCurrent,
   ripCandidateIdentity,
   ripHitProductType,
   ripIdentityKey,
+  ripPreviewKey,
+  validateRipPreviewDraft,
   validateRipDraft,
   type RipDraft,
   type RipHitChoice,
   type RipHitDraft,
+  type RipPreviewEnvelope,
   type RipValidation,
 } from '../lib/rip-drafts'
-import { todayIso } from '../lib/format'
+import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
 import { PhotoReader } from './photo-reader'
 
@@ -51,6 +59,7 @@ function emptyHit(bucket: Bucket = 'inventory'): RipHitDraft {
     selectedProductName: '',
     quantity: '1',
     value: '',
+    cost: '',
     bucket,
   }
 }
@@ -66,6 +75,66 @@ function candidateIdentitySummary(candidate: ProductCandidate): string {
     .join(' · ')
 }
 
+function PreviewMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flexGrow: 1, minWidth: 130, gap: 3 }}>
+      <Copy muted>{label}</Copy>
+      <Copy>{value}</Copy>
+    </View>
+  )
+}
+
+function RipPreviewCard({
+  preview,
+  rows,
+  loading,
+  error,
+  validation,
+  onRetry,
+}: {
+  preview: RipPreview | null
+  rows: readonly RipHitDraft[]
+  loading: boolean
+  error?: unknown
+  validation: RipValidation
+  onRetry: () => void
+}) {
+  const validationError = firstRipValidationError(validation)
+  return (
+    <Card>
+      <Copy>Estimated FIFO allocation</Copy>
+      <Copy muted>Estimated FIFO allocation. Not reserved; stock and costs are checked again when saved.</Copy>
+      {validationError ? <ErrorNotice error={new Error(validationError)} /> : null}
+      {!validationError && error ? <ErrorNotice error={error} retry={onRetry} /> : null}
+      {!validationError && loading ? <Loading /> : null}
+      {!validationError && !loading && preview ? (
+        <>
+          <Row>
+            <PreviewMetric label="Source cost" value={preview.has_unknown_cost ? 'Unknown' : money(preview.source_cost)} />
+            <PreviewMetric label="Available in bucket" value={String(preview.quantity_available)} />
+            <PreviewMetric label="Bulk write-off" value={money(preview.bulk_cost)} />
+          </Row>
+          {preview.hits.length === 0 ? <Copy muted>No tracked hits; the source cost is shown as bulk.</Copy> : (
+            <View style={{ gap: 8 }}>
+              {preview.hits.map((hit) => {
+                const draft = rows.find((row) => String(row.key) === hit.key)
+                const name = draft?.name.trim() || draft?.selectedProductName || `Hit ${hit.key}`
+                return (
+                  <View key={hit.key} style={{ borderTopWidth: 1, borderTopColor: colors.edge, paddingTop: 8 }}>
+                    <Copy>{name} · {hit.quantity} unit{hit.quantity === 1 ? '' : 's'}</Copy>
+                    <Copy muted>Allocated cost: {money(hit.cost)}</Copy>
+                  </View>
+                )
+              })}
+            </View>
+          )}
+          {preview.nonbinding ? <Copy muted>Not reserved.</Copy> : null}
+        </>
+      ) : null}
+    </Card>
+  )
+}
+
 interface HitIdentityChooserProps {
   api: Api
   row: RipHitDraft
@@ -76,6 +145,7 @@ interface HitIdentityChooserProps {
   onFieldChange: (field: IdentityField, value: string) => void
   onQuantityChange: (value: string) => void
   onValueChange: (value: string) => void
+  onCostChange: (value: string) => void
   onRemove: () => void
   canRemove: boolean
   onChoice: (choice: RipHitChoice, candidate?: ProductCandidate) => void
@@ -91,6 +161,7 @@ function HitIdentityChooser({
   onFieldChange,
   onQuantityChange,
   onValueChange,
+  onCostChange,
   onRemove,
   canRemove,
   onChoice,
@@ -138,6 +209,14 @@ function HitIdentityChooser({
           editable={!busy}
           keyboardType="decimal-pad"
           placeholder="0.00"
+        />
+        <Field
+          label={`Hit ${index + 1} cost override`}
+          value={row.cost ?? ''}
+          onChangeText={onCostChange}
+          editable={!busy}
+          keyboardType="decimal-pad"
+          placeholder="Optional"
         />
         <Field
           label={`Hit ${index + 1} quantity`}
@@ -290,6 +369,20 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
   const filled = filledRipHits(rows)
   const emptyKey = emptyRipConfirmationKey(draft)
   const emptyConfirmationShown = filled.length === 0 && emptyConfirmedKey === emptyKey
+  const previewValidation = useMemo(() => validateRipPreviewDraft(draft), [draft])
+  const previewInput = useMemo(() => buildRipPreviewPayload(draft), [draft])
+  const previewKey = previewInput ? ripPreviewKey(previewInput) : 'invalid'
+  const preview = useQuery<RipPreviewEnvelope>({
+    queryKey: ['ripPreview', previewKey],
+    enabled: previewInput !== null,
+    queryFn: async () => {
+      if (!previewInput) throw new Error('Rip preview input is incomplete.')
+      return { input: previewInput, result: await api.previewRip(previewInput) }
+    },
+  })
+  const currentPreview = previewInput && preview.data && isRipPreviewCurrent(previewInput, preview.data.input)
+    ? preview.data.result
+    : null
 
   const run = useMutation({
     mutationFn: async (submitted: RipDraft) => {
@@ -410,6 +503,11 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
     setRows((current) => current.map((row) => row.key === key ? { ...row, value } : row))
   }
 
+  function updateCost(key: number | string, cost: string) {
+    setEmptyConfirmedKey(null)
+    setRows((current) => current.map((row) => row.key === key ? { ...row, cost } : row))
+  }
+
   function updateQuantity(key: number | string, quantity: string) {
     setEmptyConfirmedKey(null)
     setRows((current) => current.map((row) => row.key === key ? { ...row, quantity } : row))
@@ -436,7 +534,7 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
     setEmptyConfirmedKey(null)
     setRows((current) => {
       const blank = current.length === 1 && current[0].choice === 'undecided' && !current[0].productId &&
-        !current[0].name && !current[0].setName && !current[0].collectorNumber && !current[0].variant && !current[0].language && !current[0].value && current[0].quantity === '1'
+        !current[0].name && !current[0].setName && !current[0].collectorNumber && !current[0].variant && !current[0].language && !current[0].value && !current[0].cost && current[0].quantity === '1'
       const bucket = current[0]?.bucket ?? 'inventory'
       return [...(blank ? [] : current), ...cards.map((card) => ({
         ...emptyHit(bucket), name: card.name, setName: card.set_name, collectorNumber: card.collector_number,
@@ -524,11 +622,20 @@ export function RipDialog({ product, onClose }: RipDialogProps) {
           onFieldChange={(field, value) => updateIdentity(row.key, field, value)}
           onQuantityChange={(value) => updateQuantity(row.key, value)}
           onValueChange={(value) => updateValue(row.key, value)}
+          onCostChange={(value) => updateCost(row.key, value)}
           onRemove={() => removeRow(row.key)}
           canRemove={rows.length > 1 && !(row.choice === 'create' && Boolean(row.productId))}
           onChoice={(choice, candidate) => updateChoice(row.key, choice, candidate)}
         />
       ))}
+      <RipPreviewCard
+        preview={currentPreview}
+        rows={filled}
+        loading={previewInput !== null && preview.isFetching && !currentPreview}
+        error={previewInput ? preview.error : undefined}
+        validation={previewValidation}
+        onRetry={() => { void preview.refetch() }}
+      />
       <Button label="Add another hit" disabled={run.isPending} onPress={addRow} />
 
       {emptyConfirmationShown ? (

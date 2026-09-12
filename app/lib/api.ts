@@ -554,6 +554,38 @@ export interface RipHit {
   cost?: string
 }
 
+/** The identity-free, read-only request used before rip hit products are resolved. */
+export interface RipPreviewHitInput {
+  key: string
+  quantity: number
+  value?: string
+  /** An explicit whole-row allocation override; omitted means server allocation. */
+  cost?: string | null
+}
+
+export interface RipPreviewInput {
+  product_id: string
+  quantity: number
+  from_bucket: Bucket
+  occurred_on: string
+  hits: RipPreviewHitInput[]
+}
+
+export interface RipPreviewHit {
+  key: string
+  quantity: number
+  cost: string | null
+}
+
+export interface RipPreview {
+  source_cost: string | null
+  has_unknown_cost: boolean
+  quantity_available: number
+  hits: RipPreviewHit[]
+  bulk_cost: string | null
+  nonbinding: true
+}
+
 export interface GradingSubmission {
   id: string
   product_id: string
@@ -1135,6 +1167,13 @@ export function createApi(request: ApiRequest) { return {
     notes?: string | null
   }) =>
     request<Transformation>('/api/v1/transformations/rip', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** Estimate FIFO allocation without creating products, ledger rows, or reservations. */
+  previewRip: (input: RipPreviewInput) =>
+    request<RipPreview>('/api/v1/transformations/rip/preview', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

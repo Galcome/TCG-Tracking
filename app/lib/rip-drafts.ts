@@ -1,4 +1,12 @@
-import { BUCKETS, type Bucket, type ProductDetail, type RipHit, type Taxonomy } from './api'
+import {
+  BUCKETS,
+  type Bucket,
+  type ProductDetail,
+  type RipHit,
+  type RipPreview,
+  type RipPreviewInput,
+  type Taxonomy,
+} from './api'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
 /** The only product types that can represent a manually recorded rip hit. */
@@ -20,6 +28,8 @@ export interface RipHitDraft {
   selectedProductTypeSlug?: string
   quantity: string
   value: string
+  /** Optional explicit whole-row cost override. Blank means the server allocates it. */
+  cost?: string
   bucket: Bucket
 }
 
@@ -47,6 +57,13 @@ export interface RipPayload {
   from_bucket: Bucket
   hits: RipHit[]
   occurred_on: string
+}
+
+export type RipPreviewPayload = RipPreviewInput
+
+export interface RipPreviewEnvelope {
+  input: RipPreviewInput
+  result: RipPreview
 }
 
 export interface RipValidationOptions {
@@ -150,8 +167,82 @@ export function ripDraftKey(draft: RipDraft): string {
       hit.quantity,
       ripIdentityKey(hit),
       hit.value,
+      hit.cost ?? '',
     ].join('\u001e')),
   ].join('\u001d')
+}
+
+/**
+ * Preview validation deliberately stops at financial inputs and filled rows. A row can
+ * still be undecided, or be a not-yet-created product, because the preview has no identity
+ * fields in its request and must be useful before reuse/create resolution.
+ */
+export function validateRipPreviewDraft(draft: Partial<RipDraft>): RipValidation {
+  const errors: RipValidation = {}
+  const quantity = ripInteger(draft.sourceQuantity ?? '', true)
+  if (quantity === null || quantity > 1_000) {
+    errors.sourceQuantity = 'Enter a whole number from 1 to 1,000.'
+  }
+  if (!draft.sourceProductId) errors.sourceProductId = 'Choose a source product.'
+  if (!isRipBucket(draft.fromBucket)) errors.fromBucket = 'Choose where the source stock is held.'
+  if (!draft.occurredOn || !ripDate(draft.occurredOn)) {
+    errors.occurredOn = 'Enter a date in YYYY-MM-DD format.'
+  }
+
+  for (const [index, hit] of filledRipHits(draft.hits ?? []).entries()) {
+    const label = `hit${index}`
+    const hitQuantity = ripInteger(hit.quantity ?? '1', true)
+    if (hitQuantity === null || hitQuantity > 10_000) {
+      errors[`${label}.quantity`] = 'Enter a whole number from 1 to 10,000.'
+    }
+    if (!ripMoney(hit.value ?? '')) {
+      errors[`${label}.value`] = 'Use digits with up to two decimal places.'
+    }
+    if (!ripMoney(hit.cost ?? '')) {
+      errors[`${label}.cost`] = 'Use digits with up to two decimal places.'
+    }
+  }
+  return errors
+}
+
+/** Build the identity-free request for the server FIFO preview. */
+export function buildRipPreviewPayload(draft: Partial<RipDraft>): RipPreviewPayload | null {
+  const errors = validateRipPreviewDraft(draft)
+  if (Object.keys(errors).length > 0) return null
+  const quantity = ripInteger(draft.sourceQuantity ?? '', true)
+  if (quantity === null || !draft.sourceProductId || !isRipBucket(draft.fromBucket)) return null
+  if (!draft.occurredOn) return null
+
+  const hits: RipPreviewPayload['hits'] = []
+  for (const hit of filledRipHits(draft.hits ?? [])) {
+    const hitQuantity = ripInteger(hit.quantity ?? '1', true)
+    if (hitQuantity === null || hitQuantity > 10_000) return null
+    hits.push({
+      key: String(hit.key),
+      quantity: hitQuantity,
+      ...(hit.value?.trim() ? { value: hit.value.trim() } : {}),
+      ...(hit.cost?.trim() ? { cost: hit.cost.trim() } : {}),
+    })
+  }
+  return {
+    product_id: draft.sourceProductId,
+    quantity,
+    from_bucket: draft.fromBucket,
+    occurred_on: draft.occurredOn,
+    hits,
+  }
+}
+
+/** Stable full-payload identity for React Query and stale-response guards. */
+export function ripPreviewKey(input: RipPreviewInput): string {
+  return JSON.stringify(input)
+}
+
+export function isRipPreviewCurrent(
+  current: RipPreviewInput | null,
+  received: RipPreviewInput | null,
+): boolean {
+  return current !== null && received !== null && ripPreviewKey(current) === ripPreviewKey(received)
 }
 
 export function validateRipDraft(
@@ -190,6 +281,7 @@ export function validateRipDraft(
       errors[`${label}.quantity`] = 'Enter a whole number from 1 to 10,000.'
     }
     if (!ripMoney(hit.value ?? '')) errors[`${label}.value`] = 'Use digits with up to two decimal places.'
+    if (!ripMoney(hit.cost ?? '')) errors[`${label}.cost`] = 'Use digits with up to two decimal places.'
     if (!isRipBucket(hit.bucket)) errors[`${label}.bucket`] = 'Choose where this hit goes.'
     if (hit.choice !== 'create' && hit.choice !== 'reuse') {
       errors[`${label}.choice`] = 'Choose Reuse or Create new product for every hit.'
@@ -230,12 +322,14 @@ export function buildRipPayload(
     if (!hit.productId) return null
     const quantity = ripInteger(hit.quantity ?? '1', true)
     if (quantity === null || quantity > 10_000) return null
-    hits.push({
+    const payloadHit: RipHit = {
       product_id: hit.productId,
       quantity,
       bucket: hit.bucket,
       value: hit.value || '0',
-    })
+    }
+    if (hit.cost?.trim()) payloadHit.cost = hit.cost.trim()
+    hits.push(payloadHit)
   }
   return {
     product_id: draft.sourceProductId,
