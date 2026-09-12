@@ -1,5 +1,5 @@
 import { useState, type PropsWithChildren } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { colors } from '../context/ThemeContext';
 export function Copy({ children, muted = false }: PropsWithChildren<{ muted?: boolean }>) {
   return <Text style={[styles.copy, muted && { color: colors.muted }]}>{children}</Text>;
@@ -35,10 +35,10 @@ export function Choice({ label, value, options, onChange, disabled = false }: {
 export function Sheet({ title, children, open, onClose, dismissDisabled = false }: PropsWithChildren<{ title: string; open: boolean; onClose: () => void; dismissDisabled?: boolean }>) {
   const close = () => { if (!dismissDisabled) onClose(); };
   return <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
-    <View style={styles.backdrop}><View role="dialog" accessibilityLabel={title} accessibilityViewIsModal style={styles.sheet}>
+    <KeyboardAvoidingView enabled={Platform.OS !== 'web'} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.backdrop}><View role="dialog" accessibilityLabel={title} accessibilityViewIsModal style={styles.sheet}>
       <Row><Heading>{title}</Heading><Button label="Close" disabled={dismissDisabled} onPress={close} /></Row>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>{children}</ScrollView>
-    </View></View>
+    </View></KeyboardAvoidingView>
   </Modal>;
 }
 export function Page({ title, children }: PropsWithChildren<{ title: string }>) {

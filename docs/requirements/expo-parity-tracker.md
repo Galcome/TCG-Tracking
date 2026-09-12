@@ -420,3 +420,17 @@ integrity is now being handled separately in `fix/grading-transaction-integrity`
 Allocation preview, full shell polish/global sale action, native IDs/Google/telemetry/assets,
 actual device/signing/distribution/preview and final approved Hosting cutover remain open.
 No push, deployment, production data change or website switch occurred.
+
+### Compact shell checkpoint
+
+Mobile navigation now uses a labeled horizontal scroll strip rather than a tall wrapping
+button grid; desktop retains the sidebar. Global New product and New sale reuse the protected
+forms, and signout closes their local state. Sheet uses native KeyboardAvoidingView while web
+behavior remains unchanged. See [React Native documentation](https://reactnative.dev/docs/keyboardavoidingview).
+Keyboard, safe-area and accessibility acceptance on actual devices remains required.
+
+Typecheck and ESLint passed; all 29 browser tests passed (exit 0), including global form
+opening/cancellation, mobile navigation reachability and no overflow. Android/iOS Hermes
+exports passed again. Production continues using the unchanged Vite deployment. Backend
+grading integrity is separately committed locally as `3615f8b`; final combined API regression
+and independent review remain acceptance gates. No push or deployment occurred.

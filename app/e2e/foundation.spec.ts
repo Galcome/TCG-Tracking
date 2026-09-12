@@ -1,6 +1,27 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+test('compact shell keeps navigation reachable and global forms reuse the protected workflows', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const product = await (await request.post(API + '/api/v1/products', { data: { name: 'Global sale picker card', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '0.00', funding: [] } } })).json();
+  await page.setViewportSize({width:390,height:900});
+  await signIn(page);
+  await page.getByRole('button', { name: 'New product', exact: true }).click();
+  await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'New sale', exact: true }).click();
+  await page.getByLabel('Search products in stock', { exact: true }).fill(product.name);
+  await page.getByRole('button', { name: product.name + ' · 1 in stock', exact: true }).click();
+  await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Vault', exact: true }).click();
+  await expect(page).toHaveURL(/\/vault$/);
+  expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
