@@ -21,7 +21,7 @@ foundation owner until its interface is stable.
 | Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows, CSV and split proceeds verified; device acceptance pending |
 | Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Partial: browser account/movement and split funding/proceeds verified; device acceptance pending |
 | Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
-| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual/photo and authoritative allocation preview implemented; expanded browser run and native acceptance pending |
+| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual/photo and authoritative allocation preview browser flows verified; native acceptance pending |
 | Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: browser operations/valuations and seven PostgreSQL races verified; native acceptance pending |
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: mapping/discovery no-write browser checks verified; native acceptance pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
@@ -30,8 +30,10 @@ foundation owner until its interface is stable.
 
 ## Acceptance evidence
 
-- Baseline route/flow inventory recorded above. Baseline screenshots and equivalence tests
-  at 390, 768 and 1536 pixels remain pending.
+- Baseline route/flow inventory recorded above. Local Vite inventory baseline screenshots
+  and rewrite inventory screenshots inspected at 390/768/1536 pixels. These use separate
+  test fixtures, not pixel-identical or production-data comparisons. Browser API/financial
+  equivalence checks are recorded below; native workflow acceptance remains open.
 - Dedicated local Postgres container `tcg-expo-e2e-postgres` binds only 127.0.0.1:55438.
   `tcg_expo_test_e2e` is disposable rewrite test data. Migrations through 0012 applied.
   Credentials are local test values supplied at command time, never production credentials.
@@ -481,3 +483,39 @@ P1/P2 issues and confirmed per-UID query-cache isolation, exact decimal formatti
 period-independent fetching. Runtime profile metadata remains unavailable; broader rewrite
 and native acceptance are not implied by this bounded review.
 The authoritative rip preview design is recorded in [its decision record](2026-09-12-rip-fifo-preview.md).
+
+## 2026-09-12 Integrity and Rip preview acceptance checkpoint
+
+Integrated ordered/fresh-state guards for grading, stock consumption, sale/purchase/adjustment
+edits and generic/transformation voids. Seven real PostgreSQL races cover duplicate sends,
+duplicate returns, return versus sale/move/edit, duplicate transformation void and sale
+edit versus void. Independent review caught the intermediate edit/void lock inversion;
+`a648090` resolves it with Product-first entity locking. Final bounded backend review found
+no remaining P1/P2 issues. Correction and explicit oversell behavior remain intentional.
+
+Rip now allocates actual consumed FIFO cost, not a pre-lock average. The authenticated
+read-only preview accepts unsaved hit keys and returns separate nullable source/hit/bulk
+costs. Expo supports optional explicit overrides, never copies suggested shares into saved
+overrides, and hides late responses after edits. Independent frontend review found no P1/P2
+issues. Runtime model/profile metadata remained unavailable throughout these resumed reviews.
+
+Validation: the full API run passed **845 tests**; it initially failed only the 100% coverage
+gate at 99.76%. The nine additional guard tests in `76fdb35` passed, and appended coverage
+reached **100% (4,625 statements, zero missing)** without weakening the gate. This is a full
+845-test run plus a nine-test focused run, not a claimed single 854-test run. Ruff passed.
+Expo TypeScript/ESLint and **89 unit tests** passed; Android/iOS Hermes exports passed.
+All **31 Expo browser tests** passed, including unsaved FIFO preview, late 3-to-4-dollar
+response suppression and unchanged stock/cost with zero inline product creates.
+
+Inventory screenshot tests now wait for the requested filtered response and compare fuzzy
+matches with API results. The stricter exact-one-card assumption failed because forgiving
+search intentionally returns similar names; no search behavior was changed. The corrected
+three width tests passed. Local artifacts: `app/output/playwright/expo-inventory-{width}.png`
+and `vite-inventory-{width}.png`. CLI baseline inspection used only the legacy test server
+and test data; its only console error was the existing missing favicon (404). Debug logs
+remain ignored, not committed. Legacy website regression is still completing separately.
+
+Native registrations/Google, required telemetry/assets, installed-device acceptance, signing,
+distribution, isolated hosted preview and approved production cutover remain release gates.
+Only a read-only registration check occurred; no Firebase project/provider/app changed.
+No push, merge, deployment or production data change occurred. Production still serves Vite.
