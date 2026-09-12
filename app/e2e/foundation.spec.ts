@@ -174,6 +174,9 @@ test('pricing requires explicit printing confirmation and keeps mapping writes o
 });
 
 test('dashboard separates period trading from lifetime cash and preserves exact cents', async ({ page }) => {
+  await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
+    month: '2026-09-01', spent: '90071992547409.92', revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
+  }] }));
   await page.route(API + '/api/v1/dashboard?*', route => route.fulfill({ json: {
     realized_profit: '90071992547409.91', roi: null, inventory_at_cost: '10.01', total_invested: '20.01',
     purchases_in_period: '0.29', cost_of_sales: '0.00', cost_written_off: '3.01', total_sales: '0.00',
@@ -186,6 +189,10 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent sales · selected period', { exact: true })).toBeVisible();
+  const trend = page.getByRole('group', { name: 'Monthly trading trend', exact: true });
+  await expect(trend.getByText('Spent $90,071,992,547,409.92', { exact: true })).toBeVisible();
+  await expect(trend.getByText('Revenue $0.00', { exact: true })).toBeVisible();
+  await expect(trend.getByText('Realized profit -$0.01', { exact: true })).toBeVisible();
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();

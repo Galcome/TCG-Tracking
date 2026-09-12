@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
 import { PeriodSelector } from '../../components/period-selector'
+import { MonthlyTrend } from '../../components/monthly-trend'
 import { CsvButton } from '../../components/csv-button'
 import { AgingReport, AttentionReport, SetReport, TierReport } from '../../components/report-rollups'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui'
@@ -12,7 +13,6 @@ import { colors } from '../../context/ThemeContext'
 import {
   REPORT_GROUPS,
   REPORT_SORTS,
-  monthLabel,
   reportMoney as money,
   sortGroupRows,
   type ReportSort,
@@ -255,33 +255,6 @@ function PerformanceReport({ rows, groupBy, noun }: { rows: GroupRow[]; groupBy:
   )
 }
 
-function MonthByMonth() {
-  const api = useApi()
-  const months = useQuery({ queryKey: ['reports', 'byMonth'], queryFn: api.byMonth })
-
-  return (
-    <View style={styles.section}>
-      <SectionTitle>Month by month</SectionTitle>
-      <Copy muted>What went out against what came back. This trend is independent of the selected reporting period.</Copy>
-      <ErrorNotice error={months.error} retry={() => { void months.refetch() }} />
-      {months.isPending ? <Loading /> : null}
-      {months.data && months.data.length === 0 ? <Card><Copy muted>No monthly activity yet.</Copy></Card> : null}
-      {months.data?.map((month) => (
-        <Card key={month.month}>
-          <Row>
-            <View style={styles.monthName}><Copy>{monthLabel(month.month)}</Copy><Copy muted>{month.month}</Copy></View>
-            <Metric label="Spent">{money(month.spent)}</Metric>
-            <Metric label="Realized profit">{money(month.realized_profit)}</Metric>
-            <Metric label="Revenue">{money(month.revenue)}</Metric>
-            <Metric label="Units sold">{month.units_sold}</Metric>
-            <Metric label="Units bought">{month.units_bought}</Metric>
-          </Row>
-        </Card>
-      ))}
-    </View>
-  )
-}
-
 export default function Reports() {
   const api = useApi()
   const { period, setPeriod, hydrated } = usePeriodPreference()
@@ -312,7 +285,7 @@ export default function Reports() {
       {rows.isPending ? <Loading /> : null}
       {rows.data ? <PerformanceReport rows={sorted} groupBy={groupBy} noun={group.noun} /> : null}
       {rows.data ? <ReturnByTime rows={sorted} noun={group.noun} /> : null}
-      <MonthByMonth />
+      <MonthlyTrend />
       <TierReport />
       <SetReport />
       <AgingReport />

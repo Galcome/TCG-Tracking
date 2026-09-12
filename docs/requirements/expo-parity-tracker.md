@@ -14,15 +14,15 @@ foundation owner until its interface is stable.
 | Area | Required flows and states | Existing verification reference | Status |
 | --- | --- | --- | --- |
 | Auth and shell | Email and Google login, restore/refresh session, membership rejection, signout, retry, deep links, global actions, responsive navigation | `web/e2e/nav.spec.ts`, `mobile.spec.ts`; backend auth tests | In progress |
-| Dashboard | Profit/cost/cash distinctions, attention flags, recent sales, scoped reports, shared persisted All/YTD/MTD/30/60/90 default60 | `balance.spec.ts`, `reports-chart.spec.ts`; PR74 | Partial: scoped browser figures/recent sales verified; trend and shell polish pending |
-| Inventory | Search/game/stock/bucket filters, paging, accessible bucket colours, aligned counts, estimate source/date/status | `buckets.spec.ts`, `bucket-journey.spec.ts`; PR73 | Partial: browser list/buckets/responsiveness verified; added taxonomy/archive filters need expanded regression |
+| Dashboard | Profit/cost/cash distinctions, attention flags, recent sales, scoped reports, shared persisted All/YTD/MTD/30/60/90 default60 | `balance.spec.ts`, `reports-chart.spec.ts`; PR74 | Partial: scoped figures/recent sales, shared monthly trend and compact shell verified; device acceptance pending |
+| Inventory | Search/game/stock/bucket filters, paging, accessible bucket colours, aligned counts, estimate source/date/status | `buckets.spec.ts`, `bucket-journey.spec.ts`; PR73 | Partial: browser list/buckets/responsiveness and taxonomy/archive flows verified; device acceptance pending |
 | Products | Add/edit/archive/delete safeguards; taxonomy, set suggestions, language/collector/variant/slab identity; history | `add-product.spec.ts`, `sets.spec.ts`, `ledger.spec.ts` | Partial: identity/history and archive/delete browser flows verified; native acceptance pending |
-| Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Partial: browser operations verified; split funding pending |
-| Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows and CSV verified; split proceeds and device acceptance pending |
-| Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Partial: browser account/movement flows verified; split funding/proceeds pending |
+| Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Partial: browser operations and exact split funding verified; device acceptance pending |
+| Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows, CSV and split proceeds verified; device acceptance pending |
+| Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Partial: browser account/movement and split funding/proceeds verified; device acceptance pending |
 | Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
 | Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual and browser photo suggestions verified; native photos and allocation preview pending |
-| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void verified; valuations and API concurrency guards pending |
+| Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void and optional valuations verified; concurrency review follow-ups in progress |
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: controls/unit guards and real mapping writes verified; expanded discovery/device acceptance pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
@@ -41,10 +41,11 @@ foundation owner until its interface is stable.
 
 ## Current assignment
 
-Latest checkpoint: isolated `app/` now includes foundation, inventory/stock, Sales, Money,
-manual transformations and grading. Next: photo adapters, grading/Vault valuations, pricing
-controls, reports/exports and dashboard preferences, with the API grading integrity follow-on
-below kept as a separate release-blocking concern. Do not claim device authentication or
+Latest checkpoint: isolated `app/` includes inventory/stock, Sales/Money with splits,
+transformations, grading/Vault valuations, browser photo suggestions, pricing, reports/CSV,
+shared periods and compact navigation. Next: independent concurrency review fixes,
+authoritative rip allocation preview, Dashboard trend and native release preparation.
+Keep backend integrity fixes isolated and release-blocking. Do not claim device authentication or
 workflow acceptance based only on bundle compilation. Full parity is not yet achieved.
 
 ## 2026-09-08 checkpoint
@@ -434,3 +435,46 @@ opening/cancellation, mobile navigation reachability and no overflow. Android/iO
 exports passed again. Production continues using the unchanged Vite deployment. Backend
 grading integrity is separately committed locally as `3615f8b`; final combined API regression
 and independent review remain acceptance gates. No push or deployment occurred.
+
+## 2026-09-12 Combined regression and native prerequisites
+
+Combined rewrite/backend regression passed: **811 API tests, 100% source coverage**, ruff,
+and all **29 Expo browser tests**. Current app checks remain 86 unit tests, TypeScript,
+ESLint and successful Android/iOS Hermes exports. Exports are not installed-device tests.
+The static-date pricing fixture repair is isolated in `chore/date-stable-pricing-test`
+(`fc89689`, integrated as `c34f28f`); provider stale behavior is unchanged.
+
+An existing independent reviewer resumed and found three concrete follow-ups: sale-edit
+stock preflight must participate in the product lock, rip allocation must use consumed FIFO
+cost under the transformation locks, and transformation void must refresh/recheck its status
+under lock. Those fixes are in progress; this regression pass does not waive them. Runtime
+profile metadata was unavailable, so Terra/high routing could not be independently verified.
+
+Read-only Firebase CLI inspection (`firebase-tools` 15.30.0) confirmed the existing
+`tcg-tracking` project has **one WEB app and no Android/iOS app registrations**. No app,
+provider, OAuth client, project configuration or deployment was created/changed. Native
+Google remains disabled, rather than borrowing Household credentials or claiming completion.
+
+Before native integration/distribution, authorize/register the approved
+`com.galcome.tcgtracking` Android package and iOS bundle, reconcile signing fingerprints,
+retrieve matching service configuration into ignored files, and supply the matching public
+Google OAuth client IDs. Actual Google/email login, kill/relaunch, token refresh, permissions,
+keyboard and CSV share acceptance require installed builds and devices. `adb devices -l`
+currently lists no connected devices. Firebase setup/auth skills informed this prerequisite
+check; missing registrations pause native configuration only, not safe local feature work.
+
+No push, merge, production data change, deployment or live Vite website cutover occurred.
+
+### Dashboard monthly trend
+
+Dashboard and Reports now share one server-backed monthly trend component and query cache.
+It preserves all twelve calendar months in oldest-first server order, explicitly independent
+of the selected period. Exact decimal formatting keeps large cents, zero revenue and negative
+profit intact. It displays distinct spending/revenue/profit and bought/sold unit counts,
+with loading, empty, error and retry states; no new chart dependency or client financial
+calculation was introduced. React checklist informed the shared component/query structure.
+
+TypeScript, ESLint and 86 unit tests passed. All 29 browser tests passed, including exact
+large monthly spending, zero revenue, negative one-cent profit and 390/768/1536-width checks.
+Android and iOS Hermes exports passed again. Independent targeted review is pending.
+The authoritative rip preview design is recorded in [its decision record](2026-09-12-rip-fifo-preview.md).

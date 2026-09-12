@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button, Card, Copy, ErrorNotice, Heading, Loading, Page, Row } from '../../components/ui';
 import { router } from 'expo-router';
 import { PeriodSelector } from '../../components/period-selector';
+import { MonthlyTrend } from '../../components/monthly-trend';
 import { useApi } from '../../context/AppContext';
 import { usePeriodPreference } from '../../lib/period-preference';
 import { money, percent } from '../../lib/format';
@@ -53,5 +54,6 @@ export default function Dashboard() {
       <Button label={`View ${sale.product.name}`} onPress={() => router.push({ pathname: '/products/[productId]', params: { productId: sale.product_id } })} />
     </Card>)}
     <Button label="Open sales ledger" onPress={() => router.push('/sales')} />
+    <MonthlyTrend />
   </Page>;
 }
