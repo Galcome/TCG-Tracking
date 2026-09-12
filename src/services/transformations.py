@@ -296,6 +296,12 @@ def void(
         )
     ).all()
     ledger.lock_products(db, [record.source_product_id, *output_ids])
+    # The route's status check happens before this service acquires the related product
+    # locks. Refresh the transformation after those locks so concurrent void requests do
+    # not both mutate the same historical row or write competing audit reasons.
+    db.refresh(record)
+    if record.status != STATUS_ACTIVE:
+        raise HTTPException(status_code=409, detail="This has already been voided")
     record.status = STATUS_VOIDED
     record.void_reason = reason
 

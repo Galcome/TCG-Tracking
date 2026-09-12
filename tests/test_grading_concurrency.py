@@ -20,9 +20,9 @@ from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.models.transformation import Transformation, TransformationOutput
 from src.routes.grading import ReturnRequest, SubmitRequest, submit, take_back
-from src.routes.ledger import create_move, create_sale
-from src.schemas.ledger import MoveCreate, SaleCreate
-from src.services import inventory, ledger
+from src.routes.ledger import create_move, create_sale, update_sale
+from src.schemas.ledger import MoveCreate, SaleCreate, SaleUpdate
+from src.services import inventory, ledger, transformations
 
 
 @dataclass
@@ -191,3 +191,99 @@ def test_grading_return_and_bucket_move_share_fresh_stock_checks(concurrent_stoc
         stats = inventory.product_stats(db, [stock.raw, stock.graded])
         assert stats[stock.raw].quantity_on_hand + stats[stock.graded].quantity_on_hand == 1
         assert all(value >= 0 for product in stats.values() for value in product.by_bucket.values())
+
+
+@pytest.mark.parametrize("concurrent_stock", [2], indirect=True)
+def test_grading_return_and_sale_update_cannot_overconsume_the_same_units(concurrent_stock):
+    """A quantity edit must serialize with a return's fresh stock check."""
+    stock = concurrent_stock
+    with Session(engine) as db:
+        sent = submit(
+            SubmitRequest(product_id=stock.raw, quantity=1), stock.member, db
+        )
+        sale = create_sale(
+            SaleCreate(product_id=stock.raw, quantity=1, amount="20.00", proceeds=[]),
+            stock.member,
+            db,
+        )
+        sale_id = sale.id
+        db.commit()
+
+    statuses = race(
+        lambda db: take_back(
+            sent.id, ReturnRequest(graded_product_id=stock.graded), stock.member, db
+        ),
+        lambda db: update_sale(
+            sale_id, SaleUpdate(quantity=2), stock.member, db
+        ),
+    )
+    assert statuses == [200, 409]
+    with Session(engine) as db:
+        stats = inventory.product_stats(db, [stock.raw, stock.graded])
+        assert stats[stock.raw].quantity_on_hand == 0
+        assert all(value >= 0 for product in stats.values() for value in product.by_bucket.values())
+
+
+def test_concurrent_transformation_voids_write_one_audit_and_restore_once(concurrent_stock):
+    """A stale ORM transformation row cannot be voided twice after product locking."""
+    stock = concurrent_stock
+    with Session(engine) as db:
+        record = transformations.transform(
+            db,
+            kind="grade",
+            source_product_id=stock.raw,
+            source_quantity=1,
+            source_bucket="inventory",
+            outputs=[
+                transformations.OutputSpec(
+                    product_id=stock.graded, quantity=1, bucket="inventory"
+                )
+            ],
+            occurred_on=date.today(),
+            member_id=stock.member.id,
+        )
+        transformation_id = record.id
+        db.commit()
+
+    barrier = Barrier(2)
+
+    def void_with_stale_read(reason: str) -> int:
+        with Session(engine) as db:
+            stale = db.get(Transformation, transformation_id)
+            assert stale is not None
+            barrier.wait(timeout=5)
+            try:
+                transformations.void(
+                    db, stale, member_id=stock.member.id, reason=reason
+                )
+                db.commit()
+                return 200
+            except HTTPException as error:
+                db.rollback()
+                return error.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(void_with_stale_read, "first void"),
+            pool.submit(void_with_stale_read, "second void"),
+        ]
+        statuses = sorted(future.result(timeout=15) for future in futures)
+
+    assert statuses == [200, 409]
+    with Session(engine) as db:
+        final = db.get(Transformation, transformation_id)
+        assert final is not None
+        assert final.status == "voided"
+        assert final.void_reason in {"first void", "second void"}
+        void_audits = db.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_type == "transformation",
+                AuditLog.entity_id == transformation_id,
+                AuditLog.action == "void",
+            )
+        ).all()
+        assert len(void_audits) == 1
+        stats = inventory.product_stats(db, [stock.raw, stock.graded])
+        assert stats[stock.raw].quantity_on_hand == 2
+        graded_stats = stats.get(stock.graded)
+        assert graded_stats is None or graded_stats.quantity_on_hand == 0

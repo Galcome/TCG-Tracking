@@ -465,6 +465,16 @@ def update_sale(
     db: Session = Depends(db_session),
 ) -> Sale:
     sale = _require_active(db, Sale, sale_id, "Sale")
+    # Sale edits compete with grading returns, moves and other sales through the product
+    # lock. The initial read above is only enough to find the product; refresh after the
+    # lock so a concurrent void or update cannot feed stale state into the preflight guard.
+    ledger.lock_products(db, [sale.product_id])
+    db.refresh(sale)
+    if sale.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This sale has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     changes.pop("proceeds", None)
