@@ -322,7 +322,7 @@ def test_vault_keeps_manual_valuation_separate_from_market_estimate(client, db, 
             original_value_cents=1000,
             cad_value_cents=1350,
             source_revision="feed-1",
-            source_as_of=date(2026, 8, 28),
+            source_as_of=date.today(),
         )
     )
     db.flush()
