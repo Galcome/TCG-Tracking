@@ -28,6 +28,7 @@ from src.models.ledger import (
     StockMove,
 )
 from src.models.product import Product
+from src.models.transformation import TransformationOutput
 from src.services.costing import Event, allocate
 
 EntityKind = Literal["purchase", "sale", "adjustment", "move", "money_movement", "transformation"]
@@ -50,6 +51,18 @@ def load_events(
     events: list[Event] = []
     sources: dict[uuid.UUID, _SourceKind] = {}
 
+    # Derived purchases retain non-null accounting columns, even when the inherited
+    # transformation basis is unknown. Its explicit null share is authoritative for
+    # FIFO: a zero placeholder must not turn an unknown-cost hit into a free asset.
+    unknown_derived = set(
+        db.scalars(
+            select(TransformationOutput.purchase_id).where(
+                TransformationOutput.product_id == product_id,
+                TransformationOutput.cost_cents.is_(None),
+            )
+        )
+    )
+
     for purchase in db.scalars(_active(Purchase, product_id)):
         events.append(
             Event(
@@ -58,7 +71,11 @@ def load_events(
                 is_supply=True,
                 occurred_on=purchase.purchase_date,
                 created_at=purchase.created_at,
-                landed_cost_cents=purchase.landed_cost_cents,
+                landed_cost_cents=(
+                    None
+                    if purchase.is_derived and purchase.id in unknown_derived
+                    else purchase.landed_cost_cents
+                ),
             )
         )
         sources[purchase.id] = "purchase"
