@@ -536,3 +536,15 @@ explicit dedicated local E2E databases; production databases and the live websit
 A dependency-free release **configuration** preflight is the next bounded local task.
 It must reject fixture/loopback/wrong-project release configuration without claiming native
 registration, Google, telemetry, signing, device acceptance or distribution approval.
+
+### Final auth and platform-boundary review
+
+An independent Terra reviewer found no concrete P1/P2 issues in the bounded auth/session,
+account cache, photo multipart and CSV adapter scope. It checked per-UID query clients,
+generation guards around token/response/JSON completion, membership-gated routes, platform
+adapter separation, spreadsheet-formula escaping and owned-file-only CSV cleanup. Existing
+89-unit/31-browser/export evidence was inspected, not rerun by the reviewer. This does not
+replace installed-device tests or review of the separate release-configuration preflight.
+
+Native Firebase registration authorization remains unanswered. No cloud registration,
+provider change, signing, distribution or website cutover is authorized by this checkpoint.
