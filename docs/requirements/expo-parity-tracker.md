@@ -519,3 +519,20 @@ Native registrations/Google, required telemetry/assets, installed-device accepta
 distribution, isolated hosted preview and approved production cutover remain release gates.
 Only a read-only registration check occurred; no Firebase project/provider/app changed.
 No push, merge, deployment or production data change occurred. Production still serves Vite.
+
+### Legacy website regression
+
+The full Vite suite completed with **111 passes and two failures (113 tests)**. One was
+Windows Chromium `ERR_ADDRESS_IN_USE` during navigation; its rerun passed without source
+changes. The other fixture selected the first `<select>`, now the reporting-period control,
+instead of the marketplace dropdown added before it. `93ab95d` targets the channel control
+by its All channels option; no Vite product behavior changed. Both failed tests passed
+together on rerun (2/2). This is not reported as a single all-green 113-test run.
+
+The selector repair is also isolated as `95cca66` on `chore/report-period-e2e-selector`,
+based on the approved reporting-period change. Browser writes/reset touched only the two
+explicit dedicated local E2E databases; production databases and the live website were not used.
+
+A dependency-free release **configuration** preflight is the next bounded local task.
+It must reject fixture/loopback/wrong-project release configuration without claiming native
+registration, Google, telemetry, signing, device acceptance or distribution approval.
