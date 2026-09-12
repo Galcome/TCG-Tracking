@@ -280,3 +280,45 @@ photo adapters, remaining grading valuation prompts, compact shell/dashboard pol
 native release acceptance remain open. The transactional grading API integrity gate remains
 release-blocking. No backend, legacy Vite source, auth, deployment or production data changed.
 No push or production cutover occurred.
+
+## 2026-09-12 Tier, holdings, aging and attention checkpoint
+
+Added read-only Tier performance, Set holdings, Stock aging and Data attention sections
+to Expo Reports. Tier shows lifetime strategy outcomes with median/range context. Set
+holdings keep realized sales, Store at cost and Vault at cost separate. Aging shows current
+unsold non-Vault lots (Inventory and Store), including explicit undated and zero-day cases.
+Attention shows current unknown-cost and negative-stock warnings with product navigation.
+These endpoints ignore the selected period and catalogue filters; that scope is labeled.
+No ledger totals are calculated or overlapping strategy/lineage/holding figures summed.
+
+Each section has independent loading, error/retry and honest empty states. A failed refresh
+with cached rows explicitly says it is showing last loaded data. Exact string-based CAD
+display and null-aware percentages are reused. Age grouping preserves server lot amounts
+and uses linear accumulation rather than repeated full-array copying. Self-review corrected
+the initial Store-only aging label against the backend's actual Vault-only exclusion.
+
+Browser tests now export to `app/dist-e2e`, and the loopback test server serves only that
+directory. Git and ESLint ignore the generated output. Normal `app/dist` exports cannot
+replace the browser suite's test-configured bundle. This is test-only isolation, not a
+production Hosting or CI/deployment change.
+
+Validation: 70 unit tests, TypeScript, ESLint and focused Python ruff checks passed. Android
+and iOS Hermes JavaScript exports passed in separate output directories; installed-device
+acceptance remains open. Both new browser cases passed, covering empty states, independent
+read rejection/retry, separate holding costs, large exact values, zero/unknown ages and
+390/768/1536 overflow checks. Mobile screenshot capture was tightened to wait for the set
+heading in the viewport after resize, and the targeted three-test rerun passed.
+
+The first full browser run had 18 passes and one existing purchase-correction refresh failure:
+the PATCH returned 200 and the disposable database contained the edited 2000 cents, but
+the screen retained the previous total. The case passed on targeted rerun with no ledger
+implementation changes. Keep this as an intermittent refresh follow-on, not a confirmed fix.
+The final serial full-suite rerun passed all 19 browser tests (exit 0).
+
+Luna/max implemented this bounded slice with fresh context. Independent review could not
+start because the conversation reached the agent-thread limit; root self-review and browser
+verification do not replace that gate. No independent-review pass is claimed for this slice.
+The React checklist was applied. Lineage, CSV/native sharing, pricing controls, photos,
+remaining grading valuations, compact shell/dashboard polish and native release acceptance
+remain open, along with the existing transactional grading API release blocker. No backend,
+legacy Vite source, authentication, production deployment or production data changed.

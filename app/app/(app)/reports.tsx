@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
 import { PeriodSelector } from '../../components/period-selector'
+import { AgingReport, AttentionReport, SetReport, TierReport } from '../../components/report-rollups'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
@@ -304,8 +305,12 @@ export default function Reports() {
       {rows.data ? <PerformanceReport rows={sorted} groupBy={groupBy} noun={group.noun} /> : null}
       {rows.data ? <ReturnByTime rows={sorted} noun={group.noun} /> : null}
       <MonthByMonth />
+      <TierReport />
+      <SetReport />
+      <AgingReport />
+      <AttentionReport />
       <Card>
-        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. The Reports rewrite currently covers grouped performance and the month trend; tier, set rollup, ageing, attention, lineage, and CSV remain follow-on work.</Copy>
+        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. Tier results show lifetime trading; set holdings, stock aging, and data attention include current positions. These sections are independent of the selected period and filters. Lineage and CSV remain follow-on work.</Copy>
       </Card>
     </Page>
   )

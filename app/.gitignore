@@ -1,6 +1,7 @@
 .expo/
 node_modules/
 dist/
+dist-e2e/
 dist-android/
 dist-ios/
 dist-native/

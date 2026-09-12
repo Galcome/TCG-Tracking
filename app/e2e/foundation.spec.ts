@@ -1,4 +1,82 @@
 import { test, expect, type Page } from '@playwright/test';
+test('Reports rollups show honest empty states without invented values', async ({ page }) => {
+  for (const path of ['by-tier', 'by-set', 'aging']) {
+    await page.route(API + '/api/v1/reports/' + path, route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  }
+  await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ contentType: 'application/json',
+    body: JSON.stringify({ sales_missing_cost: 0, products_with_negative_stock: 0, negative_stock_products: [] }) }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Reports', exact: true }).click();
+  for (const text of ['No tier sales yet.', 'No set holdings or sales yet.', 'No remaining purchase lots.', 'No data issues found.']) {
+    await expect(page.getByText(text, { exact: true })).toBeVisible();
+  }
+});
+test('Reports rollups separate realized returns from holdings and recover independently', async ({ page }) => {
+  let tierReads = 0;
+  const paths: URL[] = [];
+  await page.route(API + '/api/v1/reports/by-tier', route => {
+    paths.push(new URL(route.request().url()));
+    tierReads++;
+    return route.fulfill({ status: tierReads === 1 ? 403 : 200, contentType: 'application/json',
+      body: JSON.stringify(tierReads === 1 ? { detail: 'Tier read test rejection' } : [{
+        key: 'fixture-tier', label: 'Fixture tier', products_traded: 1, units_sold: 1,
+        realized_profit: '0.00', cost_of_sales: '10.01', roi: 0, average_roi: null,
+        best_roi: null, worst_roi: null, median_roi: null, avg_days_held: 0,
+      }]) });
+  });
+  await page.route(API + '/api/v1/reports/by-set', route => {
+    paths.push(new URL(route.request().url()));
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+      set_id: '33333333-3333-4333-8333-333333333333', name: 'Fixture set holdings', game_slug: 'pokemon',
+      units_sold: 1, realized_profit: '-0.01', cost_of_sales: '1.00', sold_roi: null,
+      units_in_store: 2, store_cost: '90071992547409.91', oldest_store_days: null,
+      units_in_vault: 3, vault_cost: '12.34',
+    }]) });
+  });
+  await page.route(API + '/api/v1/reports/aging', route => {
+    paths.push(new URL(route.request().url()));
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      { purchase_id: 'lot-unknown', product_id: '44444444-4444-4444-8444-444444444444', product_name: 'Unknown age fixture', game_slug: 'pokemon', units: 1, cost: '0.00', purchase_date: null, days_held: null },
+      { purchase_id: 'lot-zero', product_id: '55555555-5555-4555-8555-555555555555', product_name: 'Zero age fixture', game_slug: 'pokemon', units: 1, cost: '10.01', purchase_date: '2026-09-12', days_held: 0 },
+    ]) });
+  });
+  await page.route(API + '/api/v1/reports/attention', route => {
+    paths.push(new URL(route.request().url()));
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      sales_missing_cost: 2, products_with_negative_stock: 1,
+      negative_stock_products: [{ id: '66666666-6666-4666-8666-666666666666', name: 'Negative stock fixture', quantity: -1 }],
+    }) });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Reports', exact: true }).click();
+  await expect(page.getByText('Tier read test rejection', { exact: true })).toBeVisible();
+  const set = page.getByRole('group', { name: 'Set: Fixture set holdings', exact: true });
+  await expect(set.getByText('-$0.01', { exact: true })).toBeVisible();
+  await expect(set.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(set.getByText('$12.34', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  const tier = page.getByRole('group', { name: 'Tier: Fixture tier', exact: true });
+  await expect(tier.getByText('$0.00', { exact: true })).toBeVisible();
+  await expect(tier.getByText('0.0%', { exact: true })).toBeVisible();
+  await expect(tier.getByText('Unknown', { exact: true }).first()).toBeVisible();
+  const unknownAge = page.getByRole('group', { name: 'Aging lot: Unknown age fixture', exact: true });
+  const zeroAge = page.getByRole('group', { name: 'Aging lot: Zero age fixture', exact: true });
+  await expect(unknownAge.getByText('$0.00', { exact: true })).toBeVisible();
+  await expect(unknownAge.getByText('Unknown age · no purchase date', { exact: true })).toBeVisible();
+  await expect(zeroAge.getByText('$10.01', { exact: true })).toBeVisible();
+  await expect(zeroAge.getByText('0d held · bought 2026-09-12', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Negative stock fixture', exact: true })).toBeVisible();
+  await expect.poll(() => paths.length >= 5).toBeTruthy();
+  expect(paths.every(url => url.search === '')).toBeTruthy();
+  for (const width of [390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    const setHeading = set.getByText('Fixture set holdings', { exact: true });
+    await setHeading.scrollIntoViewIfNeeded();
+    await expect(setHeading).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.screenshot({ path: 'output/playwright/expo-rollups-' + width + '.png', fullPage: true });
+  }
+});
 test('Reports filters requests, preserves unknown and zero, and retries failed reads', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
