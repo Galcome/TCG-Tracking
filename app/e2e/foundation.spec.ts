@@ -1099,8 +1099,19 @@ for(const width of [390,768,1536]) {
     expect(created.ok()).toBeTruthy();
     await signIn(page);
     await page.getByRole('button',{name:'Inventory',exact:true}).click();
+    const filtered = page.waitForResponse(r => {
+      const url = new URL(r.url());
+      return url.pathname === '/api/v1/products' && url.searchParams.get('q') === name;
+    });
     await page.getByLabel('Search products',{exact:true}).fill(name);
+    const response = await filtered;
+    expect(response.ok()).toBeTruthy();
+    const matches = (await response.json()).items as { name: string }[];
     await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+    // Search deliberately includes fuzzy matches; compare rendered matches to the API,
+    // rather than incorrectly requiring an exact-name-only result.
+    await expect(page.getByRole('button',{name:/^Expo parity card \d+$/})).toHaveCount(
+      matches.filter(item => /^Expo parity card \d+$/.test(item.name)).length);
     await expect(page.getByRole('button',{name:'Expo mutation journey',exact:true})).toHaveCount(0);
     await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
     await page.screenshot({ path: 'output/playwright/expo-inventory-' + width + '.png', fullPage: true });
