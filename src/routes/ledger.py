@@ -243,6 +243,15 @@ def update_purchase(
     db: Session = Depends(db_session),
 ) -> Purchase:
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
+    # Match the generic void path's Product -> Purchase order. Refresh after the lock so
+    # a concurrent void cannot let this stale request mutate an inactive purchase.
+    ledger.lock_products(db, [purchase.product_id])
+    db.refresh(purchase)
+    if purchase.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This purchase has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     changes.pop("funding", None)
@@ -588,6 +597,15 @@ def update_adjustment(
     db: Session = Depends(db_session),
 ) -> InventoryAdjustment:
     adjustment = _require_active(db, InventoryAdjustment, adjustment_id, "Adjustment")
+    # Keep edits in the same Product-first order as ledger.void before applying fields or
+    # flushing, and reject a row that became voided while this request was queued.
+    ledger.lock_products(db, [adjustment.product_id])
+    db.refresh(adjustment)
+    if adjustment.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This adjustment has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     audit_reason = changes.pop("audit_reason", None)
 

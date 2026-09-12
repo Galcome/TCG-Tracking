@@ -20,8 +20,8 @@ from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.models.transformation import Transformation, TransformationOutput
 from src.routes.grading import ReturnRequest, SubmitRequest, submit, take_back
-from src.routes.ledger import create_move, create_sale, update_sale
-from src.schemas.ledger import MoveCreate, SaleCreate, SaleUpdate
+from src.routes.ledger import create_move, create_sale, update_sale, void_sale
+from src.schemas.ledger import MoveCreate, SaleCreate, SaleUpdate, VoidRequest
 from src.services import inventory, ledger, transformations
 
 
@@ -222,6 +222,43 @@ def test_grading_return_and_sale_update_cannot_overconsume_the_same_units(concur
         stats = inventory.product_stats(db, [stock.raw, stock.graded])
         assert stats[stock.raw].quantity_on_hand == 0
         assert all(value >= 0 for product in stats.values() for value in product.by_bucket.values())
+
+
+def test_sale_edit_and_void_share_product_first_lock(concurrent_stock):
+    """An edit racing a void completes without a deadlock or duplicate void audit."""
+    stock = concurrent_stock
+    with Session(engine) as db:
+        sale = create_sale(
+            SaleCreate(product_id=stock.raw, quantity=1, amount="20.00", proceeds=[]),
+            stock.member,
+            db,
+        )
+        sale_id = sale.id
+        db.commit()
+
+    statuses = race(
+        lambda db: update_sale(
+            sale_id, SaleUpdate(notes="corrected"), stock.member, db
+        ),
+        lambda db: void_sale(
+            sale_id, VoidRequest(reason="entered twice"), stock.member, db
+        ),
+    )
+    # If the edit wins, the void follows it; if the void wins, the refreshed edit gets a
+    # 409. Any database deadlock/500 propagates out of race() and fails this test.
+    assert statuses in ([200, 200], [200, 409])
+    with Session(engine) as db:
+        final = db.get(Sale, sale_id)
+        assert final is not None
+        assert final.status == "voided"
+        void_audits = db.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_type == "sale",
+                AuditLog.entity_id == sale_id,
+                AuditLog.action == "void",
+            )
+        ).all()
+        assert len(void_audits) == 1
 
 
 def test_concurrent_transformation_voids_write_one_audit_and_restore_once(concurrent_stock):

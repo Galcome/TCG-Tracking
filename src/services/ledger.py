@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Iterable
 from typing import Any, Literal
 
+from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -212,6 +213,21 @@ def void(
     reason: str | None,
 ) -> None:
     """Retire a transaction without deleting it, then rebuild the product's costs."""
+    # Every ledger mutation must take the product lock before touching its child row.
+    # Otherwise an edit can hold Product while this path holds Sale/Purchase/etc. and
+    # both sides wait on the other's recomputation/flush.
+    lock_products(db, [entity.product_id])
+    entity_model = type(entity)
+    locked_entity = db.scalar(
+        select(entity_model)
+        .where(entity_model.id == entity.id)
+        .with_for_update()
+    )
+    if locked_entity is None:
+        raise HTTPException(status_code=404, detail=f"{entity_type.title()} not found")
+    db.refresh(entity)
+    if entity.status != STATUS_ACTIVE:
+        raise HTTPException(status_code=409, detail=f"This {entity_type} has already been voided")
     entity.status = STATUS_VOIDED
     entity.void_reason = reason
     db.flush()
