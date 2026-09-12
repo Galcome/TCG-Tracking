@@ -1,6 +1,121 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const accounts = (await (await request.get(API + '/api/v1/money/accounts')).json()).items.filter((a: { is_active: boolean; kind: string }) => a.is_active && a.kind !== 'store_credit');
+  expect(accounts.length).toBeGreaterThanOrEqual(2);
+  const product = await (await request.post(API + '/api/v1/products', { data: { name: 'Exact split account card', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id } })).json();
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  await page.getByRole('button', { name: 'Add purchase', exact: true }).click();
+  await page.getByLabel('Total paid', { exact: true }).fill('10.01');
+  await page.getByLabel('Shipping', { exact: true }).fill('0.29');
+  await page.getByRole('button', { name: 'Split funding', exact: true }).click();
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: new RegExp(`^Funding ${i + 1} account:`) }).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: accounts[i].name, exact: true }).click();
+    await page.getByLabel(`Funding ${i + 1} amount`, { exact: true }).fill(i === 0 ? '5.10' : '5.20');
+  }
+  await page.getByRole('button', { name: 'Save purchase', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const funded = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(funded.stats.remaining_cost).toBe('10.30');
+  const funding = (await (await request.get(API + '/api/v1/money/movements?kind=funding&limit=200')).json()).items.find((m: { product_name: string }) => m.product_name === product.name);
+  expect(funding.legs.map((leg: { amount: string }) => leg.amount).sort()).toEqual(['-5.10','-5.20']);
+  await page.getByRole('button', { name: 'Record sale', exact: true }).click();
+  await page.getByLabel('Total received', { exact: true }).fill('20.00');
+  await page.getByRole('button', { name: 'Split proceeds', exact: true }).click();
+  await page.getByRole('button', { name: /^Proceeds 1 account:/ }).click();
+  await page.getByRole('dialog').last().getByRole('button', { name: accounts[0].name, exact: true }).click();
+  await page.getByLabel('Proceeds 1 amount', { exact: true }).fill('10.00');
+  await page.getByRole('button', { name: 'Proceeds 2 kind: Existing account', exact: true }).click();
+  await page.getByRole('dialog').last().getByRole('button', { name: 'New store credit', exact: true }).click();
+  await page.getByLabel('Proceeds 2 store', { exact: true }).fill('Exact split shop');
+  await page.getByLabel('Proceeds 2 amount', { exact: true }).fill('10.00');
+  await page.getByRole('dialog').getByRole('button', { name: 'Record sale', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const sold = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(sold.stats.realized_profit).toBe('9.70');
+  const proceeds = (await (await request.get(API + '/api/v1/money/movements?kind=proceeds&limit=200')).json()).items.find((m: { product_name: string }) => m.product_name === product.name);
+  expect(proceeds.legs.map((leg: { amount: string }) => leg.amount)).toEqual(['10.00','10.00']);
+  expect(proceeds.legs.some((leg: { account_kind: string }) => leg.account_kind === 'store_credit')).toBe(true);
+});
+
+test('optional grading valuations retry separately from committed grading and preserve zero', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const source = await (await request.post(API + '/api/v1/products', { data: { name: 'Grading valuation card', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } })).json();
+  await signIn(page);
+  await page.goto('/products/' + source.id);
+  let sends = 0;
+  let returns = 0;
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url() === API + '/api/v1/grading') sends++;
+    if (req.method() === 'POST' && req.url().endsWith('/return')) returns++;
+  });
+  await page.getByRole('button', { name: 'Send to grading', exact: true }).click();
+  await page.getByRole('button', { name: 'After sending: Skip valuation', exact: true }).click();
+  await page.getByRole('button', { name: 'Ask for raw value', exact: true }).click();
+  await page.getByRole('button', { name: 'Send it', exact: true }).click();
+  await expect(page.getByText('Raw value before grading — Grading valuation card', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Value per unit (CAD)', { exact: true })).toHaveValue('');
+  await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('0.00');
+  await page.route(API + '/api/v1/valuations', route => route.fulfill({ status: 409, json: { detail: 'Valuation retry fixture' } }), { times: 1 });
+  await page.getByRole('button', { name: 'Save valuation', exact: true }).click();
+  await expect(page.getByText('Valuation retry fixture', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save valuation', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(sends).toBe(1);
+  await page.getByRole('button', { name: 'Record grading return', exact: true }).click();
+  await page.getByLabel('Grade', { exact: true }).fill('10');
+  await page.getByRole('button', { name: 'After returning: Skip valuation', exact: true }).click();
+  await page.getByRole('button', { name: 'Ask for graded value', exact: true }).click();
+  await page.getByRole('button', { name: 'Record it', exact: true }).click();
+  await expect(page.getByText(/Value after grading — Grading valuation card/)).toBeVisible();
+  await page.getByRole('button', { name: 'Skip valuation', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(returns).toBe(1);
+});
+
+test('catalogue archive preserves money, history blocks deletion and mistaken empty products can be deleted', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const identity = { game_id: games[0].id, product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id };
+  const tracked = await (await request.post(API + '/api/v1/products', { data: { ...identity, name: 'Archive safeguard card',
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } })).json();
+  await signIn(page);
+  await page.goto('/products/' + tracked.id);
+  await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Permanently delete', exact: true })).toBeDisabled();
+  await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
+  await page.getByRole('button', { name: 'Permanently delete', exact: true }).click();
+  await expect(page.getByText(/This product has transaction history and cannot be deleted/)).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Archive product', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm archive', exact: true }).click();
+  await expect(page).toHaveURL(/\/inventory$/);
+  const archived = await (await request.get(API + '/api/v1/products/' + tracked.id)).json();
+  expect(archived.is_archived).toBe(true);
+  expect(archived.stats.remaining_cost).toBe('10.01');
+  expect(archived.stats.quantity_on_hand).toBe(1);
+  await page.goto('/products/' + tracked.id);
+  await page.getByRole('button', { name: 'Restore archived product', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Archive product', exact: true })).toBeVisible();
+  const mistaken = await (await request.post(API + '/api/v1/products', { data: { ...identity, name: 'Mistaken empty card' } })).json();
+  await page.goto('/products/' + mistaken.id);
+  await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
+  await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
+  await page.getByRole('button', { name: 'Permanently delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/inventory$/);
+  expect((await request.get(API + '/api/v1/products/' + mistaken.id)).status()).toBe(404);
+});
+
 test('pricing requires explicit printing confirmation and keeps mapping writes out of the ledger', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
@@ -728,7 +843,11 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   const accountsAfterSale = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterSale.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('75.00');
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
+  const filteredSales = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/sales'
+    && new URL(response.url()).searchParams.get('q') === 'Expo sale journey');
   await page.getByLabel('Search by product', { exact: true }).fill('Expo sale journey');
+  await filteredSales;
+  await expect(page.getByRole('button', { name: 'Void', exact: true })).toHaveCount(1);
   await expect(page.getByText('Expo sale journey', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Void', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Sale reversed in test');

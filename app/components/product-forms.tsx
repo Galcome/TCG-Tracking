@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useApi } from '../context/AppContext'
 import {
@@ -26,6 +26,8 @@ import {
 import { todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { SetField } from './set-field'
+import { AllocationEditor } from './allocation-editor'
+import { allocationError, fundingPayload, type AllocationDraft } from '../lib/allocation-drafts'
 
 export interface ProductFormsProps {
   /** The product being edited or the product receiving a ledger operation. */
@@ -52,13 +54,20 @@ type FormChildrenProps = {
 /** All ledger mutations invalidate the complete query cache after the server commits. */
 function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
   const queryClient = useQueryClient()
-  return useMutation({
+  const running = useRef(false)
+  const mutation = useMutation({
     mutationFn: run,
     onSuccess: async () => {
       await queryClient.invalidateQueries()
       onDone()
     },
+    onSettled: () => { running.current = false },
   })
+  return { ...mutation, mutate: (input: T) => {
+    if (running.current) return
+    running.current = true
+    mutation.mutate(input)
+  } }
 }
 
 function FormSheet({
@@ -221,6 +230,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   // null means untouched (use the signed-in member's account); an empty string is an
   // explicit choice to record no funding account.
   const [paidFrom, setPaidFrom] = useState<string | null>(null)
+  const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
   const create = useLedgerMutation<NewProduct>(api.createProduct, onClose)
 
@@ -237,6 +247,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       amount,
       date: purchaseDate,
     })
+    if (fundingSplit) errors.funding = allocationError(fundingSplit, [amount, shipping, tax, fees], true) ?? undefined
     setValidation(errors)
     if (firstValidationError(errors)) return
 
@@ -266,7 +277,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
         tax: tax || undefined,
         fees: fees || undefined,
         source: optionalText(source),
-        funding: fundedBy ? [{ account_id: fundedBy }] : [],
+        funding: fundingSplit ? fundingPayload(fundingSplit) : fundedBy ? [{ account_id: fundedBy }] : [],
       },
     })
   }
@@ -319,7 +330,8 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       </Row>
       <Field label="Purchase date" value={purchaseDate} onChangeText={setPurchaseDate} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
-      <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} />
+      {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
+      <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
       <Copy muted>Optional slab and purchase details</Copy>
       <Row>
         <Field label="Grading company" value={gradingCompany} onChangeText={setGradingCompany} placeholder="PSA" />
@@ -353,12 +365,14 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
   const [notes, setNotes] = useState('')
   // Keep an explicit "No account recorded" choice distinct from the initial default.
   const [paidFrom, setPaidFrom] = useState<string | null>(null)
+  const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
   const create = useLedgerMutation(api.createPurchase, onClose)
   const fundedBy = paidFrom ?? mine?.id ?? ''
 
   function submit() {
     const errors = validateDraft('purchase', { productId: product.id, quantity, amount, date: purchaseDate })
+    if (fundingSplit) errors.funding = allocationError(fundingSplit, [amount, shipping, tax, fees], true) ?? undefined
     setValidation(errors)
     if (firstValidationError(errors)) return
     const parsedQuantity = parseIntegerQuantity(quantity, { positive: true })
@@ -375,7 +389,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
       purchase_date: purchaseDate,
       source: optionalText(source),
       notes: optionalText(notes),
-      funding: fundedBy ? [{ account_id: fundedBy }] : [],
+      funding: fundingSplit ? fundingPayload(fundingSplit) : fundedBy ? [{ account_id: fundedBy }] : [],
     })
   }
 
@@ -396,7 +410,8 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
       </Row>
       <Field label="Purchase date" value={purchaseDate} onChangeText={setPurchaseDate} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
-      <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} />
+      {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
+      <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
       <Row>
         <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
         <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />

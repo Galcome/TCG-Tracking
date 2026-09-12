@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Text } from 'react-native'
 
 import { useApi } from '../context/AppContext'
@@ -28,6 +28,8 @@ import {
 } from '../lib/sale-drafts'
 import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { AllocationEditor } from './allocation-editor'
+import { allocationError, allocationPayload, type AllocationDraft } from '../lib/allocation-drafts'
 
 export interface RecordSaleDialogProps {
   /** Omit to open a product picker before showing the sale fields. */
@@ -205,6 +207,8 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
   const [bucketOverride, setBucketOverride] = useState<Bucket | null>(null)
   const [proceeds, setProceeds] = useState<SaleProceeds>(() => ({ kind: 'account', accountId: '' }))
   const [accountOverride, setAccountOverride] = useState<string | null>(null)
+  const [proceedsSplit, setProceedsSplit] = useState<AllocationDraft[] | null>(null)
+  const submitting = useRef(false)
   const [allowOversell, setAllowOversell] = useState(false)
   const [validation, setValidation] = useState<SaleValidation>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -215,6 +219,7 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
       await queryClient.invalidateQueries()
       onClose()
     },
+    onSettled: () => { submitting.current = false },
   })
 
   const effectiveProceeds = useMemo(
@@ -236,8 +241,8 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
     marketplace,
     notes,
     allowOversell,
-    proceeds: effectiveProceeds,
-  }), [product.id, quantity, amount, platformFees, paymentFees, shippingPaid, saleDateValue, soldFrom, soldByMemberId, marketplace, notes, allowOversell, effectiveProceeds])
+    proceeds: proceedsSplit ? { kind: 'none' } : effectiveProceeds,
+  }), [product.id, quantity, amount, platformFees, paymentFees, shippingPaid, saleDateValue, soldFrom, soldByMemberId, marketplace, notes, allowOversell, effectiveProceeds, proceedsSplit])
   const request = useMemo(() => previewInput(draft), [draft])
   const requestKey = request ? salePreviewKey(request) : 'invalid'
   const preview = useQuery<SalePreviewEnvelope>({
@@ -259,8 +264,13 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
   }
 
   function submit() {
+    if (create.isPending || submitting.current) return
     setSubmitError(null)
     const errors = validateSaleDraft(draft)
+    if (proceedsSplit) {
+      const splitError = currentPreview ? allocationError(proceedsSplit, [currentPreview.net_proceeds]) : 'Wait for the server net payout preview before splitting proceeds.'
+      if (splitError) errors.proceeds = splitError
+    }
     if (currentPreview?.exceeds_stock && !allowOversell) {
       errors.quantity = `Only ${currentPreview.quantity_available} units are recorded. Allow oversell to continue.`
     }
@@ -274,6 +284,8 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
       setSubmitError('Complete the sale fields before recording it.')
       return
     }
+    if (proceedsSplit) payload.proceeds = allocationPayload(proceedsSplit)
+    submitting.current = true
     create.mutate(payload)
   }
 
@@ -322,7 +334,8 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
       />
       {customMarketplace ? <Field label="Channel name" value={marketplace} onChangeText={setMarketplace} autoFocus placeholder="Card shop, show, trade" /> : null}
       {selectedMarketplace ? <Copy muted>{selectedMarketplace.name} usually lists a {selectedMarketplace.feePercent}% all-in cut; enter what was actually charged.</Copy> : null}
-      <ProceedsChoice accounts={accounts} value={effectiveProceeds} onChange={chooseProceeds} />
+      {!proceedsSplit ? <ProceedsChoice accounts={accounts} value={effectiveProceeds} onChange={chooseProceeds} /> : null}
+      <AllocationEditor rows={proceedsSplit} onChange={setProceedsSplit} accounts={accounts} defaultAccount={effectiveProceeds.kind === 'account' ? effectiveProceeds.accountId : ''} disabled={create.isPending} />
       <Row>
         <Choice
           label="Sold by"

@@ -7,6 +7,7 @@ import { RecordSaleDialog } from '../../../components/sale-form';
 import { ProductOperations } from '../../../components/product-operations';
 import { LineageReport } from '../../../components/lineage-report';
 import { PricingControls } from '../../../components/pricing-controls';
+import { ProductLifecycle } from '../../../components/product-lifecycle';
 import { RecordValuationDialog } from '../../../components/valuation-form';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
@@ -33,6 +34,7 @@ export default function ProductDetail() {
       <Button label="Record valuation" onPress={() => setValuing(true)} />
       {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
       <PricingControls product={p} />
+      <ProductLifecycle product={p} />
       <ProductOperations key={p.id} product={p} />
       <LineageReport productId={p.id} />
       {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>

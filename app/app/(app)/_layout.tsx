@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Copy, ErrorNotice, Loading, Row } from '../../components/ui';
+import { AddProductDialog } from '../../components/product-forms';
 import { useSession } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
 export default function ProtectedLayout() {
   const { session, loading, error, signOut } = useSession();
   const [actionError, setActionError] = useState<unknown>(null);
+  const [adding, setAdding] = useState(false);
   const member = useQuery({ queryKey: ['me'], queryFn: () => session!.api.me(), enabled: Boolean(session) });
   const { isDesktop } = useResponsiveLayout();
   const path = usePathname();
@@ -21,10 +23,12 @@ export default function ProtectedLayout() {
         <Row>{([{ href: '/', label: 'Dashboard' }, { href: '/inventory', label: 'Inventory' }, { href: '/sales', label: 'Sales' }, { href: '/money', label: 'Money' }, { href: '/reports', label: 'Reports' }, { href: '/vault', label: 'Vault' }] as const).map(link =>
           <Button key={link.href} label={(path === link.href ? '• ' : '') + link.label} onPress={() => router.push(link.href)} disabled={!member.data} />)}</Row>
         <Button label="Sign out" onPress={() => { void signOut().catch(setActionError); }} />
+        <Button label="New product" disabled={!member.data} onPress={() => setAdding(true)} />
       </View>
       <View style={{ flex: 1 }}>
         <ErrorNotice error={error ?? actionError ?? member.error} retry={member.isError ? () => { void member.refetch(); } : undefined} />
         {member.isPending ? <Loading /> : member.data ? <Slot /> : null}
+        {member.data && adding ? <AddProductDialog onClose={() => setAdding(false)} /> : null}
       </View>
     </View>
   </SafeAreaView>;

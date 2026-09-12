@@ -18,18 +18,18 @@ export function Field({ label, ...props }: TextInputProps & { label: string }) {
     <TextInput {...props} accessibilityLabel={label} placeholderTextColor={colors.muted}
       style={[styles.input, props.multiline && { minHeight: 80 }, props.style]} /></View>;
 }
-export function Choice({ label, value, options, onChange }: {
-  label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void;
+export function Choice({ label, value, options, onChange, disabled = false }: {
+  label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const close = () => { setOpen(false); setQ(''); };
   return <View style={styles.field}><Text style={styles.label}>{label}</Text>
-    <Button label={label + ': ' + (options.find(o => o.value === value)?.label ?? 'Choose')} onPress={() => setOpen(true)} />
+    <Button label={label + ': ' + (options.find(o => o.value === value)?.label ?? 'Choose')} disabled={disabled} onPress={() => setOpen(true)} />
     <Sheet title={label} open={open} onClose={close}>
       {options.length > 10 && <Field label="Find option" value={q} onChangeText={setQ} />}
       {options.filter(o => o.label.toLowerCase().includes(q.toLowerCase())).map(o =>
-        <Button key={o.value} label={o.label} onPress={() => { onChange(o.value); close(); }} />)}
+        <Button key={o.value} label={o.label} disabled={disabled} onPress={() => { onChange(o.value); close(); }} />)}
     </Sheet></View>;
 }
 export function Sheet({ title, children, open, onClose, dismissDisabled = false }: PropsWithChildren<{ title: string; open: boolean; onClose: () => void; dismissDisabled?: boolean }>) {

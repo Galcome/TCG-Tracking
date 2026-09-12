@@ -19,13 +19,25 @@ export interface RecordValuationDialogProps {
     name: string
   }
   onClose: () => void
+  /** Optional context for a post-operation prompt; the normal Vault form keeps its copy. */
+  title?: string
+  description?: string
+  initialCapturedOn?: string
+  onSkip?: () => void
 }
 
-export function RecordValuationDialog({ product, onClose }: RecordValuationDialogProps) {
+export function RecordValuationDialog({
+  product,
+  onClose,
+  title,
+  description,
+  initialCapturedOn,
+  onSkip,
+}: RecordValuationDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
   const [value, setValue] = useState('')
-  const [capturedOn, setCapturedOn] = useState(todayIso())
+  const [capturedOn, setCapturedOn] = useState(initialCapturedOn ?? todayIso())
   const [notes, setNotes] = useState('')
   const [validation, setValidation] = useState<ValuationValidation>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -51,7 +63,7 @@ export function RecordValuationDialog({ product, onClose }: RecordValuationDialo
   function submit() {
     // The disabled button and Sheet guard cover normal interaction. The ref also closes the
     // synchronous gap before React has rendered the pending mutation state again.
-    if (busy) return
+    if (busy || submitting.current) return
 
     setValidation({})
     const errors = validateValuationDraft(draft)
@@ -68,11 +80,11 @@ export function RecordValuationDialog({ product, onClose }: RecordValuationDialo
   const validationMessage = firstValuationValidationError(validation)
 
   return (
-    <Sheet title={`Record valuation — ${product.name}`} open onClose={onClose} dismissDisabled={busy}>
+    <Sheet title={title ?? `Record valuation — ${product.name}`} open onClose={onClose} dismissDisabled={busy}>
       <Card>
         <Copy>{product.name}</Copy>
         <Copy muted>
-          Use a manual estimate per unit, including a slab price if you have one. This value stays separate from the ledger and never uses AI.
+          {description ?? 'Use a manual estimate per unit, including a slab price if you have one. This value stays separate from the ledger and never uses AI.'}
         </Copy>
       </Card>
       <Field
@@ -102,6 +114,7 @@ export function RecordValuationDialog({ product, onClose }: RecordValuationDialo
       />
       {validationMessage ? <ErrorNotice error={new Error(validationMessage)} /> : null}
       {record.error ? <ErrorNotice error={record.error} /> : null}
+      {onSkip ? <Button label="Skip valuation" onPress={onSkip} disabled={busy} /> : null}
       <Button label={busy ? 'Saving…' : 'Save valuation'} onPress={submit} disabled={busy} />
     </Sheet>
   )

@@ -28,6 +28,7 @@ import {
   type ProductDetail,
 } from '../lib/api'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { RecordValuationDialog } from './valuation-form'
 
 /** Graders worth a quick tap; the text field remains available for every other company. */
 export const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC'] as const
@@ -126,6 +127,18 @@ function BucketChoice({
   )
 }
 
+interface ValuationPrompt {
+  product: { id: string; name: string }
+  capturedOn: string
+  title: string
+  description: string
+}
+
+interface SendMutationInput {
+  draft: SendToGradingDraft
+  promptValuation: boolean
+}
+
 /** Send a flag to the grader. Stock and cost do not move until the return transformation. */
 export function SendToGradingDialog({ product, onClose }: SendToGradingDialogProps) {
   const api = useApi()
@@ -139,10 +152,13 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
   const [sentOn, setSentOn] = useState(todayIso())
   const [fees, setFees] = useState('')
   const [notes, setNotes] = useState('')
+  const [promptValuation, setPromptValuation] = useState(false)
+  const [valuationPrompt, setValuationPrompt] = useState<ValuationPrompt | null>(null)
   const [validation, setValidation] = useState<GradingValidation>({})
+  const submitting = useRef(false)
 
   const send = useMutation({
-    mutationFn: async (draft: SendToGradingDraft) => {
+    mutationFn: async ({ draft }: SendMutationInput) => {
       const [current, outstanding] = await Promise.all([api.product(product.id), api.gradingSubmissions({ product_id: product.id })])
       const error = firstGradingValidationError(validateSendToGradingDraft(draft, gradingAvailable(product.id, current.stats.by_bucket, outstanding)))
       if (error) throw new Error(error)
@@ -150,16 +166,29 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
       if (!payload) throw new Error('Complete the grading fields before sending it.')
       return api.sendToGrading(payload)
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, input) => {
       // The server is authoritative for stock and cost. Refresh every active view after
       // the committed flag so product history, bucket counts and outstanding submissions
       // cannot remain stale.
       await queryClient.invalidateQueries()
-      onClose()
+      if (input.promptValuation) {
+        setValuationPrompt({
+          product: { id: product.id, name: product.name },
+          capturedOn: input.draft.sentOn,
+          title: `Raw value before grading — ${product.name}`,
+          description: 'Optional manual per-unit CAD estimate before grading. Zero is valid; choose Skip valuation to leave no estimate. This is a dated note separate from ledger cost, stock, and profit.',
+        })
+      } else {
+        onClose()
+      }
+    },
+    onSettled: () => {
+      submitting.current = false
     },
   })
 
   function submit() {
+    if (send.isPending || submitting.current) return
     const draft: SendToGradingDraft = {
       productId: product.id,
       quantity,
@@ -173,7 +202,25 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
     if (!submissions.isSuccess || submissions.isFetching) errors.submissionId = 'Wait for grading availability to load before sending.'
     setValidation(errors)
     if (firstGradingValidationError(errors)) return
-    send.mutate(draft)
+    submitting.current = true
+    send.mutate({ draft, promptValuation })
+  }
+
+  if (valuationPrompt) {
+    const closePrompt = () => {
+      setValuationPrompt(null)
+      onClose()
+    }
+    return (
+      <RecordValuationDialog
+        product={valuationPrompt.product}
+        title={valuationPrompt.title}
+        description={valuationPrompt.description}
+        initialCapturedOn={valuationPrompt.capturedOn}
+        onClose={closePrompt}
+        onSkip={closePrompt}
+      />
+    )
   }
 
   return (
@@ -226,6 +273,19 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
         placeholder="YYYY-MM-DD"
       />
       <BucketChoice value={bucket} counts={counts} onChange={setBucket} />
+      <Choice
+        label="After sending"
+        value={promptValuation ? 'prompt' : 'skip'}
+        options={[
+          option('skip', 'Skip valuation'),
+          option('prompt', 'Ask for raw value'),
+        ]}
+        onChange={(next) => setPromptValuation(next === 'prompt')}
+      />
+      <Copy muted>
+        Optional: after a successful send, record a dated per-unit CAD estimate for the raw card.
+        Zero is valid; choose Skip valuation to leave no estimate.
+      </Copy>
       <Copy muted>
         It stays in {BUCKET_LABELS[bucket]} while away. The bucket counts above are a
         client-side guard; the server checks availability again when you send.
@@ -238,6 +298,8 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
 interface ReturnMutationInput {
   draft: ReturnFromGradingDraft
   childPayload: ReturnFromGradingDraft
+  promptValuation: boolean
+  childName: string
 }
 
 function ExistingGradedProductPicker({
@@ -247,7 +309,7 @@ function ExistingGradedProductPicker({
 }: {
   sourceProductId: string
   selectedId: string
-  onSelect: (id: string) => void
+  onSelect: (id: string, name: string) => void
 }) {
   const api = useApi()
   const [search, setSearch] = useState('')
@@ -272,7 +334,7 @@ function ExistingGradedProductPicker({
         <Button
           key={item.id}
           label={`${selectedId === item.id ? 'Selected: ' : ''}${item.name}${productIdentity(item) ? ` · ${productIdentity(item)}` : ''}`}
-          onPress={() => onSelect(item.id)}
+          onPress={() => onSelect(item.id, item.name)}
         />
       ))}
     </>
@@ -294,6 +356,7 @@ export function ReturnFromGradingDialog({
   const productTypes = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
   const [childMode, setChildMode] = useState<'create' | 'existing'>('create')
   const [existingProductId, setExistingProductId] = useState('')
+  const [existingProductName, setExistingProductName] = useState('')
   const createdChildIdRef = useRef<string | null>(null)
   const [createdChildId, setCreatedChildId] = useState<string | null>(null)
   const [grade, setGrade] = useState('')
@@ -308,7 +371,10 @@ export function ReturnFromGradingDialog({
   const [returnedOn, setReturnedOn] = useState(todayIso())
   const [extraFees, setExtraFees] = useState('')
   const [notes, setNotes] = useState('')
+  const [promptValuation, setPromptValuation] = useState(false)
+  const [valuationPrompt, setValuationPrompt] = useState<ValuationPrompt | null>(null)
   const [validation, setValidation] = useState<GradingValidation>({})
+  const submitting = useRef(false)
 
   const gradedTypeId = productTypes.data?.find((item) => item.slug === 'graded-card')?.id ?? ''
   const suggested = gradedName(product.name, submission.grading_company, grade)
@@ -341,12 +407,30 @@ export function ReturnFromGradingDialog({
       if (!payload) throw new Error('Complete the return fields before recording it.')
       const result = await api.returnFromGrading(submission.id, payload)
       await queryClient.invalidateQueries()
-      return result
+      return { result, gradedProductId }
     },
-    onSuccess: onClose,
+    onSuccess: async ({ gradedProductId }, input) => {
+      if (input.promptValuation) {
+        setValuationPrompt({
+          product: {
+            id: gradedProductId,
+            name: input.childName,
+          },
+          capturedOn: input.draft.returnedOn,
+          title: `Value after grading — ${input.childName}`,
+          description: 'Optional manual per-unit CAD estimate for the returned graded card. Zero is valid; choose Skip valuation to leave no estimate. This is a dated note separate from ledger cost, stock, and profit.',
+        })
+      } else {
+        onClose()
+      }
+    },
+    onSettled: () => {
+      submitting.current = false
+    },
   })
 
   function submit() {
+    if (returned.isPending || submitting.current) return
     const selectedId = createdChildIdRef.current ?? (childMode === 'existing' ? existingProductId : '')
     const inlineTypeId = gradedTypeId
     const draft: ReturnFromGradingDraft = {
@@ -383,7 +467,26 @@ export function ReturnFromGradingDialog({
     setValidation(errors)
     if (firstGradingValidationError(errors)) return
 
-    returned.mutate({ draft, childPayload: draft })
+    const childName = childMode === 'existing' ? existingProductName || 'Returned graded card' : finalName
+    submitting.current = true
+    returned.mutate({ draft, childPayload: draft, promptValuation, childName })
+  }
+
+  if (valuationPrompt) {
+    const closePrompt = () => {
+      setValuationPrompt(null)
+      onClose()
+    }
+    return (
+      <RecordValuationDialog
+        product={valuationPrompt.product}
+        title={valuationPrompt.title}
+        description={valuationPrompt.description}
+        initialCapturedOn={valuationPrompt.capturedOn}
+        onClose={closePrompt}
+        onSkip={closePrompt}
+      />
+    )
   }
 
   const childError = productTypes.error
@@ -436,7 +539,10 @@ export function ReturnFromGradingDialog({
         <ExistingGradedProductPicker
           sourceProductId={product.id}
           selectedId={existingProductId}
-          onSelect={setExistingProductId}
+          onSelect={(id, selectedName) => {
+            setExistingProductId(id)
+            setExistingProductName(selectedName)
+          }}
         />
       ) : null}
       {createdChildId ? (
@@ -481,6 +587,19 @@ export function ReturnFromGradingDialog({
       <Copy muted>
         Extra fees stay decimal strings. They are added by the server to the fee already
         recorded on the submission; the client never calculates cost or profit.
+      </Copy>
+      <Choice
+        label="After returning"
+        value={promptValuation ? 'prompt' : 'skip'}
+        options={[
+          option('skip', 'Skip valuation'),
+          option('prompt', 'Ask for graded value'),
+        ]}
+        onChange={(next) => setPromptValuation(next === 'prompt')}
+      />
+      <Copy muted>
+        Optional: after a successful return, record a dated per-unit CAD estimate for the
+        graded card. Zero is valid; choose Skip valuation to leave no estimate.
       </Copy>
       <Field label="Note" value={notes} onChangeText={setNotes} multiline />
     </GradingSheet>

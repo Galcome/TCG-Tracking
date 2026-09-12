@@ -14,16 +14,16 @@ foundation owner until its interface is stable.
 | Area | Required flows and states | Existing verification reference | Status |
 | --- | --- | --- | --- |
 | Auth and shell | Email and Google login, restore/refresh session, membership rejection, signout, retry, deep links, global actions, responsive navigation | `web/e2e/nav.spec.ts`, `mobile.spec.ts`; backend auth tests | In progress |
-| Dashboard | Profit/cost/cash distinctions, attention flags, recent sales, scoped reports, shared persisted All/YTD/MTD/30/60/90 default60 | `balance.spec.ts`, `reports-chart.spec.ts`; PR74 | Pending |
-| Inventory | Search/game/stock/bucket filters, paging, accessible bucket colours, aligned counts, estimate source/date/status | `buckets.spec.ts`, `bucket-journey.spec.ts`; PR73 | Pending |
-| Products | Add/edit/archive/delete safeguards; taxonomy, set suggestions, language/collector/variant/slab identity; history | `add-product.spec.ts`, `sets.spec.ts`, `ledger.spec.ts` | Pending |
-| Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Pending |
+| Dashboard | Profit/cost/cash distinctions, attention flags, recent sales, scoped reports, shared persisted All/YTD/MTD/30/60/90 default60 | `balance.spec.ts`, `reports-chart.spec.ts`; PR74 | Partial: scoped browser figures/recent sales verified; trend and shell polish pending |
+| Inventory | Search/game/stock/bucket filters, paging, accessible bucket colours, aligned counts, estimate source/date/status | `buckets.spec.ts`, `bucket-journey.spec.ts`; PR73 | Partial: browser list/buckets/responsiveness verified; added taxonomy/archive filters need expanded regression |
+| Products | Add/edit/archive/delete safeguards; taxonomy, set suggestions, language/collector/variant/slab identity; history | `add-product.spec.ts`, `sets.spec.ts`, `ledger.spec.ts` | Partial: identity/history and archive/delete browser flows verified; native acceptance pending |
+| Purchases/stock | Purchase funding and fees, adjustments, bucket moves, edits/void reasons, invalid/unknown/zero costs | `ledger.spec.ts`, `money.spec.ts`, `buckets.spec.ts` | Partial: browser operations verified; split funding pending |
 | Sales | Search/member/marketplace/period filters, server preview, sale entry/edit/void, proceeds funding, unknown costs, CSV | `sales.spec.ts`, `store-credit.spec.ts`, `exports.spec.ts` | Partial: web flows and CSV verified; split proceeds and device acceptance pending |
-| Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Pending |
+| Money | Joint/member/store-credit accounts, postings, transfer, adjustment, void, partial funding/proceeds | `money.spec.ts`, `store-credit.spec.ts`, `balance.spec.ts` | Partial: browser account/movement flows verified; split funding/proceeds pending |
 | Crack | Case/box suggestions and editable child quantities, bucket allocation, original dates/cost lineage, reverse | `crack.spec.ts` | Partial: web journey verified; device acceptance pending |
-| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual quantity/identity/retry verified; photos and preview pending |
+| Rip | Multiple hits, proportional allocation, empty/bulk writeoff, identity candidates/reuse, photo batches/manual fallback, reverse | `rip.spec.ts` | Partial: manual and browser photo suggestions verified; native photos and allocation preview pending |
 | Grading | Send/date/company/fees, outstanding status, return identity and valuation, void safeguards | `grading.spec.ts` | Partial: send/return/reuse/void verified; valuations and API concurrency guards pending |
-| Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Pending |
+| Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: controls/unit guards and real mapping writes verified; expanded discovery/device acceptance pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Pending |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
@@ -382,3 +382,41 @@ changing retry behavior. Android/iOS Hermes exports passed with photo/pricing in
 these are not installed app builds. SDK compatibility check passed. No Android devices were
 listed by `adb devices -l`; real-device acceptance remains open. Independent review still
 cannot start at the agent-thread limit. No push, deployment or production cutover occurred.
+
+## 2026-09-12 Catalogue, grading valuations and allocation checkpoint
+
+Catalogue management now offers confirmed archive/restore and typed `DELETE` confirmation.
+The API remains the deletion authority, including voided history. Browser checks prove
+archive preserves stock and $10.01 cost, restore works, history blocks deletion, and an
+empty mistaken product can be deleted. Inventory includes type/archive filters; global
+New product reuses the existing authenticated form. Browser photo selection also restores
+after cancellation on older browsers using a scoped focus fallback.
+
+Optional manual valuation prompts are explicitly opted into before grading send/return;
+defaults preserve the existing fast workflow. Prompts open only after the grading transaction
+commits and use that operation's date/product. Valuation rejection/retry/skip never repeats
+send/return, and zero remains valid. Provider estimates do not supply slab values. Synchronous
+submit guards cover grading, valuation and shared stock/sale forms.
+
+Added complete multi-account funding and mixed account/store-credit proceeds. Exact integer
+cents validate input sums only: landed funding includes shipping/tax/fees, whereas proceeds
+match the server's net preview. Every allocation carries an explicit decimal amount; duplicate
+destinations and incomplete splits are rejected. Server accounting/access checks remain final.
+The browser proves $10.01 + $0.29 shipping posts as -$5.10/-$5.20, and a $20 sale split $10
+account/$10 store credit preserves server realized profit $9.70. Corrections still rescale
+existing splits through backend behavior rather than silently replacing them with one account.
+
+Validation: 86 unit tests, typecheck and ESLint passed. The final serial full browser suite
+passed all 28 tests (exit 0); Android/iOS Hermes exports passed. An earlier run had 27 passes
+and one test timing failure: search was still debouncing when the newly added sale made the
+generic Void selector ambiguous. Waiting for the filtered response fixed the fixture without
+changing ledger behavior. The first valuation rejection fixture also used the wrong URL;
+corrected to the actual `/api/v1/valuations` endpoint, then retry/zero/skip passed.
+
+Luna hit its usage limit during the grading slice (reported retry 12:44 PM); root completed
+integration and verification locally. Independent review is not claimed. Backend grading
+integrity is now being handled separately in `fix/grading-transaction-integrity`, worktree
+`TCG-Tracking-codex-grading`, based on `origin/main`, not mixed into frontend source.
+Allocation preview, full shell polish/global sale action, native IDs/Google/telemetry/assets,
+actual device/signing/distribution/preview and final approved Hosting cutover remain open.
+No push, deployment, production data change or website switch occurred.
