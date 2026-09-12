@@ -1,0 +1,8 @@
+{
+  "firebaseProjectId": "tcg-tracking",
+  "firebaseAuthDomain": "tcg-tracking.firebaseapp.com",
+  "apiOrigin": "https://api-production-6ea5.up.railway.app",
+  "androidPackage": "com.galcome.tcgtracking",
+  "iosBundleIdentifier": "com.galcome.tcgtracking",
+  "nativeMode": "pending"
+}

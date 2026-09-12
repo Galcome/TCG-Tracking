@@ -548,3 +548,24 @@ replace installed-device tests or review of the separate release-configuration p
 
 Native Firebase registration authorization remains unanswered. No cloud registration,
 provider change, signing, distribution or website cutover is authorized by this checkpoint.
+
+### Release configuration preflight acceptance
+
+Implemented dependency-free local CLI and EAS pre-install hook with explicit build context,
+reviewed TCG target identities, exact documented API origin, required public environment,
+disabled dotenv, sanitized failures and explicit development skip. Full native mode remains
+unsupported; native SDK/plugin/service activation, dynamic app config and pre-existing
+Android/iOS projects fail closed pending reviewed native configuration. No network/build
+or cloud operation is performed. Local exports and Vite deployment remain unchanged.
+
+TypeScript, ESLint and **97 app unit tests** passed. A manual release invocation without
+configuration rejected with exit 1 and names/reasons only. Independent review caught a P2
+filesystem gap for service files wired inside native projects; rejecting pre-existing native
+projects and adding a real CLI regression closed it. Reviewer verified the fix with no
+remaining concrete P1/P2 in this scope. Previous API/browser/export evidence is unchanged,
+not rerun for this build-hook-only slice. The coder profile was unavailable; explicitly
+requested Luna fallback prepared initial code, then root finished bounded integration.
+
+Next gates require native registration authorization, matching platform/OAuth/signing
+configuration and installed-device testing. Passing this preflight does not authorize an
+EAS build, distribution, hosted preview or production cutover. No changes were pushed.

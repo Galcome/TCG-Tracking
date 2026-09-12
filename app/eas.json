@@ -4,16 +4,21 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "environment": "preview",
+      "env": { "EXPO_NO_DOTENV": "1" },
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "environment": "production",
+      "env": { "EXPO_NO_DOTENV": "1" },
       "autoIncrement": true
     }
   }

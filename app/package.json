@@ -4,6 +4,8 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "eas-build-pre-install": "node scripts/release-preflight.mjs",
     "start": "expo start",
     "web": "expo start --web",
     "android": "expo run:android",

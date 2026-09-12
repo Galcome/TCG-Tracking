@@ -63,6 +63,23 @@ kill/relaunch and token refresh must be verified on devices. Google is currently
 Android/iOS JavaScript export success is not an APK/IPA build or device acceptance.
 Do not run production builds or switch the live website based on this foundation alone.
 
+## Release configuration preflight
+
+Supply the four public values explicitly through shell/EAS and `EXPO_NO_DOTENV=1`, then run
+`npm run release:preflight -- --profile preview --platform android` (or production/ios).
+The dependency-free `eas-build-pre-install` hook uses `EAS_BUILD_PROFILE` and
+`EAS_BUILD_PLATFORM`; missing/conflicting context fails. Explicit development skips release
+checks. Custom build workflows must invoke the guard themselves.
+
+The target pins TCG identities and the production API origin documented in
+`docs/DEPLOYMENT_TEMPLATE.md`. Fixture/local/wrong-project values, dotenv loading, dynamic
+app config overrides, pre-existing Android/iOS projects and partial native SDK activation fail closed. Full native validation
+is unsupported pending approved registrations/configuration. Public-key shape is checked,
+not ownership or deployed backend compatibility. Passing validates configuration only;
+native Google, telemetry, icons, signing, device acceptance, distribution approval and a
+separately approved website cutover are still required. No cloud action is performed.
+Ordinary local exports/test fixtures remain unchanged.
+
 ## Tracking
 
 See [parity tracker](../docs/requirements/expo-parity-tracker.md) and
