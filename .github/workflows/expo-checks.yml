@@ -6,8 +6,13 @@ on:
     branches: [main, dev]
     paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", ".github/workflows/expo-checks.yml"]
   push:
-    branches: ["feature/expo-**"]
-    paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", ".github/workflows/expo-checks.yml"]
+    # Always validate exact protected-branch commits, including docs-only merges,
+    # so a future exact-main mobile release gate can find an authoritative result.
+    branches: [main, dev]
+
+concurrency:
+  group: expo-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
