@@ -66,6 +66,45 @@ const BUCKET_BLURB: Record<string, string> = {
 }
 
 /**
+ * One restrained colour for each place. The words remain in every badge and tab so
+ * the colour makes a mixed row scannable without becoming a colour-only status.
+ */
+const BUCKET_TONES: Record<
+  Bucket,
+  {
+    dot: string
+    value: string
+    active: string
+    badge: string
+  }
+> = {
+  inventory: {
+    dot: 'bg-(--color-bucket-inventory)',
+    value: 'text-(--color-bucket-inventory)',
+    active:
+      'bg-(--color-bucket-inventory)/12 text-(--color-bucket-inventory) ring-1 ring-inset ring-(--color-bucket-inventory)/30',
+    badge:
+      'border-(--color-bucket-inventory)/30 bg-(--color-bucket-inventory)/10 text-(--color-bucket-inventory)',
+  },
+  store: {
+    dot: 'bg-(--color-bucket-store)',
+    value: 'text-(--color-bucket-store)',
+    active:
+      'bg-(--color-bucket-store)/12 text-(--color-bucket-store) ring-1 ring-inset ring-(--color-bucket-store)/30',
+    badge:
+      'border-(--color-bucket-store)/30 bg-(--color-bucket-store)/10 text-(--color-bucket-store)',
+  },
+  vault: {
+    dot: 'bg-(--color-bucket-vault)',
+    value: 'text-(--color-bucket-vault)',
+    active:
+      'bg-(--color-bucket-vault)/12 text-(--color-bucket-vault) ring-1 ring-inset ring-(--color-bucket-vault)/30',
+    badge:
+      'border-(--color-bucket-vault)/30 bg-(--color-bucket-vault)/10 text-(--color-bucket-vault)',
+  },
+}
+
+/**
  * Where a product's stock actually sits. Always shown when there is any.
  *
  * An earlier version stayed silent unless stock was split across buckets, on the grounds
@@ -78,8 +117,15 @@ function BucketSplit({ by }: { by: Record<Bucket, number> }) {
   if (held.length === 0) return null
 
   return (
-    <span className="mt-0.5 block whitespace-nowrap text-[0.6875rem] font-normal text-(--color-faint)">
-      {held.map((bucket) => `${by[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`).join(' · ')}
+    <span className="mt-1 flex max-w-full flex-wrap items-center justify-center gap-1 text-[0.6875rem] font-normal leading-4">
+      {held.map((bucket) => (
+        <span
+          key={bucket}
+          className={`inline-flex items-center rounded-full border px-1.5 py-0.5 ${BUCKET_TONES[bucket].badge}`}
+        >
+          {by[bucket]} {BUCKET_LABELS[bucket].toLowerCase()}
+        </span>
+      ))}
     </span>
   )
 }
@@ -120,14 +166,23 @@ function BucketTabs({
           key={tab.key}
           type="button"
           onClick={() => onChange(tab.key)}
-          className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
+          aria-pressed={value === tab.key}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
             value === tab.key
-              ? 'bg-(--color-accent) font-medium text-(--color-ink)'
+              ? tab.key
+                ? `${BUCKET_TONES[tab.key as Bucket].active} font-medium`
+                : 'bg-(--color-accent) font-medium text-(--color-ink)'
               : 'text-(--color-muted) hover:text-(--color-text)'
           }`}
         >
+          {tab.key && (
+            <span
+              aria-hidden="true"
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${BUCKET_TONES[tab.key as Bucket].dot}`}
+            />
+          )}
           {tab.label}
-          <span className="ml-1.5 tabular-nums opacity-70">{tab.count}</span>
+          <span className="tabular-nums opacity-70">{tab.count}</span>
         </button>
       ))}
     </div>
@@ -262,7 +317,11 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                   <th className="px-4 py-3 font-medium">Product</th>
                   <th className="px-4 py-3 font-medium">Game</th>
                   <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                  <th
+                    className={`w-32 min-w-32 whitespace-nowrap px-2 py-3 text-center font-medium ${
+                      bucket ? BUCKET_TONES[bucket as Bucket].value : ''
+                    }`}
+                  >
                     {bucket ? `In ${title}` : 'In stock'}
                   </th>
                   {/* First column to go when width runs out: it is derived, and the
@@ -311,8 +370,12 @@ export function Inventory({ onRecordSale, onAddProduct }: PageActions) {
                       {product.product_type.name}
                     </td>
                     <td
-                      className={`px-4 py-3 text-right tabular-nums ${
-                        product.stats.quantity_on_hand < 0 ? 'text-(--color-loss)' : ''
+                      className={`w-32 min-w-32 px-2 py-3 text-center tabular-nums ${
+                        product.stats.quantity_on_hand < 0
+                          ? 'text-(--color-loss)'
+                          : bucket
+                            ? BUCKET_TONES[bucket as Bucket].value
+                            : ''
                       }`}
                     >
                       {countFor(product.stats.by_bucket, product.stats.quantity_on_hand, bucket)}

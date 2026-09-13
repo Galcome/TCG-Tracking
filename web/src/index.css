@@ -24,6 +24,14 @@
   --color-loss: #ff6b6b;
   --color-warn: #ffb454;
 
+  /* Stock places. Keep the same restrained vocabulary anywhere the Inventory page
+     compares where units are held: cyan is bought/held, gold is lined up to sell,
+     and violet is the deliberate long-term hold. The labels stay visible anywhere
+     these colours appear, so hue is a scan aid rather than the only meaning. */
+  --color-bucket-inventory: #4cc4ff;
+  --color-bucket-store: #ffb454;
+  --color-bucket-vault: #a55eea;
+
   /* Per-game identity. Used as a small dot so a mixed inventory list groups at a
      glance without a legend. */
   --color-game-pokemon: #ffcb05;
