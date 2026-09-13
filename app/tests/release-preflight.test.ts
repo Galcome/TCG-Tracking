@@ -82,7 +82,8 @@ test('wrong identities, fixture keys, malformed policies and missing configs are
 test('pending native mode rejects partial activation and dynamic overrides', () => {
   for (const name of ['@react-native-firebase/app', '@react-native-google-signin/google-signin', '@sentry/react-native']) {
     const input = fixture(); input.manifest.dependencies[name] = '1';
-    assert.equal(validateRelease(input).ok, false, name);
+    // Dormant native dependencies are allowed; activation requires a validated build.
+    assert.equal(validateRelease(input).ok, true, name);
   }
   const plugin = fixture(); plugin.app.expo.plugins.push(['@react-native-firebase/app', {}]);
   assert.equal(validateRelease(plugin).ok, false);
@@ -115,6 +116,7 @@ test('CLI rejects pre-existing Android/iOS projects while native mode is pending
   try {
     mkdirSync(join(temporaryRoot, 'scripts'));
     copyFileSync(new URL('../scripts/release-preflight.mjs', import.meta.url), join(temporaryRoot, 'scripts/release-preflight.mjs'));
+    copyFileSync(new URL('../scripts/native-config.cjs', import.meta.url), join(temporaryRoot, 'scripts/native-config.cjs'));
     for (const name of ['release-target.json', 'eas.json', 'app.json', 'package.json']) {
       copyFileSync(new URL(`../${name}`, import.meta.url), join(temporaryRoot, name));
     }
@@ -133,4 +135,23 @@ test('CLI rejects pre-existing Android/iOS projects while native mode is pending
     // Only this test-owned, verified temp directory is removed.
     rmSync(temporaryRoot, { recursive: true });
   }
+});
+
+test('Android native build requires matching registration, service, OAuth and dependencies', () => {
+  const input = fixture();
+  Object.assign(input.env, { TCG_NATIVE_BUILD: '1', EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: target.googleWebClientId });
+  const service = { project_info: { project_id: target.firebaseProjectId }, client: [{
+    client_info: { mobilesdk_app_id: target.androidAppId, android_client_info: { package_name: target.androidPackage } },
+    oauth_client: [{ client_type: 3, client_id: target.googleWebClientId },
+      { client_type: 1, android_info: { package_name: target.androidPackage, certificate_hash: target.androidSigningSha1 } }],
+  }] };
+  assert.equal(validateRelease({ ...input, androidService: service }).ok, true);
+  assert.equal(validateRelease(input).ok, false);
+  const withoutAndroidOAuth = structuredClone(service);
+  withoutAndroidOAuth.client[0].oauth_client = withoutAndroidOAuth.client[0].oauth_client.filter((entry) => entry.client_type !== 1);
+  assert.equal(validateRelease({ ...input, androidService: withoutAndroidOAuth }).ok, false);
+  assert.equal(validateRelease({ ...input, androidService: { ...service, project_info: { project_id: 'household' } } }).ok, false);
+  assert.equal(validateRelease({ ...input, context: { profile: 'preview', platform: 'ios' }, androidService: service }).ok, false);
+  const missing = structuredClone(input); delete missing.manifest.dependencies['@react-native-firebase/perf'];
+  assert.equal(validateRelease({ ...missing, androidService: service }).ok, false);
 });

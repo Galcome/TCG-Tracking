@@ -569,3 +569,34 @@ requested Luna fallback prepared initial code, then root finished bounded integr
 Next gates require native registration authorization, matching platform/OAuth/signing
 configuration and installed-device testing. Passing this preflight does not authorize an
 EAS build, distribution, hosted preview or production cutover. No changes were pushed.
+
+### Native Android packaging checkpoint — September 13
+
+Joseph subsequently authorized native registrations and local Gradle → Firebase internal
+distribution, with iOS EAS cloud later and CI/CD work after distribution. Android and iOS
+registrations now exist in the existing TCG Firebase project. Android build opt-in requires
+matching app/package, web OAuth client and Android certificate OAuth configuration. Native
+Google sign-in preserves existing JS Firebase sessions; ordinary web exports remain isolated
+from native modules. Lazy native Crashlytics/Performance setup does not establish device receipt.
+
+A unique ignored TCG release keystore replaces Expo debug signing. Its public fingerprints
+match the registered Android OAuth certificate and the packaged APK. The temporary debug
+fingerprint added during preparation was removed; secure signing-key backup is still required.
+Local commands validate source/APK receipts, signing and identity before distribution.
+
+App tests **107/107**, TypeScript, ESLint and ordinary Expo web export passed. The first
+Windows native attempt failed in the older CMake/Ninja toolchain. A project-local Gradle
+init script selects installed CMake 3.31.6 without altering shared SDK binaries; the retry
+completed `assembleRelease` successfully in 16m 9s. Actual APK signature and package/version
+were verified (`com.galcome.tcgtracking`, version 0.1.0/code 1). The compiled JS bundle contains
+the reviewed production API and none of the checked E2E configuration markers. Because a
+release script changed during that build, the guard correctly refused its final receipt;
+a frozen-source cached rebuild remains necessary before distribution eligibility.
+
+No upload, production backend deployment, website cutover or CI/CD redesign occurred.
+App Distribution group listing returned 404; console initialization and explicit TCG tester
+aliases remain needed. The first-internal feature-branch release exception is unanswered.
+The production backend must first receive the reviewed reporting-period and rip-preview/FIFO
+changes required by this app, or an explicitly approved compatible test API must be selected.
+No Android device is connected; installed-device auth/relaunch/camera/sharing and telemetry
+acceptance remain pending. iOS native setup and cloud build are not yet validated.

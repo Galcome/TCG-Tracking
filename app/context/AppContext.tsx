@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, type User } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, type User } from 'firebase/auth';
 import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { createApi, type Api } from '../lib/api';
 import { createRequest, isWorthRetrying } from '../lib/transport';
-import { authInstance, googleAvailable, googleSignIn } from '../lib/firebase';
+import { authInstance, googleAvailable, googleSignIn, signOut as platformSignOut } from '../lib/firebase';
 import { getConfig } from '../lib/config';
 import { createSessionGuard } from '../lib/session';
 type Session = { uid: string; api: Api; queries: QueryClient };
@@ -63,7 +63,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const signOut = async () => {
     // Keep the authenticated screen mounted so a persistence failure is visible and
     // retryable. Only report sign-out after Firebase has actually cleared the session.
-    await firebaseSignOut(authInstance());
+    await platformSignOut();
     guard.current.invalidate();
     session.current?.queries.clear();
     session.current = null;

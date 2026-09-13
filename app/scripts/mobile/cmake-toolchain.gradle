@@ -1,0 +1,8 @@
+// Project-local Windows toolchain selection. Do not replace shared SDK binaries.
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            project.extensions.getByName('android').externalNativeBuild.cmake.version = '3.31.6'
+        }
+    }
+}

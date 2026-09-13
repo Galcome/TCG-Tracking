@@ -11,6 +11,7 @@
     },
     "android": {
       "package": "com.galcome.tcgtracking",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#0a0e1a"
       }
@@ -23,11 +24,15 @@
       "expo-router",
       "expo-status-bar",
       "expo-sharing",
-      ["expo-image-picker", {
-        "photosPermission": "Allow TCG Investments to select card photos for identity suggestions.",
-        "cameraPermission": "Allow TCG Investments to photograph cards for identity suggestions.",
-        "microphonePermission": false
-      }]
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow TCG Investments to select card photos for identity suggestions.",
+          "cameraPermission": "Allow TCG Investments to photograph cards for identity suggestions.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true

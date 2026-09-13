@@ -22,3 +22,5 @@ output/playwright/
 *.mobileprovision
 google-services.json
 GoogleService-Info.plist
+.firebase-web-config.json
+.native-release/

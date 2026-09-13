@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import nativeHelpers from './native-config.cjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const profiles = ['development', 'preview', 'production'];
@@ -27,7 +28,7 @@ export function buildContext(argv, env) {
 }
 
 /** @param {Record<string, any>} input */
-export function validateRelease({ context, env = {}, target, eas, app, manifest, nativeFiles = [], dynamicConfig = false }) {
+export function validateRelease({ context, env = {}, target, eas, app, manifest, nativeFiles = [], dynamicConfig = false, androidService }) {
   const errors = [];
   const fail = (message) => errors.push(message);
   if (!profiles.includes(context?.profile) || !platforms.includes(context?.platform)) {
@@ -39,6 +40,11 @@ export function validateRelease({ context, env = {}, target, eas, app, manifest,
     || target.apiOrigin !== 'https://api-production-6ea5.up.railway.app'
     || target.androidPackage !== 'com.galcome.tcgtracking'
     || target.iosBundleIdentifier !== 'com.galcome.tcgtracking'
+    || target.androidAppId !== '1:304233430839:android:75a3507eda63cefe3b64b2'
+    || target.iosAppId !== '1:304233430839:ios:c1b31c756ff1e22f3b64b2'
+    || target.googleWebClientId !== '304233430839-95kp2702183c867u13giihdmkc6rpkfc.apps.googleusercontent.com'
+    || target.androidSigningSha1 !== 'd703f6ed97fb5ad55465c5d6611640d77ea1e140'
+    || target.androidSigningSha256 !== 'aa28fc92e91998056f37fbb4eb776f04f1945f7041257c544e35e127385db85d'
     || target.nativeMode !== 'pending') fail('Release target is missing, malformed or unapproved; full native mode is unsupported.');
   if (eas?.cli?.appVersionSource !== 'local'
     || profiles.some((p) => eas?.build?.[p]?.environment !== p)
@@ -64,11 +70,22 @@ export function validateRelease({ context, env = {}, target, eas, app, manifest,
   const dependencies = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
     .flatMap((section) => Object.keys(manifest?.[section] ?? {}));
   const plugins = (app?.expo?.plugins ?? []).map((p) => Array.isArray(p) ? p[0] : p);
-  if ([...dependencies, ...plugins].some((p) => /react-native-firebase|google-signin|sentry\/react-native/i.test(String(p)))
+  const nativeAndroid = env.TCG_NATIVE_BUILD === '1' && context.platform === 'android';
+  if (env.TCG_NATIVE_BUILD === '1' && context.platform !== 'android') fail('iOS native validation is not implemented yet.');
+  if (nativeAndroid) {
+    try {
+      nativeHelpers.validateAndroidService(androidService, target, env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+      for (const dependency of ['@react-native-firebase/app', '@react-native-firebase/crashlytics', '@react-native-firebase/perf', '@react-native-google-signin/google-signin']) {
+        if (!dependencies.includes(dependency)) throw new Error('Missing native dependency.');
+      }
+    } catch { fail('Android native service/OAuth/dependency configuration could not be validated.'); }
+  }
+  if (!nativeAndroid && (plugins.some((p) => /react-native-firebase|google-signin|sentry\/react-native/i.test(String(p)))
     || Object.hasOwn(app?.expo?.android ?? {}, 'googleServicesFile')
     || Object.hasOwn(app?.expo?.ios ?? {}, 'googleServicesFile')
+    // Installed dependencies alone do not activate plugins in ordinary exports.
     || nativeFiles.length
-    || Object.keys(env).some((name) => /GOOGLE_SERVICES|GOOGLE_SERVICE_INFO|FIREBASE_SERVICE_FILE/.test(name) && env[name])) {
+    || Object.keys(env).some((name) => /GOOGLE_SERVICES|GOOGLE_SERVICE_INFO|FIREBASE_SERVICE_FILE/.test(name) && env[name]))) {
     fail('Partial native activation is forbidden while native configuration is pending.');
   }
   return { ok: errors.length === 0, skipped: false, errors, caveat };
@@ -81,10 +98,12 @@ function main() {
     const read = (name) => JSON.parse(readFileSync(resolve(root, name), 'utf8'));
     return validateRelease({ context, env: process.env,
       target: read('release-target.json'), eas: read('eas.json'), app: read('app.json'), manifest: read('package.json'),
+      androidService: process.env.TCG_NATIVE_BUILD === '1' && context.platform === 'android'
+        ? JSON.parse(readFileSync(process.env.GOOGLE_SERVICES_JSON || resolve(root, 'google-services.json'), 'utf8')) : undefined,
       nativeFiles: ['google-services.json', 'GoogleService-Info.plist'].filter((name) => existsSync(resolve(root, name))),
       // Pre-existing native projects can wire SDKs/service files outside app.json.
       // Reject them until full native validation is reviewed and implemented.
-      dynamicConfig: ['app.config.js', 'app.config.ts', 'app.config.mjs', 'app.config.cjs', 'android', 'ios'].some((name) => existsSync(resolve(root, name))),
+      dynamicConfig: ['app.config.ts', 'app.config.mjs', 'app.config.cjs', 'ios', ...(process.env.TCG_NATIVE_BUILD === '1' ? [] : ['android'])].some((name) => existsSync(resolve(root, name))),
     });
   } catch {
     // Never print parser exceptions, environment values or service-file contents.

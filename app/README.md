@@ -58,7 +58,8 @@ EAS profiles retain Household's current local app-version policy. Before distrib
 reconcile the package/bundle ID, Firebase registrations, native Google credential flow,
 signing, version increment, telemetry, app icons, and environment configuration. Native
 email/password persistence is explicitly initialized with AsyncStorage, but actual
-kill/relaunch and token refresh must be verified on devices. Google is currently web-only.
+kill/relaunch and token refresh must be verified on devices. Native Google is enabled only
+in a validated Android build; installed-device authentication remains unverified.
 
 Android/iOS JavaScript export success is not an APK/IPA build or device acceptance.
 Do not run production builds or switch the live website based on this foundation alone.
@@ -73,12 +74,39 @@ checks. Custom build workflows must invoke the guard themselves.
 
 The target pins TCG identities and the production API origin documented in
 `docs/DEPLOYMENT_TEMPLATE.md`. Fixture/local/wrong-project values, dotenv loading, dynamic
-app config overrides, pre-existing Android/iOS projects and partial native SDK activation fail closed. Full native validation
-is unsupported pending approved registrations/configuration. Public-key shape is checked,
+unreviewed app config overrides and partial native activation fail closed. Dormant native
+dependencies do not activate ordinary local/web exports. Opted-in Android native builds
+validate the registered service app/package/project and Google web client; iOS native
+validation remains unsupported. Public-key shape is checked,
 not ownership or deployed backend compatibility. Passing validates configuration only;
 native Google, telemetry, icons, signing, device acceptance, distribution approval and a
 separately approved website cutover are still required. No cloud action is performed.
 Ordinary local exports/test fixtures remain unchanged.
+
+## Local Android beta release
+
+Following Household's local Gradle → Firebase process, use
+`npm run mobile:android:doctor`, then `npm run mobile:android:build:local`.
+The Windows script retrieves missing TCG configs into ignored files, supplies reviewed
+public values with dotenv disabled, validates Android configuration, preserves native
+state with non-clean prebuild, and runs Gradle `assembleRelease` locally. No EAS Android
+credits are used. The generated `android/` directory stays ignored.
+
+The script creates and retains a unique release key in ignored `.native-release/`.
+Securely back up both `tcg-release.jks` and `signing-password` before broader testing;
+losing them prevents updates signed with this key. Do not commit or upload these files.
+Unlike the inspected Household default, this path does not ship Expo's shared debug key.
+Signing fingerprints must match the registered TCG Android app for Google sign-in.
+
+After review, device acceptance and release approval, supply an existing TCG Firebase
+tester group alias in `FIREBASE_TESTER_GROUPS`, then run
+`npm run mobile:android:distribute:local`. Distribution checks a build receipt against
+current app sources and APK bytes, verifies APK identity/version, and requires successful
+CI for the exact main commit. Only an explicitly approved first internal feature build
+may set `TCG_INTERNAL_BRANCH_RELEASE_APPROVED=1`. The live website remains Vite.
+App Distribution must be initialized for TCG before upload. iOS will use EAS cloud once
+its native configuration/signing is verified. New CI/CD automation follows the first
+successful internal deployment, not before it.
 
 ## Tracking
 
