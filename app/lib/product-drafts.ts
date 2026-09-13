@@ -1,4 +1,5 @@
-import type { Bucket, Transaction } from './api'
+import type { Bucket, Taxonomy, Transaction } from './api'
+import { suggestedProductName } from './product-types'
 
 /**
  * Validation shared by the native forms and their unit tests.
@@ -45,6 +46,20 @@ export interface DraftValues {
   cost?: string
   auditReason?: string
   transaction?: Transaction
+}
+
+/**
+ * Return the name shown/sent by product entry. Sealed products can be named from their set and
+ * type until the person edits the field; once touched, the manual value is permanent for that
+ * draft even if the set or type changes later. Card types intentionally derive an empty name.
+ */
+export function effectiveProductName(
+  manualName: string,
+  manualNameTouched: boolean,
+  setName: string,
+  productType: Taxonomy | undefined,
+): string {
+  return manualNameTouched ? manualName : suggestedProductName(setName, productType)
 }
 
 const MONEY_RE = /^\d+(?:\.\d{1,2})?$/

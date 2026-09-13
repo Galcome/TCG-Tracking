@@ -5,9 +5,10 @@ import { Text, View } from 'react-native';
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui';
 import { useApi } from '../../context/AppContext';
 import { colors } from '../../context/ThemeContext';
-import { BUCKETS, BUCKET_LABELS, type Bucket } from '../../lib/api';
+import { BUCKETS, BUCKET_LABELS, type Bucket, type Product } from '../../lib/api';
 import { money } from '../../lib/format';
 import { ProductForms } from '../../components/product-forms';
+import { RecordSaleDialog } from '../../components/sale-form';
 export default function Inventory() {
   const api = useApi();
   const params = useLocalSearchParams<{ bucket?: string }>();
@@ -20,6 +21,8 @@ export default function Inventory() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [operation, setOperation] = useState<{ product: Product; mode: 'move' | 'edit' } | null>(null);
+  const [selling, setSelling] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
   const games = useQuery({ queryKey: ['games'], queryFn: api.games });
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
@@ -28,6 +31,8 @@ export default function Inventory() {
   return <Page title={bucket ? BUCKET_LABELS[bucket] : 'All stock'}>
     <Button label="Add product" onPress={() => setAdding(true)} />
     {adding && <ProductForms mode="add" onClose={() => setAdding(false)} />}
+    {operation ? <ProductForms product={operation.product} mode={operation.mode} onClose={() => setOperation(null)} /> : null}
+    {selling ? <RecordSaleDialog product={selling} onClose={() => setSelling(null)} /> : null}
     <Row><Button label="All stock" onPress={() => { router.setParams({ bucket: '' }); setOffset(0); }} />
       {BUCKETS.map(b => <Button key={b} label={BUCKET_LABELS[b] + ' ' + (products.data?.bucket_totals[b] ?? '')}
         onPress={() => { router.setParams({ bucket: b }); setOffset(0); }} />)}</Row>
@@ -44,13 +49,16 @@ export default function Inventory() {
     {products.isPending && <Loading />}
     {products.data?.items.length === 0 && <Card><Copy>No products match these filters.</Copy></Card>}
     {products.data?.items.map(p=><Card key={p.id}>
-      <Row><View style={{flex:1,minWidth:200}}><Button label={p.name} onPress={()=>router.push({pathname:'/products/[productId]',params:{productId:p.id}})} />
+      <Row><View style={{flex:1,minWidth:160}}><Button variant="link" label={p.name} onPress={()=>router.push({pathname:'/products/[productId]',params:{productId:p.id}})} />
         <Copy muted>{p.game.name} · {p.product_type.name}{p.set_name ? ' · '+p.set_name : ''}</Copy></View>
-        <View style={{minWidth:120,alignItems:'center'}}><Copy>{bucket ? p.stats.by_bucket[bucket] : p.stats.quantity_on_hand}</Copy><Copy muted>{bucket ? 'In '+BUCKET_LABELS[bucket] : 'In stock'}</Copy></View></Row>
+        <View style={{minWidth:80,alignItems:'center'}}><Copy>{bucket ? p.stats.by_bucket[bucket] : p.stats.quantity_on_hand}</Copy><Copy muted>{bucket ? 'In '+BUCKET_LABELS[bucket] : 'In stock'}</Copy></View></Row>
       <Row>{BUCKETS.map(b=><Text key={b} style={{color:colors[b],backgroundColor:colors.raised,padding:8,borderRadius:8}}>{BUCKET_LABELS[b]} {p.stats.by_bucket[b]}</Text>)}</Row>
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}
       <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit {money(p.stats.realized_profit)}</Copy></Row>
       <Copy muted>Market estimate {money(p.market_estimate?.value)} / unit{p.market_estimate ? ' · '+p.market_estimate.provider+' · '+p.market_estimate.status+' · '+(p.market_estimate.captured_on ?? 'No date') : ''}</Copy>
+      <Row><Button label="Sell" disabled={p.is_archived || p.stats.quantity_on_hand <= 0} onPress={() => setSelling(p)} />
+        <Button label="Move" disabled={p.is_archived || p.stats.quantity_on_hand <= 0} onPress={() => setOperation({ product: p, mode: 'move' })} />
+        <Button label="Edit" onPress={() => setOperation({ product: p, mode: 'edit' })} /></Row>
     </Card>)}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}

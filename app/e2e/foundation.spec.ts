@@ -9,6 +9,27 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
     initial_purchase: { quantity: 1, amount: '0.00', funding: [] } } })).json();
   await page.setViewportSize({width:390,height:900});
   await signIn(page);
+  for (const width of [320, 390, 768, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    const navigation = page.getByLabel('Main navigation', { exact: true });
+    await expect(navigation.getByRole('button', { name: 'Dashboard', exact: true })).toBeEnabled();
+    await expect(navigation.getByRole('button')).toHaveCount(7);
+    const navigationBox = await navigation.boundingBox();
+    if (width < 1000) {
+      expect(navigationBox!.y).toBeGreaterThan(600);
+      expect(navigationBox!.y + navigationBox!.height).toBeGreaterThanOrEqual(895);
+    }
+    for (const label of ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
+      const box = await navigation.getByRole('button', { name: label, exact: true }).boundingBox();
+      expect(box, label + ' must be rendered without scrolling').not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(901);
+      expect(box!.height).toBeGreaterThanOrEqual(48);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'New product', exact: true }).click();
   await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
@@ -33,6 +54,7 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
   await page.goto('/products/' + product.id);
   await page.getByRole('button', { name: 'Add purchase', exact: true }).click();
   await page.getByLabel('Total paid', { exact: true }).fill('10.01');
+  await page.getByRole('button', { name: 'Show optional details', exact: true }).click();
   await page.getByLabel('Shipping', { exact: true }).fill('0.29');
   await page.getByRole('button', { name: 'Split funding', exact: true }).click();
   for (let i = 0; i < 2; i++) {
@@ -214,6 +236,21 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
 });
 
 test('dashboard separates period trading from lifetime cash and preserves exact cents', async ({ page }) => {
+  const fixtureId = '66666666-6666-4666-8666-666666666666';
+  await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ json: {
+    sales_missing_cost: 0, products_with_negative_stock: 1,
+    negative_stock_products: [{ id: fixtureId, name: 'Dashboard correction fixture', quantity: -1 }],
+  } }));
+  await page.route(API + '/api/v1/reports/by-marketplace?*', route => route.fulfill({ json: [{
+    key: 'fixture', label: 'Fixture channel', revenue: '20.00', realized_profit: '9.00',
+  }] }));
+  await page.route(API + '/api/v1/sales?*', route => route.fulfill({ json: { total: 1, items: [{
+    id: fixtureId, product_id: fixtureId, product: { id: fixtureId, name: 'Dashboard sale fixture' },
+    quantity: 1, amount: '20.00', platform_fees: '1.00', payment_fees: '0.00', shipping_paid: '0.00',
+    net_proceeds: '19.00', cost_basis: '10.00', realized_profit: '9.00', has_unknown_cost: false,
+    days_held_weighted: null, sale_date: '2026-09-13', sold_by_member_id: null,
+    marketplace: 'Fixture channel', notes: null, status: 'active',
+  }] } }));
   await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
     month: '2026-09-01', spent: '90071992547409.92', revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
   }] }));
@@ -229,6 +266,12 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent sales · selected period', { exact: true })).toBeVisible();
+  await expect(page.getByText('Where it sold · gross sales by channel', { exact: true })).toBeVisible();
+  await expect(page.getByText('Fixture channel', { exact: true })).toBeVisible();
+  await expect(page.getByText('$20.00', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit sale: Dashboard sale fixture', exact: true }).click();
+  await expect(page.getByLabel('Total received', { exact: true })).toHaveValue('20.00');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   const trend = page.getByRole('group', { name: 'Monthly trading trend', exact: true });
   await expect(trend.getByText('Spent $90,071,992,547,409.92', { exact: true })).toBeVisible();
   await expect(trend.getByText('Revenue $0.00', { exact: true })).toBeVisible();
@@ -237,6 +280,8 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
   }
+  await page.getByRole('button', { name: 'Correct negative stock: Dashboard correction fixture', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp('/products/' + fixtureId + '$'));
 });
 
 test('photo suggestions preserve identity and manual input without creating inventory', async ({ page, request }) => {
@@ -985,11 +1030,11 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   expect(setsResponse.ok()).toBeTruthy();
   const knownSets = await setsResponse.json();
   expect(knownSets.items.length).toBeGreaterThan(0);
-  await page.getByRole('button', { name: 'Find a set', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Choose a set', exact: true }).getByRole('button', { name: knownSets.items[0].name, exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add product', exact: true }).getByRole('button', { name: knownSets.items[0].name, exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Expo mutation journey');
   await page.getByLabel('Quantity', { exact: true }).fill('2');
   await page.getByLabel('Total paid', { exact: true }).fill('83.33');
+  await page.getByRole('button', { name: 'Show optional details', exact: true }).click();
   await page.getByLabel('Shipping', { exact: true }).fill('1.00');
   await page.getByLabel('Collector number', { exact: true }).fill('042');
   await page.getByLabel('Variant', { exact: true }).fill('Foil');

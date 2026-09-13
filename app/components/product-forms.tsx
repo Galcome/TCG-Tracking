@@ -17,6 +17,7 @@ import {
 } from '../lib/api'
 import {
   firstValidationError,
+  effectiveProductName,
   optionalText,
   parseIntegerQuantity,
   validateDraft,
@@ -24,6 +25,7 @@ import {
   type ProductFormMode,
 } from '../lib/product-drafts'
 import { todayIso } from '../lib/format'
+import { namedByItsSet } from '../lib/product-types'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { SetField } from './set-field'
 import { AllocationEditor } from './allocation-editor'
@@ -83,10 +85,8 @@ function FormSheet({
 }: FormChildrenProps) {
   const close = busy ? () => undefined : onClose
   const validationMessage = firstValidationError(validation ?? {})
-
-  return (
-    <Sheet title={title} open onClose={close} dismissDisabled={busy}>
-      {children}
+  const footer = (
+    <>
       {validationMessage ? <ErrorNotice error={new Error(validationMessage)} /> : null}
       {error ? <ErrorNotice error={error} /> : null}
       {canSubmit ? (
@@ -94,8 +94,15 @@ function FormSheet({
           label={busy ? 'Saving…' : submitLabel}
           disabled={busy}
           onPress={onSubmit}
+          variant="primary"
         />
       ) : null}
+    </>
+  )
+
+  return (
+    <Sheet title={title} open onClose={close} dismissDisabled={busy} footer={footer}>
+      {children}
     </Sheet>
   )
 }
@@ -207,6 +214,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const { games, productTypes } = useGamesAndTypes()
   const { accounts, mine, error: accountError } = useAccounts()
   const [name, setName] = useState('')
+  const [nameTouched, setNameTouched] = useState(false)
   const [gameId, setGameId] = useState('')
   const [productTypeId, setProductTypeId] = useState('')
   const [setLabel, setSetLabel] = useState('')
@@ -232,15 +240,22 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const [paidFrom, setPaidFrom] = useState<string | null>(null)
   const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
+  const [showOptional, setShowOptional] = useState(false)
   const create = useLedgerMutation<NewProduct>(api.createProduct, onClose)
 
   const effectiveGameId = gameId || games.data?.[0]?.id || ''
   const effectiveProductTypeId = productTypeId || productTypes.data?.[0]?.id || ''
   const fundedBy = paidFrom ?? mine?.id ?? ''
+  const chosenType = productTypes.data?.find((type) => type.id === effectiveProductTypeId)
+  // Once a person edits the name, it belongs to them forever. Set/type changes may update
+  // the suggestion before that point, but can never overwrite a correction they typed.
+  const effectiveName = effectiveProductName(name, nameTouched, setLabel, chosenType)
+  const nameIsTheirs = !namedByItsSet(chosenType?.slug)
+  const showSlabFields = chosenType?.slug === 'graded-card'
 
   function submit() {
     const errors = validateDraft('add', {
-      name,
+      name: effectiveName,
       gameId: effectiveGameId,
       productTypeId: effectiveProductTypeId,
       quantity,
@@ -255,7 +270,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
     if (parsedQuantity === null) return
 
     create.mutate({
-      name: name.trim(),
+      name: effectiveName.trim(),
       game_id: effectiveGameId,
       product_type_id: effectiveProductTypeId,
       set_name: optionalText(setLabel),
@@ -263,9 +278,9 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       variant: optionalText(variant),
       language: language || null,
       condition: optionalText(condition),
-      grading_company: optionalText(gradingCompany),
-      grade: optionalText(grade),
-      cert_number: optionalText(certNumber),
+      grading_company: showSlabFields ? optionalText(gradingCompany) : null,
+      grade: showSlabFields ? optionalText(grade) : null,
+      cert_number: showSlabFields ? optionalText(certNumber) : null,
       storage_location: optionalText(storageLocation),
       notes: optionalText(notes),
       initial_purchase: {
@@ -307,23 +322,28 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
           onChange={setProductTypeId}
         />
       </Row>
-      <Field label="Name" value={name} onChangeText={setName} autoFocus placeholder="Product name" />
-      <SetField game={games.data?.find(game => game.id === effectiveGameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />
-      <Row>
-        <Field label="Collector number" value={collectorNumber} onChangeText={setCollectorNumber} placeholder="123/204" />
-        <Field label="Variant" value={variant} onChangeText={setVariant} placeholder="Holo, alternate art" />
-      </Row>
       <Choice
         label="Language"
         value={language}
         options={LANGUAGES.map((item) => option(item, item))}
         onChange={setLanguage}
       />
-      <Row>
-        <Field label="Condition" value={condition} onChangeText={setCondition} placeholder="Raw, near mint" />
-        <Field label="Storage location" value={storageLocation} onChangeText={setStorageLocation} placeholder="Shelf 1" />
-      </Row>
-      <Copy muted>Initial purchase</Copy>
+      <SetField
+        game={games.data?.find(game => game.id === effectiveGameId)?.slug ?? ''}
+        value={setLabel}
+        onChange={setSetLabel}
+        autoFocus={!nameIsTheirs}
+      />
+      <Field
+        label="Name"
+        value={effectiveName}
+        onChangeText={(value) => {
+          setNameTouched(true)
+          setName(value)
+        }}
+        autoFocus={nameIsTheirs}
+        placeholder={nameIsTheirs ? 'Card name' : 'Pick a set above'}
+      />
       <Row>
         <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" />
         <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
@@ -332,21 +352,41 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
       <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
-      <Copy muted>Optional slab and purchase details</Copy>
-      <Row>
-        <Field label="Grading company" value={gradingCompany} onChangeText={setGradingCompany} placeholder="PSA" />
-        <Field label="Grade" value={grade} onChangeText={setGrade} placeholder="10" />
-      </Row>
-      <Row>
-        <Field label="Cert number" value={certNumber} onChangeText={setCertNumber} />
-        <Field label="Bought from" value={source} onChangeText={setSource} />
-      </Row>
-      <Row>
-        <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-        <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
-        <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
-      </Row>
-      <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+      <Button
+        label={showOptional ? 'Hide optional details' : 'Show optional details'}
+        variant="link"
+        onPress={() => setShowOptional((current) => !current)}
+      />
+      {showOptional ? (
+        <>
+          <Copy muted>Optional identity, storage and purchase details</Copy>
+          <Row>
+            <Field label="Collector number" value={collectorNumber} onChangeText={setCollectorNumber} placeholder="123/204" />
+            <Field label="Variant" value={variant} onChangeText={setVariant} placeholder="Holo, alternate art" />
+          </Row>
+          <Row>
+            <Field label="Condition" value={condition} onChangeText={setCondition} placeholder="Raw, near mint" />
+            <Field label="Storage location" value={storageLocation} onChangeText={setStorageLocation} placeholder="Shelf 1" />
+          </Row>
+          {showSlabFields ? (
+            <>
+              <Copy muted>Graded-card details</Copy>
+              <Row>
+                <Field label="Grading company" value={gradingCompany} onChangeText={setGradingCompany} placeholder="PSA" />
+                <Field label="Grade" value={grade} onChangeText={setGrade} placeholder="10" />
+                <Field label="Cert number" value={certNumber} onChangeText={setCertNumber} />
+              </Row>
+            </>
+          ) : null}
+          <Row>
+            <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
+            <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
+            <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
+          </Row>
+          <Field label="Bought from" value={source} onChangeText={setSource} />
+          <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+        </>
+      ) : null}
     </FormSheet>
   )
 }
@@ -367,6 +407,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
   const [paidFrom, setPaidFrom] = useState<string | null>(null)
   const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
+  const [showOptional, setShowOptional] = useState(false)
   const create = useLedgerMutation(api.createPurchase, onClose)
   const fundedBy = paidFrom ?? mine?.id ?? ''
 
@@ -412,13 +453,23 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
       <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
-      <Row>
-        <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-        <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
-        <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
-      </Row>
-      <Field label="Bought from" value={source} onChangeText={setSource} />
-      <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+      <Button
+        label={showOptional ? 'Hide optional details' : 'Show optional details'}
+        variant="link"
+        onPress={() => setShowOptional((current) => !current)}
+      />
+      {showOptional ? (
+        <>
+          <Copy muted>Optional shipping and purchase details</Copy>
+          <Row>
+            <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
+            <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
+            <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
+          </Row>
+          <Field label="Bought from" value={source} onChangeText={setSource} />
+          <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+        </>
+      ) : null}
     </FormSheet>
   )
 }
@@ -441,11 +492,14 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
   const [storageLocation, setStorageLocation] = useState(text(product.storage_location))
   const [notes, setNotes] = useState(text(product.notes))
   const [archived, setArchived] = useState(product.is_archived)
+  const [hadSlabMetadata] = useState(() => Boolean(product.grading_company || product.grade || product.cert_number))
   const [validation, setValidation] = useState<DraftValidation>({})
   const update = useLedgerMutation<Partial<NewProduct> & { is_archived?: boolean }>(
     (changes) => api.updateProduct(product.id, changes),
     onClose,
   )
+  const selectedType = productTypes.data?.find((type) => type.id === productTypeId)
+  const showSlabFields = selectedType?.slug === 'graded-card' || product.product_type.slug === 'graded-card' || hadSlabMetadata
 
   function submit() {
     const errors = validateDraft('edit', { name, gameId, productTypeId })
@@ -486,27 +540,31 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
       error={update.error ?? games.error ?? productTypes.error}
       validation={validation}
     >
-      <Field label="Name" value={name} onChangeText={setName} autoFocus />
       <Row>
         <Choice label="Game" value={gameId} options={(games.data ?? []).map((game) => option(game.id, game.name))} onChange={setGameId} />
         <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={setProductTypeId} />
       </Row>
+      <Choice label="Language" value={language} options={LANGUAGES.map((item) => option(item, item))} onChange={setLanguage} />
       <SetField game={games.data?.find(game => game.id === gameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />
+      <Field label="Name" value={name} onChangeText={setName} autoFocus />
       <Row>
         <Field label="Collector number" value={collectorNumber} onChangeText={setCollectorNumber} />
         <Field label="Variant" value={variant} onChangeText={setVariant} />
       </Row>
-      <Choice label="Language" value={language} options={LANGUAGES.map((item) => option(item, item))} onChange={setLanguage} />
       <Row>
         <Field label="Condition" value={condition} onChangeText={setCondition} />
         <Field label="Storage location" value={storageLocation} onChangeText={setStorageLocation} />
       </Row>
-      <Copy muted>Optional slab details</Copy>
-      <Row>
-        <Field label="Grading company" value={gradingCompany} onChangeText={setGradingCompany} />
-        <Field label="Grade" value={grade} onChangeText={setGrade} />
-        <Field label="Cert number" value={certNumber} onChangeText={setCertNumber} />
-      </Row>
+      {showSlabFields ? (
+        <>
+          <Copy muted>Graded-card details</Copy>
+          <Row>
+            <Field label="Grading company" value={gradingCompany} onChangeText={setGradingCompany} />
+            <Field label="Grade" value={grade} onChangeText={setGrade} />
+            <Field label="Cert number" value={certNumber} onChangeText={setCertNumber} />
+          </Row>
+        </>
+      ) : null}
       <Field label="External reference" value={externalRef} onChangeText={setExternalRef} />
       <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
       <Button label={archived ? 'Restore product' : 'Archive product'} onPress={() => setArchived((current) => !current)} disabled={update.isPending} />
