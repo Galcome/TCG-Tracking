@@ -619,3 +619,12 @@ Gradle daemon/compiler that held Windows jar locks. All 107 app tests and Expo d
 compatibility checks passed again. This source change invalidates the previous APK receipt;
 the corrected dependency set still needs final packaging. Local builds now target only
 `:app:assembleRelease`, avoiding unrelated library release assembly targets.
+
+The corrected dependency build succeeded in 14m 14s with approved signing and a verified
+receipt. Remote Node 22 clean install, lint, type checks, 107 tests and SDK checks all passed.
+Remote Expo browser run passed 30/31: a grading test navigated away before Firebase sign-in
+completed. Read-only artifact inspection confirmed successful product creation/sign-in,
+an aborted account lookup and the login page at failure. The existing helper now waits for
+the protected shell's Sign out control (also present before membership resolution), rather
+than adding sleeps/retries or changing runtime authentication. Final receipt packaging and
+the new CI run remain pending for this test-only source checkpoint.

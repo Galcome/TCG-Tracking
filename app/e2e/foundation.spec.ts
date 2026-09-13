@@ -1068,6 +1068,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Email',{exact:true}).fill('e2e@example.test');
   await page.getByLabel('Password',{exact:true}).fill('test-password');
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
 }
 test('session restoration and signout use the real Firebase SDK; API membership gates the dashboard',async({page})=>{
   await signIn(page);
