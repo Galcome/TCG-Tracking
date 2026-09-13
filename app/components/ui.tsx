@@ -3,6 +3,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, Sc
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, useResponsiveLayout } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
+import { CardBackdrop } from './card-backdrop';
 export function Brand() {
   const fonts = useTypography();
   return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0, maxWidth: '100%' }}>
@@ -18,7 +19,7 @@ export function Copy({ children, muted = false }: PropsWithChildren<{ muted?: bo
   return <Text style={[styles.copy, { fontFamily: fonts.body }, muted && { color: colors.muted }]}>{children}</Text>;
 }
 export function Heading({ children }: PropsWithChildren) { const fonts = useTypography(); return <Text accessibilityRole="header" style={[styles.heading, { fontFamily: fonts.display }]}>{children}</Text>; }
-export function Card({ children }: PropsWithChildren) { return <View style={styles.card}>{children}</View>; }
+export function Card({ children, accent = false }: PropsWithChildren<{ accent?: boolean }>) { return <View style={[styles.card, accent && { overflow: 'hidden', borderTopColor: colors.accent }]}>{accent ? <CardBackdrop /> : null}{children}</View>; }
 export function Row({ children }: PropsWithChildren) { return <View style={styles.row}>{children}</View>; }
 export function Button({ label, onPress, disabled = false, danger = false, variant = 'secondary' }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean; variant?: 'primary' | 'secondary' | 'link' }) {
   const fonts = useTypography();

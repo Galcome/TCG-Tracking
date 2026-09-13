@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Brand, Button, Card, Copy, ErrorNotice, Field, Loading, Page } from '../components/ui';
 import { useSession } from '../context/AppContext';
 import { colors } from '../context/ThemeContext';
+import { CardBackdrop } from '../components/card-backdrop';
 export default function Login() {
   const auth = useSession();
   const [email, setEmail] = useState('');
@@ -17,8 +18,8 @@ export default function Login() {
     setBusy(true); setError(null);
     try { await action(); } catch (e) { setError(e); } finally { setBusy(false); }
   }
-  return <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}><Page title="Welcome back">
-    <View style={{ maxWidth: 480, width: '100%', alignSelf: 'center' }}><Card>
+  return <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}><CardBackdrop lattice /><Page title="Welcome back">
+    <View style={{ maxWidth: 480, width: '100%', alignSelf: 'center' }}><Card accent>
       <Brand />
       <Copy>Sign in with the account added to your store.</Copy>
       <ErrorNotice error={auth.error ?? error} />

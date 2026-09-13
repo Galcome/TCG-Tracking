@@ -36,8 +36,7 @@ share recipients, keyboard/full-height form, navigation, larger text and safe-ar
 remain real-device gates.
 
 This slice begins design recovery, not completion of the entire website design port.
-Restrained holo/lattice treatments, broader game-marker coverage,
-responsive desktop density and representative-screen visual approval remain tracked.
+Representative-screen visual approval and installed-device acceptance remain tracked.
 Every journey in the audit matrix still needs explicit comparative acceptance evidence.
 Provider availability advisories remain separate fix work; no AI-estimated prices or slab
 auto-pricing are introduced. Future APK packaging requires a higher version/code and new
@@ -80,4 +79,27 @@ APK or representative-screen/device visual approval is implied.
 First PR CI run executed 33 Expo browser scenarios: 30 passed; three failed on ambiguous
 page/form selectors after navigation restoration. Scoped Product type to Add product
 dialog and Store quantity to textbox in commit `ef7f6f7`; financial assertions and workflow
-remain unchanged. Subsequent CI acceptance is pending, as is final independent review.
+remain unchanged. Subsequent CI acceptance is recorded below.
+
+## Final correction / acceptance checkpoint
+
+At `bc806d3`, Expo CI passed all 34 browser scenarios (including font-load failure) and
+native fixture exports. Backend, build, CodeQL, Vite browser and required aggregate checks
+passed in the PR workflow. Final independent Terra review found no P1/P2
+defects in committed entry/navigation/typography changes.
+
+Completed static, low-contrast holo accents for login/profit cards and original sleeve
+lattice on login. Decorations are pointer-inert, assistive-tech hidden and have no
+animation. Stock cards now use wrapping horizontal groups on desktop, stacked mobile
+presentation, semantic bucket badges and screen-reader product grouping. Mobile search
+remains visible while extra filters collapse; active choices remain summarized and
+preserved on reopening. No API/accounting changes. Independent review of this final
+visual slice found no P1/P2 defects; focused 320/390/1536 stock-action guard/bounds and
+collapsed-filter restore assertions were added afterward. Local lint/typecheck, 109 units,
+all three fixture exports and diff checks pass; latest exact-commit CI is pending.
+
+Code completion is not device/product acceptance. Remaining gates: latest exact-commit
+CI; representative login/stock/product-entry visual approval; installed keyboard/insets/
+larger-text/navigation/relaunch/camera/share checks; real provider availability; refreshed
+signed Android alpha and source receipt from CI-green main. Never switch live Vite on
+fixture-only evidence. A user/device acceptance gate cannot be marked passed by agents.

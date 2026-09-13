@@ -26,7 +26,7 @@ export default function Dashboard() {
     <ErrorNotice error={dashboard.error} retry={() => { void dashboard.refetch(); }} />
     {dashboard.isPending && <Loading />}
     {data && <><Row>
-      <Card><Copy muted>Realized profit</Copy><Copy>{money(data.realized_profit)}</Copy><Copy>ROI {percent(data.roi)}</Copy></Card>
+      <Card accent><Copy muted>Realized profit</Copy><Copy>{money(data.realized_profit)}</Copy><Copy>ROI {percent(data.roi)}</Copy></Card>
       <Card><Copy muted>Inventory at cost · all time</Copy><Copy>{money(data.inventory_at_cost)}</Copy><Copy>{data.units_in_stock} units</Copy></Card>
       <Card><Copy muted>Sales in period</Copy><Copy>{money(data.total_sales)}</Copy><Copy>{data.sale_count} sales</Copy></Card>
       <Card><Copy muted>Cash balance · all time</Copy><Copy>{money(data.cash_balance)}</Copy></Card>

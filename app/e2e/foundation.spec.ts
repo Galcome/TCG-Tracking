@@ -38,9 +38,62 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
   await page.getByRole('button', { name: product.name + ' · 1 in stock', exact: true }).click();
   await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByLabel('Main navigation', { exact: true }).getByRole('button', { name: 'Inventory', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Stock:/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Stock: In stock', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Stock', exact: true }).getByRole('button', { name: 'All products', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide filters', exact: true }).click();
+  await expect(page.getByText('All games · All types · All products · Hide archived', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show filters', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stock: All products', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide filters', exact: true }).click();
   await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(page).toHaveURL(/\/vault$/);
   expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test('responsive stock cards preserve action guards and keep controls within the viewport', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const product = await (await request.post(API + '/api/v1/products', { data: {
+    name: 'Stock action fixture', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.00', funding: [] },
+  } })).json();
+  await page.route(API + '/api/v1/products?*', route => route.fulfill({ json: {
+    items: [product,
+      { ...product, id: '77777777-7777-4777-8777-777777777777', name: 'Empty stock fixture', stats: { ...product.stats, quantity_on_hand: 0, by_bucket: { inventory: 0, store: 0, vault: 0 } } },
+      { ...product, id: '88888888-8888-4888-8888-888888888888', name: 'Archived stock fixture', is_archived: true },
+    ], total: 3, bucket_totals: { inventory: 2, store: 0, vault: 0 },
+  } }));
+  await signIn(page);
+  await page.goto('/inventory');
+  for (const width of [320, 390, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const name of ['Stock action fixture', 'Empty stock fixture', 'Archived stock fixture']) {
+      const card = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
+      await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeEnabled();
+      for (const label of ['Sell', 'Move']) {
+        const action = card.getByRole('button', { name: label, exact: true });
+        if (name === product.name) await expect(action).toBeEnabled(); else await expect(action).toBeDisabled();
+        const box = await action.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(48);
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+      }
+    }
+    expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+  const active = page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true });
+  await active.getByRole('button', { name: 'Sell', exact: true }).click();
+  await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await active.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Move stock', exact: true })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await active.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(product.name);
 });
 
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
