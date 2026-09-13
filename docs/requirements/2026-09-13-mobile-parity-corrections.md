@@ -105,6 +105,10 @@ signed Android alpha and source receipt from CI-green main. Never switch live Vi
 fixture-only evidence. A user/device acceptance gate cannot be marked passed by agents.
 # Follow-up verification: response/commit ordering
 
+The subsequent 907d1e6 checkpoint passed all 35 Expo browser scenarios and native exports (34771972585), plus backend/Vite/all-required CI (34771972553). Trace investigation confirmed the rip writer returned the correct $150.01 source/output cost; the immediate child read saw quantity zero and empty history before transaction commit. Separate PR #89 corrects response/commit ordering without changing financial algorithms or assertions.
+
+Root inspected fixture-rendered inventory screenshots at 320, 390 and 1536 pixels, and Add product at 390 pixels. Sealed set selection fills the name; the save footer remains visible; stock colors and compact desktop layout are restored. This is browser visual evidence, not native device acceptance. Java/Android SDK doctor passed, and Firebase alpha currently has one tester and one release. Preparing 0.1.1 (Android versionCode 2); no new upload yet. Updated code requires a fresh signed build receipt after final exact-main CI.
+
 Latest Expo CI (34771498202) passed 33 of 35 scenarios, including the new stock-card and filter checks. Pricing confirmation returned HTTP 201 followed immediately by an empty mapping read; rip verification read zero cost after a successful transformation. These failures are under investigation, not waived. A separate backend correction will address transaction completion before success responses if confirmed.
 
 Local rendering also exposed Metro retaining a previous production configuration when exporting with changed fixture environment variables. Only denied membership GETs used the fake test token; no production writes occurred. Export scripts now clear Metro's cache. A fresh all-platform export succeeded, and the web bundle contains the fixture API/project identifiers instead of the production API URL. Earlier local exports demonstrate compilation, not verified fixture targeting. CI already explicitly cleared the cache.
