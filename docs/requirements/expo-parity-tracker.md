@@ -688,3 +688,18 @@ dashboard/reports at 60d/90d), and a retained known-good Vite channel/artifact. 
 Vite Hosting artifact only for rollback, never the database. After the first Android
 upload, address CI/CD automation with local Gradle/Firebase Android and EAS-cloud iOS;
 do not copy Household's historical Android EAS workflow or unrelated credentials.
+
+Rollback preparation: cloned the current live Vite artifact to `vite-rollback-pr82`.
+Its URL returned HTTP 200 and HTML matched the then-current live site:
+https://tcg-tracking--vite-rollback-pr82-5xpc970w.web.app. This snapshot expires September
+20, 2026; retain/renew a known-good snapshot before any later cutover. Restore with
+`firebase hosting:clone tcg-tracking:vite-rollback-pr82 tcg-tracking:live --project tcg-tracking`,
+after confirming the intended snapshot still exists. No rollback/promotion has occurred.
+
+Release runtime note: invoking the PowerShell release script directly under PowerShell 7
+failed the source receipt guard because its sorting differs from Windows PowerShell 5.1.
+All source files and APK bytes in the main clone match the assigned checkout. Windows
+PowerShell 5.1, the documented npm-script/build runtime, reproduces the exact build receipt.
+Use that runtime for distribution; do not rewrite the receipt or bypass verification.
+Firebase CLI uses a process-scoped real Node 22 executable to avoid the observed Node 24
+shutdown assertion and nested-npx PowerShell shim problem. No machine-wide runtime changes.
