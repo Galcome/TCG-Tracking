@@ -656,3 +656,33 @@ testers, review/deploy required backend compatibility changes, and satisfy the d
 main/exact-green-CI rule (or obtain the explicitly requested first-internal exception).
 Installed Android-device acceptance and secure keystore backup remain necessary; iOS cloud
 release remains deferred until the Android distribution checkpoint is cleared.
+
+### Approved production rollout — September 13
+
+Joseph approved normal PR merge/backend deployment and Android distribution to `alpha`,
+plus a conditional Expo website switch only after production verification. Final PR-head
+CI passed every required check, including the deterministic backend coverage test; Terra's
+integration review found no code-level release blocker. PR #82 merged as
+`1850890a9961ba00cba9696c4006145548947c14`. Railway API deployment
+`777f277e-94ed-43c7-bf47-9c1b26af456e` succeeded on that commit. Exact-main CI is still
+the upload gate; no feature-branch exception is being used.
+
+Firebase CLI confirms `alpha` has one tester. A separate temporary main release clone
+holds the unchanged, previously verified APK/receipt, avoiding edits to Joseph's main
+checkout or a branch-name bypass. Installed-device acceptance is still pending.
+
+The real-production Expo web export is staged, not live:
+https://tcg-tracking--expo-review-vj02wcg8.web.app (seven-day channel). Root and inventory
+deep links and the compiled production API bundle returned HTTP 200. Its exact origin
+was appended to Railway API CORS without removing existing origins or adding a wildcard;
+that configuration redeployment must finish before authenticated preview testing.
+Browser tooling failed at initialization, so authenticated production parity is not proven.
+Production OpenAPI is intentionally disabled; its 404 is not a deployment failure.
+
+**Do not switch Hosting yet.** Main CI still publishes `web/dist`, so a manual Expo
+promotion would be undone on the next main push. Cutover requires a separately reviewed
+Hosting/CI change, successful authenticated read-only comparisons (inventory, money,
+dashboard/reports at 60d/90d), and a retained known-good Vite channel/artifact. Restore the
+Vite Hosting artifact only for rollback, never the database. After the first Android
+upload, address CI/CD automation with local Gradle/Firebase Android and EAS-cloud iOS;
+do not copy Household's historical Android EAS workflow or unrelated credentials.
