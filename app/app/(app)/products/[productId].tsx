@@ -9,6 +9,7 @@ import { LineageReport } from '../../../components/lineage-report';
 import { PricingControls } from '../../../components/pricing-controls';
 import { ProductLifecycle } from '../../../components/product-lifecycle';
 import { RecordValuationDialog } from '../../../components/valuation-form';
+import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
 export default function ProductDetail() {
@@ -21,7 +22,7 @@ export default function ProductDetail() {
   const p=product.data;
   return <Page title={p?.name ?? 'Product'}>
     <ErrorNotice error={product.error} retry={()=>{void product.refetch();}} />{product.isPending&&<Loading />}
-    {p&&<><Card><Copy>{p.game.name} · {p.product_type.name}</Copy>
+    {p&&<><Card><GameIdentity slug={p.game.slug} name={p.game.name} /><Copy>{p.product_type.name}</Copy>
       <Copy>{[p.set_name,p.collector_number,p.variant,p.language,p.condition,p.grading_company,p.grade,p.cert_number].filter(Boolean).join(' · ')}</Copy>
       <Row><Copy>On hand {p.stats.quantity_on_hand}</Copy><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit {money(p.stats.realized_profit)}</Copy></Row>
       <Copy muted>{p.notes ?? 'No notes'}</Copy></Card>

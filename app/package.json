@@ -1,6 +1,6 @@
 {
   "name": "tcg-investments-app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -17,11 +17,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "node --import tsx --test tests/*.test.ts",
-    "export:web": "expo export --platform web --output-dir dist",
-    "export:android": "expo export --platform android --output-dir dist-android",
-    "export:ios": "expo export --platform ios --output-dir dist-ios"
+    "export:web": "expo export --platform web --output-dir dist --clear",
+    "export:android": "expo export --platform android --output-dir dist-android --clear",
+    "export:ios": "expo export --platform ios --output-dir dist-ios --clear"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-firebase/app": "^26.4.0",
     "@react-native-firebase/crashlytics": "^26.4.0",
@@ -33,6 +35,7 @@
     "expo-constants": "~57.0.17",
     "expo-dev-client": "~57.0.19",
     "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
     "expo-image-picker": "~57.0.17",
     "expo-linking": "~57.0.10",
     "expo-router": "~57.0.21",
@@ -45,6 +48,7 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.10.1"
   },
