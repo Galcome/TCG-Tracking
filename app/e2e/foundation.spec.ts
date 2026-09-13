@@ -870,7 +870,7 @@ test('crack form validates the split and carries exact cost into inline-created 
   await page.getByRole('button', { name: 'Crack open', exact: true }).click();
   await page.getByLabel('Boxes per case', { exact: true }).fill('6');
   await page.getByLabel('Child name', { exact: true }).fill('Expo inline split boxes');
-  await page.getByLabel('Store', { exact: true }).fill('4');
+  await page.getByRole('textbox', { name: 'Store', exact: true }).fill('4');
   await page.getByRole('button', { name: 'Crack it open', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   expect((await (await request.get(API + '/api/v1/products/' + source.id)).json()).stats.quantity_on_hand).toBe(1);

@@ -33,7 +33,7 @@ async function signIn(page: Page) {
 }
 
 async function chooseType(page: Page, typeName: string) {
-  await page.getByRole('button', { name: /^Product type:/ }).click()
+  await page.getByRole('dialog', { name: 'Add product', exact: true }).getByRole('button', { name: /^Product type:/ }).click()
   await page.getByRole('dialog', { name: 'Product type', exact: true })
     .getByRole('button', { name: typeName, exact: true }).click()
 }
