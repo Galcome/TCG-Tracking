@@ -17,9 +17,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "node --import tsx --test tests/*.test.ts",
-    "export:web": "expo export --platform web --output-dir dist",
-    "export:android": "expo export --platform android --output-dir dist-android",
-    "export:ios": "expo export --platform ios --output-dir dist-ios"
+    "export:web": "expo export --platform web --output-dir dist --clear",
+    "export:android": "expo export --platform android --output-dir dist-android --clear",
+    "export:ios": "expo export --platform ios --output-dir dist-ios --clear"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

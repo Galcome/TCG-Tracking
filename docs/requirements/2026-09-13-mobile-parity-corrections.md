@@ -103,3 +103,8 @@ CI; representative login/stock/product-entry visual approval; installed keyboard
 larger-text/navigation/relaunch/camera/share checks; real provider availability; refreshed
 signed Android alpha and source receipt from CI-green main. Never switch live Vite on
 fixture-only evidence. A user/device acceptance gate cannot be marked passed by agents.
+# Follow-up verification: response/commit ordering
+
+Latest Expo CI (34771498202) passed 33 of 35 scenarios, including the new stock-card and filter checks. Pricing confirmation returned HTTP 201 followed immediately by an empty mapping read; rip verification read zero cost after a successful transformation. These failures are under investigation, not waived. A separate backend correction will address transaction completion before success responses if confirmed.
+
+Local rendering also exposed Metro retaining a previous production configuration when exporting with changed fixture environment variables. Only denied membership GETs used the fake test token; no production writes occurred. Export scripts now clear Metro's cache. A fresh all-platform export succeeded, and the web bundle contains the fixture API/project identifiers instead of the production API URL. Earlier local exports demonstrate compilation, not verified fixture targeting. CI already explicitly cleared the cache.
