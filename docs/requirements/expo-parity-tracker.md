@@ -628,3 +628,31 @@ an aborted account lookup and the login page at failure. The existing helper now
 the protected shell's Sign out control (also present before membership resolution), rather
 than adding sleeps/retries or changing runtime authentication. Final receipt packaging and
 the new CI run remain pending for this test-only source checkpoint.
+
+### Final local Android artifact
+
+Final app source checkpoint `e4da153` packaged successfully in 8m 21s with a verified
+unchanged-source/APK receipt. APK package/version, approved release certificate, receipt
+byte hash, embedded native-Firebase opt-in and compiled production API were checked. Known
+E2E configuration markers are absent. Artifact remains ignored/local at
+`app/android/app/build/outputs/apk/release/app-release.apk`; it was not uploaded elsewhere.
+
+Windows Node 24 encountered a Firebase CLI shutdown assertion before Gradle; the guard
+stopped that invocation. Node 22 tooling proceeded, and release preflight/signing validation
+were also run explicitly with Node 22.23.2 against the actual build's service snapshot.
+Native prebuild regenerated the ignored Android project; the retained signing files outside
+that directory survived. This is not presented as a fully cached build.
+
+Both Expo CI runs for `e4da153` passed, including all **31 browser tests** and Android/iOS
+fixture bundle exports. One duplicate backend run passed; the other passed **854 tests**
+but failed the 100% coverage gate at 99.98% because a concurrent sale-update guard was only
+incidentally covered. A deterministic refresh-inactive sale test now checks 409, unchanged
+notes and no update audit. Ruff/diff checks passed; local DB authentication prevented its
+pytest run, so final CI validation of that test remains pending. No threshold/runtime change.
+
+Draft PR #82 holds the pushed work. Main, production API, Vite Hosting, Firebase distribution
+and CI/CD architecture remain unchanged. Before upload: initialize/select TCG App Distribution
+testers, review/deploy required backend compatibility changes, and satisfy the documented
+main/exact-green-CI rule (or obtain the explicitly requested first-internal exception).
+Installed Android-device acceptance and secure keystore backup remain necessary; iOS cloud
+release remains deferred until the Android distribution checkpoint is cleared.

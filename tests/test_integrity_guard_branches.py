@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.ledger import STATUS_VOIDED, InventoryAdjustment, Purchase
+from src.models.audit import AuditLog
+from src.models.ledger import STATUS_VOIDED, InventoryAdjustment, Purchase, Sale
 from src.models.transformation import (
     TRANSFORM_CRACK,
     TRANSFORM_RIP,
@@ -68,6 +69,42 @@ def test_adjustment_update_rejects_a_row_that_refreshes_inactive(
 
     assert response.status_code == 409
     assert "voided" in response.json()["detail"]
+
+
+def test_sale_update_rejects_a_row_that_refreshes_inactive(
+    client, db, make_product, monkeypatch
+):
+    product = make_product("Stale sale guard")
+    purchase = client.post(
+        "/api/v1/purchases",
+        json={"product_id": product["id"], "quantity": 1, "amount": "10.00"},
+    )
+    assert purchase.status_code == 201, purchase.text
+    sale = client.post(
+        "/api/v1/sales",
+        json={"product_id": product["id"], "quantity": 1, "amount": "20.00"},
+    )
+    assert sale.status_code == 201, sale.text
+    sale_id = uuid.UUID(sale.json()["id"])
+    _force_inactive_refresh(monkeypatch, db, Sale)
+
+    response = client.patch(
+        f"/api/v1/sales/{sale_id}", json={"notes": "stale edit"}
+    )
+
+    assert response.status_code == 409
+    assert "voided" in response.json()["detail"]
+    assert db.scalar(select(Sale.notes).where(Sale.id == sale_id)) is None
+    assert (
+        db.scalar(
+            select(AuditLog.id).where(
+                AuditLog.entity_type == "sale",
+                AuditLog.entity_id == sale_id,
+                AuditLog.action == "update",
+            )
+        )
+        is None
+    )
 
 
 def test_generic_void_returns_404_for_an_unpersisted_purchase(db, make_product):
