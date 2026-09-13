@@ -60,6 +60,7 @@ htmlcov/
 
 # Firebase CLI local cache
 .firebase/
+firebase-debug.log
 
 # Playwright
 web/test-results/

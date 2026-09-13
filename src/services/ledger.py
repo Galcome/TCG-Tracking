@@ -11,8 +11,10 @@ the database, handing them over, and writing the answer back.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from typing import Any, Literal
 
+from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -27,11 +29,10 @@ from src.models.ledger import (
     StockMove,
 )
 from src.models.product import Product
+from src.models.transformation import TransformationOutput
 from src.services.costing import Event, allocate
 
-EntityKind = Literal[
-    "purchase", "sale", "adjustment", "move", "money_movement", "transformation"
-]
+EntityKind = Literal["purchase", "sale", "adjustment", "move", "money_movement", "transformation"]
 
 #: Which table an event id came from, so allocations land in the right FK column.
 _SourceKind = Literal["purchase", "sale", "adjustment_supply", "adjustment_consumer"]
@@ -51,6 +52,18 @@ def load_events(
     events: list[Event] = []
     sources: dict[uuid.UUID, _SourceKind] = {}
 
+    # Derived purchases retain non-null accounting columns, even when the inherited
+    # transformation basis is unknown. Its explicit null share is authoritative for
+    # FIFO: a zero placeholder must not turn an unknown-cost hit into a free asset.
+    unknown_derived = set(
+        db.scalars(
+            select(TransformationOutput.purchase_id).where(
+                TransformationOutput.product_id == product_id,
+                TransformationOutput.cost_cents.is_(None),
+            )
+        )
+    )
+
     for purchase in db.scalars(_active(Purchase, product_id)):
         events.append(
             Event(
@@ -59,7 +72,11 @@ def load_events(
                 is_supply=True,
                 occurred_on=purchase.purchase_date,
                 created_at=purchase.created_at,
-                landed_cost_cents=purchase.landed_cost_cents,
+                landed_cost_cents=(
+                    None
+                    if purchase.is_derived and purchase.id in unknown_derived
+                    else purchase.landed_cost_cents
+                ),
             )
         )
         sources[purchase.id] = "purchase"
@@ -93,13 +110,23 @@ def load_events(
     return events, sources
 
 
+def lock_products(db: Session, product_ids: Iterable[uuid.UUID]) -> None:
+    """Serialize related stock operations in one consistent UUID order."""
+    db.execute(
+        select(Product.id)
+        .where(Product.id.in_(set(product_ids)))
+        .order_by(Product.id)
+        .with_for_update()
+    )
+
+
 def recompute_product(db: Session, product_id: uuid.UUID) -> None:
     """Rebuild this product's cost allocations from its complete history.
 
     Takes a row lock on the product first so two concurrent writes cannot interleave and
     produce allocations from two different views of history.
     """
-    db.execute(select(Product.id).where(Product.id == product_id).with_for_update())
+    lock_products(db, [product_id])
 
     events, sources = load_events(db, product_id)
     result = allocate(events)
@@ -186,6 +213,21 @@ def void(
     reason: str | None,
 ) -> None:
     """Retire a transaction without deleting it, then rebuild the product's costs."""
+    # Every ledger mutation must take the product lock before touching its child row.
+    # Otherwise an edit can hold Product while this path holds Sale/Purchase/etc. and
+    # both sides wait on the other's recomputation/flush.
+    lock_products(db, [entity.product_id])
+    entity_model = type(entity)
+    locked_entity = db.scalar(
+        select(entity_model)
+        .where(entity_model.id == entity.id)
+        .with_for_update()
+    )
+    if locked_entity is None:
+        raise HTTPException(status_code=404, detail=f"{entity_type.title()} not found")
+    db.refresh(entity)
+    if entity.status != STATUS_ACTIVE:
+        raise HTTPException(status_code=409, detail=f"This {entity_type} has already been voided")
     entity.status = STATUS_VOIDED
     entity.void_reason = reason
     db.flush()

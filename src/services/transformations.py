@@ -25,6 +25,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,6 +40,7 @@ from src.models.product import Product
 from src.models.transformation import Transformation, TransformationOutput
 from src.services import inventory, ledger
 from src.services.costing import split_cost
+from src.services.money import proportional_split
 
 #: The reason a consuming adjustment carries. Kept apart from `written_off` because the
 #: cost did not evaporate - it moved to whatever came out.
@@ -94,6 +96,74 @@ class OutputSpec:
     bucket: str
 
 
+@dataclass(frozen=True)
+class RipCostSpec:
+    """The non-financial inputs used to allocate one rip's actual source cost.
+
+    ``value`` is the per-unit estimate typed by the member. It is deliberately kept as an
+    input to the allocation policy rather than being treated as a cost. ``cost`` is an
+    optional explicit, known-cost override for the whole output row.
+    """
+
+    quantity: int
+    value: int
+    cost: int | None = None
+
+
+def allocate_rip_costs(
+    source_cost: int | None, hits: list[RipCostSpec]
+) -> tuple[list[int | None], int | None]:
+    """Allocate a rip's *actual* FIFO source cost across its hit rows.
+
+    The route supplies only estimates and optional explicit overrides. The transformation
+    service calls this after the source adjustment has been consumed and FIFO has reported
+    ``source_cost``. This keeps mixed-lot rips tied to the ledger's answer rather than to a
+    pre-write average.
+
+    For a known source, explicit costs are kept verbatim. When the remaining rows have
+    estimates, their shares use ``value * quantity``. If all remaining estimates are zero,
+    an equal-row split is used for compatibility with the original rip workflow. Any
+    remainder is bulk. Unknown source cost stays unknown for every row, including explicit
+    inputs and bulk.
+    """
+    if source_cost is not None and source_cost < 0:
+        raise ValueError("source cost cannot be negative")
+
+    for hit in hits:
+        if hit.quantity <= 0:
+            raise ValueError("rip hit quantity must be positive")
+        if hit.value < 0:
+            raise ValueError("rip hit value cannot be negative")
+        if hit.cost is not None and hit.cost < 0:
+            raise ValueError("rip hit cost cannot be negative")
+
+    if source_cost is None:
+        # An explicit input is still only a request when the source basis is unknown. It
+        # must not manufacture a known output cost or turn an unknown rip into a zero-cost
+        # asset; the authoritative source basis wins for every output row.
+        return [None] * len(hits), None
+
+    explicit_total = sum(hit.cost for hit in hits if hit.cost is not None)
+    if explicit_total > source_cost:
+        raise ValueError("explicit rip hit costs exceed the actual source cost")
+
+    costs: list[int | None] = [hit.cost for hit in hits]
+    open_indexes = [index for index, hit in enumerate(hits) if hit.cost is None]
+    remaining = source_cost - explicit_total
+    if not open_indexes:
+        return costs, remaining
+
+    weights = [hits[index].value * hits[index].quantity for index in open_indexes]
+    if not any(weights):
+        # Preserve the original behavior: no estimates means one equal share per output
+        # row, not one share per physical output unit.
+        weights = [1] * len(open_indexes)
+
+    for index, share in zip(open_indexes, proportional_split(weights, remaining)):
+        costs[index] = share
+    return costs, 0
+
+
 def source_purchase_date(db: Session, product_id: uuid.UUID) -> date | None:
     """The date the outputs should inherit: the oldest lot this product still has stock in.
 
@@ -133,6 +203,7 @@ def transform(
     source_bucket: str,
     outputs: list[OutputSpec],
     costs: list[int] | None = None,
+    rip_policy: list[RipCostSpec] | None = None,
     added_cost: int = 0,
     occurred_on: date | None,
     member_id: uuid.UUID | None,
@@ -140,10 +211,15 @@ def transform(
 ) -> Transformation:
     """Consume the source, produce the outputs, carry the cost and the date across.
 
-    `costs` lets a caller decide each row's share itself. The rip screen does, because a
-    box is a lottery rather than a division: three hits at $500, $50 and $10 split a $150
-    box $134 / $13 / $3, so the big hit carries the risk it earned and each card's ROI
-    stands on its own. Whatever the hits do not take is written off as bulk.
+    `rip_policy` lets a rip caller provide the typed estimates and optional explicit shares.
+    It is evaluated only after the source adjustment has been consumed and FIFO has reported
+    the actual source cost. Three hits at $500, $50 and $10 split a $150 box $134 / $13 / $3,
+    so the big hit carries the risk it earned and each card's ROI stands on its own. Whatever
+    the hits do not take is written off as bulk.
+
+    `costs` remains as a compatibility path for non-rip callers that already have resolved
+    shares. New rip callers should pass `rip_policy`; the route must not precompute costs
+    from an average before the source is locked.
 
     Omitted, the source's cost is divided across the produced *units* with a
     largest-remainder split, so six boxes out of a $100 case come to
@@ -155,6 +231,20 @@ def transform(
     A source whose cost is genuinely unknown produces outputs whose cost is unknown too.
     Spreading a zero would say the boxes were free, which is a different claim.
     """
+    if costs is not None and rip_policy is not None:
+        raise ValueError("pass either resolved costs or a rip policy, not both")
+    if costs is not None and len(costs) != len(outputs):
+        raise ValueError("resolved costs must match the output rows")
+    if rip_policy is not None and len(rip_policy) != len(outputs):
+        raise ValueError("rip policy must match the output rows")
+
+    ledger.lock_products(db, [source_product_id, *(output.product_id for output in outputs)])
+    available = available_in_bucket(db, source_product_id, source_bucket)
+    if source_quantity > available:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{source_bucket} holds {available}, so {source_quantity} cannot be transformed",
+        )
     record = Transformation(
         kind=kind,
         source_product_id=source_product_id,
@@ -197,7 +287,19 @@ def transform(
         carried += added_cost
 
     shares: list[int | None]
-    if costs is not None:
+    if rip_policy is not None:
+        try:
+            shares, bulk_cost = allocate_rip_costs(record.source_cost_cents, rip_policy)
+        except ValueError as exc:
+            # The actual source cost is only knowable after FIFO consumes the locked rows.
+            # Convert a bad explicit override into the same client-facing validation class
+            # as the other rip request checks; the request transaction rolls back the write.
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+            ) from exc
+        record.bulk_cost_cents = bulk_cost if bulk_cost is not None else 0
+    elif costs is not None:
         shares = list(costs)
         # Anything the outputs did not take is bulk, and bulk is written off here rather
         # than carried as an asset nobody would ever choose to acquire.
@@ -282,6 +384,18 @@ def void(
     The rows stay. A voided transformation is the explanation for stock reappearing, and
     the audit trail is what makes the mistake recoverable rather than just gone.
     """
+    output_ids = db.scalars(
+        select(TransformationOutput.product_id).where(
+            TransformationOutput.transformation_id == record.id
+        )
+    ).all()
+    ledger.lock_products(db, [record.source_product_id, *output_ids])
+    # The route's status check happens before this service acquires the related product
+    # locks. Refresh the transformation after those locks so concurrent void requests do
+    # not both mutate the same historical row or write competing audit reasons.
+    db.refresh(record)
+    if record.status != STATUS_ACTIVE:
+        raise HTTPException(status_code=409, detail="This has already been voided")
     record.status = STATUS_VOIDED
     record.void_reason = reason
 
@@ -294,9 +408,7 @@ def void(
             consuming.void_reason = reason
 
     for output in db.scalars(
-        select(TransformationOutput).where(
-            TransformationOutput.transformation_id == record.id
-        )
+        select(TransformationOutput).where(TransformationOutput.transformation_id == record.id)
     ):
         if output.purchase_id is None:  # pragma: no cover - always set on create
             continue

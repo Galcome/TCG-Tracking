@@ -1,0 +1,75 @@
+name: Expo rewrite checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", ".github/workflows/expo-checks.yml"]
+  push:
+    branches: ["feature/expo-**"]
+    paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", ".github/workflows/expo-checks.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  expo:
+    name: Expo checks (no deployment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    defaults:
+      run:
+        working-directory: app
+    env:
+      CI: "1"
+      APP_ENV: test
+      APP_ROLE: test
+      DATABASE_URL: postgresql+psycopg://test_user:test_password@127.0.0.1:5432/test_db
+      E2E_DATABASE_URL: postgresql+psycopg://test_user:test_password@127.0.0.1:5432/test_db_e2e
+      DIRECT_DATABASE_URL: ""
+      FIREBASE_PROJECT_ID: test-firebase-project
+      ALLOWED_MEMBER_EMAILS: ""
+      SENTRY_DSN: ""
+      # Compilation fixtures only. Never upload these bundles for distribution.
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:8101
+      EXPO_PUBLIC_FIREBASE_API_KEY: e2e-public-placeholder
+      EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: test-firebase-project.firebaseapp.com
+      EXPO_PUBLIC_FIREBASE_PROJECT_ID: test-firebase-project
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
+      - run: uv sync --all-groups --frozen
+        working-directory: .
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx expo install --check
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --reporter=line
+      - run: npx expo export --platform android --platform ios --output-dir dist-native --clear --max-workers 2
+      - name: Failure evidence (test fixtures only)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: expo-test-failures
+          path: app/test-results/
+          retention-days: 7

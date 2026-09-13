@@ -61,7 +61,9 @@ test('a sale can be recorded somewhere that is not one of the six channels', asy
 
   // A channel you can enter has to be a channel you can filter by.
   await page.getByPlaceholder('Search by product…').fill('')
-  await page.locator('select').first().selectOption('Corner card shop')
+  await page.getByRole('combobox').filter({
+    has: page.getByRole('option', { name: 'All channels', exact: true }),
+  }).selectOption('Corner card shop')
   await expect(page.getByRole('row', { name: rx(name) })).toBeVisible()
 })
 

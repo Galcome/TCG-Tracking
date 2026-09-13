@@ -35,12 +35,77 @@ def buy(client, product_id, quantity, amount):
 
 
 def send(client, product_id, **extra):
-    return client.post(
-        "/api/v1/grading", json={"product_id": product_id, **extra}
-    )
+    return client.post("/api/v1/grading", json={"product_id": product_id, **extra})
 
 
 # ---------------------------------------------------------------------- the send
+
+
+def test_outstanding_submissions_share_one_bucket_capacity(client, make_product):
+    raw = make_product("Cumulative grading guard")
+    buy(client, raw["id"], 2, "10.01")
+    first = send(client, raw["id"], quantity=1)
+    assert first.status_code == 201
+    assert send(client, raw["id"], quantity=2).status_code == 409
+    assert send(client, raw["id"], quantity=1).status_code == 201
+    assert send(client, raw["id"], quantity=1).status_code == 409
+    assert stats(client, raw["id"])["quantity_on_hand"] == 2
+
+
+def test_cancelled_submission_releases_capacity(client, make_product):
+    raw = make_product("Cancelled grading capacity")
+    buy(client, raw["id"], 1, "10.01")
+    first = send(client, raw["id"]).json()
+    cancelled = client.post(
+        f"/api/v1/grading/{first['id']}/void", json={"reason": "Cancelled for test"}
+    )
+    assert cancelled.status_code == 200
+    assert send(client, raw["id"]).status_code == 201
+
+
+def test_return_rejects_missing_original_bucket_stock_without_writes(client, make_product):
+    raw = make_product("Moved while grading")
+    graded = make_product("Moved graded target")
+    buy(client, raw["id"], 1, "10.01")
+    submission = send(client, raw["id"]).json()
+    moved = client.post(
+        "/api/v1/moves",
+        json={
+            "product_id": raw["id"],
+            "quantity": 1,
+            "from_bucket": "inventory",
+            "to_bucket": "vault",
+        },
+    )
+    assert moved.status_code == 201, moved.text
+    returned = client.post(
+        f"/api/v1/grading/{submission['id']}/return",
+        json={
+            "graded_product_id": graded["id"],
+        },
+    )
+    assert returned.status_code == 409
+    assert stats(client, raw["id"])["quantity_on_hand"] == 1
+    assert stats(client, graded["id"])["quantity_on_hand"] == 0
+    current = client.get(f"/api/v1/grading?product_id={raw['id']}").json()[0]
+    assert current["status"] == "out"
+
+
+def test_return_date_cannot_precede_send(client, make_product):
+    raw = make_product("Grading chronology source")
+    graded = make_product("Grading chronology target")
+    buy(client, raw["id"], 1, "10.01")
+    submission = send(client, raw["id"], sent_on=TODAY.isoformat()).json()
+    returned = client.post(
+        f"/api/v1/grading/{submission['id']}/return",
+        json={
+            "graded_product_id": graded["id"],
+            "returned_on": (TODAY - timedelta(days=1)).isoformat(),
+        },
+    )
+    assert returned.status_code == 422
+    assert stats(client, raw["id"])["remaining_cost"] == "10.01"
+    assert stats(client, graded["id"])["quantity_on_hand"] == 0
 
 
 def test_sending_does_not_move_the_card(client, make_product):
@@ -187,9 +252,7 @@ def test_the_return_records_how_long_it_took(client, make_product):
     raw = make_product("Timed Raw")
     graded = make_product("Timed Graded")
     buy(client, raw["id"], 1, "100.00")
-    submission = send(
-        client, raw["id"], sent_on=(TODAY - timedelta(days=45)).isoformat()
-    ).json()
+    submission = send(client, raw["id"], sent_on=(TODAY - timedelta(days=45)).isoformat()).json()
 
     response = client.post(
         f"/api/v1/grading/{submission['id']}/return",
@@ -299,16 +362,12 @@ def test_something_already_back_cannot_be_cancelled(client, make_product):
         json={"graded_product_id": graded["id"]},
     )
 
-    response = client.post(
-        f"/api/v1/grading/{submission['id']}/void", json={"reason": "too late"}
-    )
+    response = client.post(f"/api/v1/grading/{submission['id']}/void", json={"reason": "too late"})
     assert response.status_code == 409
 
 
 def test_cancelling_something_that_does_not_exist_is_a_404(client):
-    response = client.post(
-        f"/api/v1/grading/{uuid.uuid4()}/void", json={"reason": "x"}
-    )
+    response = client.post(f"/api/v1/grading/{uuid.uuid4()}/void", json={"reason": "x"})
     assert response.status_code == 404
 
 

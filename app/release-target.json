@@ -1,0 +1,13 @@
+{
+  "firebaseProjectId": "tcg-tracking",
+  "firebaseAuthDomain": "tcg-tracking.firebaseapp.com",
+  "apiOrigin": "https://api-production-6ea5.up.railway.app",
+  "androidPackage": "com.galcome.tcgtracking",
+  "iosBundleIdentifier": "com.galcome.tcgtracking",
+  "nativeMode": "pending",
+  "androidAppId": "1:304233430839:android:75a3507eda63cefe3b64b2",
+  "iosAppId": "1:304233430839:ios:c1b31c756ff1e22f3b64b2",
+  "googleWebClientId": "304233430839-95kp2702183c867u13giihdmkc6rpkfc.apps.googleusercontent.com",
+  "androidSigningSha1": "d703f6ed97fb5ad55465c5d6611640d77ea1e140",
+  "androidSigningSha256": "aa28fc92e91998056f37fbb4eb776f04f1945f7041257c544e35e127385db85d"
+}

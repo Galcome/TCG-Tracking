@@ -243,6 +243,15 @@ def update_purchase(
     db: Session = Depends(db_session),
 ) -> Purchase:
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
+    # Match the generic void path's Product -> Purchase order. Refresh after the lock so
+    # a concurrent void cannot let this stale request mutate an inactive purchase.
+    ledger.lock_products(db, [purchase.product_id])
+    db.refresh(purchase)
+    if purchase.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This purchase has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     changes.pop("funding", None)
@@ -304,7 +313,7 @@ def list_sales(
     marketplace: str | None = Query(default=None, max_length=120),
     sold_by_member_id: uuid.UUID | None = Query(default=None),
     game: str | None = Query(default=None, max_length=60, description="Game slug"),
-    period: str = Query(default=reporting.PERIOD_ALL, pattern="^(all|ytd|mtd|30d)$"),
+    period: str = Query(default=reporting.PERIOD_ALL, pattern=reporting.PERIOD_PATTERN),
     limit: int = Query(default=DEFAULT_SALE_LIMIT, ge=1, le=MAX_SALE_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
@@ -414,6 +423,7 @@ def create_sale(
     db: Session = Depends(db_session),
 ) -> Sale:
     _require_product(db, payload.product_id)
+    ledger.lock_products(db, [payload.product_id])
     _guard_oversell(db, payload.product_id, payload.quantity, payload.allow_oversell)
 
     sale = Sale(
@@ -464,6 +474,16 @@ def update_sale(
     db: Session = Depends(db_session),
 ) -> Sale:
     sale = _require_active(db, Sale, sale_id, "Sale")
+    # Sale edits compete with grading returns, moves and other sales through the product
+    # lock. The initial read above is only enough to find the product; refresh after the
+    # lock so a concurrent void or update cannot feed stale state into the preflight guard.
+    ledger.lock_products(db, [sale.product_id])
+    db.refresh(sale)
+    if sale.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This sale has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     changes.pop("proceeds", None)
@@ -577,6 +597,15 @@ def update_adjustment(
     db: Session = Depends(db_session),
 ) -> InventoryAdjustment:
     adjustment = _require_active(db, InventoryAdjustment, adjustment_id, "Adjustment")
+    # Keep edits in the same Product-first order as ledger.void before applying fields or
+    # flushing, and reject a row that became voided while this request was queued.
+    ledger.lock_products(db, [adjustment.product_id])
+    db.refresh(adjustment)
+    if adjustment.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This adjustment has been voided and can no longer be changed",
+        )
     changes = payload.model_dump(exclude_unset=True)
     audit_reason = changes.pop("audit_reason", None)
 
@@ -641,6 +670,7 @@ def create_move(
     is unaffected by anything here.
     """
     _require_product(db, payload.product_id)
+    ledger.lock_products(db, [payload.product_id])
 
     stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
     available = stats.by_bucket.get(payload.from_bucket, 0) if stats else 0

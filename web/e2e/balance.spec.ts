@@ -17,7 +17,7 @@ async function gotoDashboard(page: Page) {
  * The three lifetime figures, read off the Since day one block.
  *
  * Does not navigate: the period test needs to press a period button and read again on the
- * same page, and a reload would put the selector back to All time.
+ * same page, while the preference test verifies that a reload keeps the selected window.
  */
 async function running(page: Page) {
   const block = page.locator('section').filter({ hasText: 'Since day one' })
@@ -73,4 +73,44 @@ test('the running total ignores the period buttons', async ({ page }) => {
   expect(thirtyDays.out).toBeCloseTo(allTime.out, 2)
   expect(thirtyDays.in).toBeCloseTo(allTime.in, 2)
   expect(thirtyDays.balance).toBeCloseTo(allTime.balance, 2)
+})
+
+test('the dashboard defaults to 60 days and remembers the selected period', async ({ page }) => {
+  await gotoDashboard(page)
+
+  const selector = page.getByRole('group', { name: 'Reporting period' })
+  await expect(selector.getByRole('button', { name: '60 days', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  await selector.getByRole('button', { name: '90 days', exact: true }).click()
+  await page.reload()
+  await expect(page.getByRole('group', { name: 'Reporting period' }).getByRole('button', { name: '90 days', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+})
+
+test('the period selector stays compact and safe on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/')
+  await page.evaluate(() => {
+    window.localStorage.setItem('tcg-tracking:period', 'not-a-period')
+  })
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+
+  const selector = page.locator('select#reporting-period')
+  await expect(selector).toBeVisible()
+  await expect(selector).toHaveValue('60d')
+
+  await selector.selectOption('90d')
+  await page.reload()
+  await expect(page.locator('select#reporting-period')).toHaveValue('90d')
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow).toBeLessThanOrEqual(1)
 })

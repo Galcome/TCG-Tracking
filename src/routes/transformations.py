@@ -6,7 +6,8 @@ exist rather than a `kind` parameter nobody can read at the call site.
 """
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -26,8 +27,8 @@ from src.models.transformation import (
 )
 from src.schemas.ledger import VoidRequest
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
-from src.services import inventory, transformations
-from src.services.money import proportional_split
+from src.services import ledger, transformations
+from src.services.costing import Event, allocate
 
 router = APIRouter()
 
@@ -169,9 +170,7 @@ def crack_case(
     if refusal:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=refusal)
 
-    available = transformations.available_in_bucket(
-        db, payload.product_id, payload.from_bucket
-    )
+    available = transformations.available_in_bucket(db, payload.product_id, payload.from_bucket)
     if payload.quantity > available:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -255,39 +254,17 @@ class RipRequest(BaseModel):
         return self
 
 
-def _hit_costs(db: Session, payload: RipRequest) -> list[int]:
-    """Each hit's share of the box, in proportion to what it is thought to be worth.
+def _hit_costs(payload: RipRequest) -> list[transformations.RipCostSpec]:
+    """Pass rip estimates and explicit decisions to the FIFO-backed service.
 
-    Anything given an explicit `cost` keeps it and the rest share what is left. Hits with
-    no value at all fall back to an even split: a box has to land somewhere, and refusing
-    to record a rip because nobody put a number on it would be the wrong trade.
+    This deliberately does not inspect inventory or derive a cost. The source may span
+    multiple lots, so only the locked consuming adjustment can provide the authoritative
+    cost after the transformation starts.
     """
-    if not payload.hits:
-        return []
-
-    stats = inventory.product_stats(db, [payload.product_id]).get(payload.product_id)
-    unit_cost = stats.average_unit_cost_cents if stats else None
-    total = (unit_cost or 0) * payload.quantity
-
-    explicit = [hit.cost for hit in payload.hits]
-    if all(value is not None for value in explicit):
-        return [value or 0 for value in explicit]
-
-    remaining = max(total - sum(value for value in explicit if value is not None), 0)
-    open_rows = [index for index, value in enumerate(explicit) if value is None]
-    # A hit's value is a per-unit estimate (and is stored that way below), while the
-    # allocated transformation cost belongs to the whole output row.  Account for
-    # quantity here so two $10 copies carry the same weight as one $20 copy.
-    weights = [payload.hits[index].value * payload.hits[index].quantity for index in open_rows]
-    if not any(weights):
-        weights = [1] * len(open_rows)
-
-    shared = proportional_split(weights, remaining)
-
-    costs = [value or 0 for value in explicit]
-    for index, share in zip(open_rows, shared):
-        costs[index] = share
-    return costs
+    return [
+        transformations.RipCostSpec(quantity=hit.quantity, value=hit.value, cost=hit.cost)
+        for hit in payload.hits
+    ]
 
 
 @router.post("/rip", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
@@ -319,9 +296,7 @@ def rip_open(
     if refusal:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=refusal)
 
-    available = transformations.available_in_bucket(
-        db, payload.product_id, payload.from_bucket
-    )
+    available = transformations.available_in_bucket(db, payload.product_id, payload.from_bucket)
     if payload.quantity > available:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -342,7 +317,7 @@ def rip_open(
                 detail="A box cannot be a hit out of itself",
             )
 
-    costs = _hit_costs(db, payload)
+    rip_policy = _hit_costs(payload)
 
     record = transformations.transform(
         db,
@@ -356,7 +331,7 @@ def rip_open(
             )
             for hit in payload.hits
         ],
-        costs=costs,
+        rip_policy=rip_policy,
         occurred_on=payload.occurred_on,
         member_id=member.id,
         notes=payload.notes,
@@ -378,6 +353,104 @@ def rip_open(
     db.flush()
 
     return _read(db, record)
+
+
+class RipPreviewHit(BaseModel):
+    key: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, gt=0, le=MAX_OUTPUT_UNITS)
+    value: MoneyIn = 0
+    cost: MoneyIn | None = None
+
+    @field_validator("key")
+    @classmethod
+    def nonblank_key(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("hit key cannot be blank")
+        return value
+
+
+class RipPreviewRequest(BaseModel):
+    product_id: uuid.UUID
+    quantity: int = Field(default=1, gt=0, le=1_000)
+    from_bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
+    occurred_on: date = Field(default_factory=date.today)
+    hits: list[RipPreviewHit] = Field(default_factory=list, max_length=MAX_OUTPUT_UNITS)
+
+    @model_validator(mode="after")
+    def unique_keys(self) -> "RipPreviewRequest":
+        if len({hit.key for hit in self.hits}) != len(self.hits):
+            raise ValueError("hit keys must be unique")
+        return self
+
+
+class RipPreviewOutput(BaseModel):
+    key: str
+    quantity: int
+    cost: MoneyOutOptional
+
+
+class RipPreviewRead(BaseModel):
+    source_cost: MoneyOutOptional
+    has_unknown_cost: bool
+    quantity_available: int
+    hits: list[RipPreviewOutput]
+    bulk_cost: MoneyOutOptional
+    nonbinding: Literal[True] = True
+
+
+@router.post("/rip/preview", response_model=RipPreviewRead)
+def preview_rip(
+    payload: RipPreviewRequest,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session),
+) -> RipPreviewRead:
+    """Simulate product-wide FIFO without product or accounting writes/reservations."""
+    if db.get(Product, payload.product_id) is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    refusal = transformations.opening_refusal(db, payload.product_id, TRANSFORM_RIP)
+    if refusal:
+        raise HTTPException(status_code=422, detail=refusal)
+    available = transformations.available_in_bucket(db, payload.product_id, payload.from_bucket)
+    if payload.quantity > available:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{payload.from_bucket} holds {available}, so "
+                f"{payload.quantity} cannot be ripped out of it"
+            ),
+        )
+
+    # Bucket availability is current stock; costing remains product-wide at occurred_on,
+    # exactly as the writer and sale preview. Never filter FIFO lots by the bucket.
+    events, _sources = ledger.load_events(db, payload.product_id)
+    hypothetical = Event(
+        id=uuid.uuid4(),
+        quantity=payload.quantity,
+        is_supply=False,
+        occurred_on=payload.occurred_on,
+        created_at=datetime.max.replace(tzinfo=UTC),
+    )
+    outcome = allocate([*events, hypothetical]).consumers[hypothetical.id]
+    try:
+        shares, bulk = transformations.allocate_rip_costs(
+            outcome.cost_basis_cents,
+            [
+                transformations.RipCostSpec(quantity=hit.quantity, value=hit.value, cost=hit.cost)
+                for hit in payload.hits
+            ],
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return RipPreviewRead(
+        source_cost=outcome.cost_basis_cents,
+        has_unknown_cost=outcome.has_unknown_cost,
+        quantity_available=available,
+        bulk_cost=bulk,
+        hits=[
+            RipPreviewOutput(key=hit.key, quantity=hit.quantity, cost=share)
+            for hit, share in zip(payload.hits, shares)
+        ],
+    )
 
 
 @router.get("", response_model=list[TransformationRead])

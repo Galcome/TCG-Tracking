@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "TCG Investments",
+    "slug": "tcg-investments",
+    "version": "0.1.0",
+    "scheme": "tcginvestments",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.galcome.tcgtracking"
+    },
+    "android": {
+      "package": "com.galcome.tcgtracking",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0e1a"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow TCG Investments to select card photos for identity suggestions.",
+          "cameraPermission": "Allow TCG Investments to photograph cards for identity suggestions.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-build-properties"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
