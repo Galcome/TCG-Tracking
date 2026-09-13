@@ -20,7 +20,7 @@ def read_me(member: Member = Depends(get_current_member)) -> Member:
 @router.get("", response_model=list[MemberRead])
 def list_members(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[Member]:
     """Everyone who can operate the store. Used to populate "sold by" pickers."""
     return list(db.scalars(select(Member).order_by(Member.display_name, Member.id)))

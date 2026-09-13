@@ -189,7 +189,7 @@ def resolve_proceeds(
 @router.get("/accounts", response_model=AccountList)
 def list_accounts(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> AccountList:
     """Every pot, with what its balance means spelled out.
 
@@ -315,7 +315,7 @@ def list_movements(
     limit: int = Query(default=DEFAULT_MOVEMENT_LIMIT, ge=1, le=MAX_MOVEMENT_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> MovementList:
     """Every movement, newest first.
 
@@ -371,7 +371,7 @@ def list_movements(
 def create_transfer(
     payload: TransferCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> MovementRead:
     """Move money from one account to another.
 
@@ -411,7 +411,7 @@ def create_transfer(
 def create_adjustment(
     payload: AdjustmentCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> MovementRead:
     """Correct a balance, or set the one carried over from the spreadsheet.
 
@@ -450,7 +450,7 @@ def void_movement(
     movement_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> MovementRead:
     """Retire a movement. Balances stop counting it; the row stays as the explanation.
 
@@ -488,5 +488,4 @@ def _one(db: Session, movement: MoneyMovement) -> MovementRead:
     )
     legs = {movement.id: [(posting, account) for posting, account in rows]}
     return _serialise([movement], legs, _product_names(db, [movement]))[0]
-
 

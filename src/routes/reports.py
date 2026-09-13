@@ -129,7 +129,7 @@ PeriodQuery = Query(default=reporting.PERIOD_ALL, pattern=reporting.PERIOD_PATTE
 def read_dashboard(
     period: str = PeriodQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     return reporting.dashboard(db, period)
 
@@ -141,7 +141,7 @@ def read_by_game(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     return reporting.by_game(db, period, filters=_filters(set_id, game_id, product_type_id))
 
@@ -153,7 +153,7 @@ def read_by_product(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     return reporting.by_product(db, period, filters=_filters(set_id, game_id, product_type_id))
 
@@ -165,7 +165,7 @@ def read_by_product_type(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     return reporting.by_product_type(db, period, filters=_filters(set_id, game_id, product_type_id))
 
@@ -177,7 +177,7 @@ def read_by_marketplace(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     """Where things sold. Sales with no marketplace collapse into "Unspecified"."""
     return reporting.by_marketplace(db, period, filters=_filters(set_id, game_id, product_type_id))
@@ -190,7 +190,7 @@ def read_by_seller(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     return reporting.by_seller(db, period, filters=_filters(set_id, game_id, product_type_id))
 
@@ -202,7 +202,7 @@ def read_by_set_performance(
     game_id: uuid.UUID | None = GameQuery,
     product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     """Sets compared against each other, so the group can see which ones actually paid.
 
@@ -228,7 +228,7 @@ class MonthRead(BaseModel):
 @router.get("/reports/by-month", response_model=list[MonthRead])
 def read_by_month(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     """The last twelve months of trading, oldest first.
 
@@ -241,7 +241,7 @@ def read_by_month(
 @router.get("/reports/aging", response_model=list[AgingLotRead])
 def read_aging(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     """Unsold stock, oldest money first, one row per purchase lot.
 
@@ -254,7 +254,7 @@ def read_aging(
 @router.get("/reports/attention", response_model=AttentionRead)
 def read_attention(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ):
     """States where a number on screen cannot be trusted. Empty when the ledger is sound."""
     return reporting.attention(db)
@@ -336,7 +336,7 @@ class SetRead(BaseModel):
 def lineage_report(
     product_id: uuid.UUID,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> LineageRead:
     """One product, all-in, across everything it became.
 
@@ -353,7 +353,7 @@ def lineage_report(
 @router.get("/reports/by-tier", response_model=list[TierRead])
 def tier_report(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[TierRead]:
     """How each kind of thing has performed, with the spread and not just the average.
 
@@ -369,7 +369,7 @@ def tier_report(
 @router.get("/reports/by-set", response_model=list[SetRead])
 def set_report(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[SetRead]:
     """One set, split into what sold, what is still trying, and what is held on purpose.
 
@@ -442,7 +442,7 @@ class VaultHoldingRead(BaseModel):
 def record_valuation(
     payload: ValuationRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> ValuationRead:
     """Write down what something is worth today.
 
@@ -467,7 +467,7 @@ def record_valuation(
 @router.get("/reports/vault", response_model=list[VaultHoldingRead])
 def vault_report(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[VaultHoldingRead]:
     """What is in the Vault, and what it has done since it went in.
 

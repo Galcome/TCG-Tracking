@@ -48,7 +48,7 @@ def list_sets(
     q: str = Query(default="", max_length=120),
     limit: int = Query(default=sets.DEFAULT_SUGGESTION_LIMIT, ge=1, le=MAX_SUGGESTIONS),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SetList:
     """Sets worth offering for one game, best first.
 

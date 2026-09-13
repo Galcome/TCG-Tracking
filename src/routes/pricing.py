@@ -154,7 +154,7 @@ def list_mappings(
     product_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=MAX_MAPPINGS),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[CatalogMappingRead]:
     stmt = select(CatalogMapping).order_by(CatalogMapping.created_at.desc()).limit(limit)
     if product_id is not None:
@@ -173,7 +173,7 @@ def list_mappings(
 def create_mapping(
     payload: CatalogMappingCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> CatalogMappingRead:
     product = db.get(Product, payload.product_id)
     if product is None:
@@ -207,7 +207,7 @@ def update_mapping(
     mapping_id: uuid.UUID,
     payload: CatalogMappingUpdate,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> CatalogMappingRead:
     mapping = db.get(CatalogMapping, mapping_id)
     if mapping is None:
@@ -238,7 +238,7 @@ def update_mapping(
 @router.post("/refresh", response_model=PricingRefreshRead)
 def refresh_pricing(
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> PricingRefreshRead:
     """Refresh confirmed mappings once; a later scheduler can call this same operation."""
     try:

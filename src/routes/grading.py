@@ -119,7 +119,7 @@ def _read(db: Session, record: GradingSubmission, today: date | None = None) -> 
 def submit(
     payload: SubmitRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SubmissionRead:
     """Send cards to a grader.
 
@@ -168,7 +168,7 @@ def list_submissions(
     product_id: uuid.UUID | None = Query(default=None),
     out_only: bool = Query(default=False, description="Only what is still away"),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[SubmissionRead]:
     """What is at the grader, longest away first.
 
@@ -192,7 +192,7 @@ def take_back(
     submission_id: uuid.UUID,
     payload: ReturnRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SubmissionRead:
     """It came back. The raw card is consumed and the graded one produced.
 
@@ -275,7 +275,7 @@ def void_submission(
     submission_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SubmissionRead:
     """Cancel a submission that never should have existed. Nothing moved, so nothing undoes."""
     record = db.get(GradingSubmission, submission_id)

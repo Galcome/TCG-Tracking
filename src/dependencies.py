@@ -20,7 +20,12 @@ FALLBACK_DISPLAY_NAME = "Member"
 
 
 def db_session() -> Generator[Session, None, None]:
-    """Request-scoped session. Commits on success, rolls back on error."""
+    """Shared transaction: inject with function scope to commit before responding.
+
+    Request-scoped yield cleanup runs after sending the response in FastAPI. Every
+    consumer must use ``Depends(db_session, scope="function")`` so subsequent reads
+    see committed writes and commit failures cannot follow an already-sent success.
+    """
     with get_db() as session:
         yield session
 
@@ -37,7 +42,7 @@ def _display_name_from_claims(claims: dict) -> str:
 
 def get_current_member(
     claims: dict = Depends(get_current_user),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Member:
     """Resolve the verified Firebase token to a member row, creating one on first sign-in.
 

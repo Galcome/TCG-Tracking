@@ -22,7 +22,7 @@ def build_router(model: type[Base], label: str) -> APIRouter:
     @router.get("", response_model=list[TaxonomyRead])
     def list_all(
         _: Member = Depends(get_current_member),
-        db: Session = Depends(db_session),
+        db: Session = Depends(db_session, scope="function"),
     ) -> list[Base]:
         return list(db.scalars(select(model).order_by(model.sort_order, model.name)))
 
@@ -30,7 +30,7 @@ def build_router(model: type[Base], label: str) -> APIRouter:
     def create(
         payload: TaxonomyCreate,
         _: Member = Depends(get_current_member),
-        db: Session = Depends(db_session),
+        db: Session = Depends(db_session, scope="function"),
     ) -> Base:
         slug = slugify(payload.name)
         if not slug:
