@@ -674,9 +674,11 @@ checkout or a branch-name bypass. Installed-device acceptance is still pending.
 The real-production Expo web export is staged, not live:
 https://tcg-tracking--expo-review-vj02wcg8.web.app (seven-day channel). Root and inventory
 deep links and the compiled production API bundle returned HTTP 200. Its exact origin
-was appended to Railway API CORS without removing existing origins or adding a wildcard;
-that configuration redeployment must finish before authenticated preview testing.
-Browser tooling failed at initialization, so authenticated production parity is not proven.
+was appended to Railway API CORS without removing existing origins or adding a wildcard.
+Configuration redeployment `a1cab5d5-f2cb-4525-bbf1-567743059852` succeeded; HTTP 200 health
+returns the exact preview origin in its CORS header. Connected browser tooling failed at
+initialization. Playwright CLI verified login rendering at default/390px widths with zero
+console errors, but authenticated production parity is not proven.
 Production OpenAPI is intentionally disabled; its 404 is not a deployment failure.
 
 **Do not switch Hosting yet.** Main CI still publishes `web/dist`, so a manual Expo
