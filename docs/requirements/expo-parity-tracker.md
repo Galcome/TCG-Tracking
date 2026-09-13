@@ -703,3 +703,25 @@ PowerShell 5.1, the documented npm-script/build runtime, reproduces the exact bu
 Use that runtime for distribution; do not rewrite the receipt or bypass verification.
 Firebase CLI uses a process-scoped real Node 22 executable to avoid the observed Node 24
 shutdown assertion and nested-npx PowerShell shim problem. No machine-wide runtime changes.
+
+Dependency assessment found release follow-ups, not a verified auth bypass: the backend's
+PyJWT 2.11.0 can amplify JWKS fetches for unknown token key IDs (fixed in 2.13.0), and
+Expo Router's `query-string` dependency uses vulnerable malformed-percent decoding
+(`decode-uri-component`, fixed in 0.5.0). Fix both before broad Expo distribution/web
+cutover. Existing fixed-HTTPS JWKS URL and RS256-only key validation rule out the reviewed
+scheme/JWK-HMAC mixing paths; Mako is migration tooling and uuid's affected buffer APIs
+are not application calls. See [PyJWT advisory](https://github.com/advisories/GHSA-fhv5-28vv-h8m8)
+and [decoder advisory](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr). Internal `alpha`
+remains one-tester device validation, not broad-release acceptance. Backend dependency
+remediation is isolated on `fix/auth-dependency-security`; no APK receipt is rewritten.
+
+Android distribution checkpoint: exact-main CI run
+https://github.com/Galcome/TCG-Tracking/actions/runs/34754413911 passed all backend,
+Vite build/E2E, required-test and Hosting deployment jobs. Windows PowerShell 5.1 verified
+the unchanged receipt/signature/package/version, then Firebase successfully uploaded and
+distributed **0.1.0 (1)** to **`alpha`**, release **`6g3rouq688fb0`**. Tester access:
+https://appdistribution.firebase.google.com/testerapps/1:304233430839:android:75a3507eda63cefe3b64b2/releases/6g3rouq688fb0
+Do not retain the CLI's temporary signed binary-download URL. Device login, relaunch,
+camera/share and telemetry acceptance remain pending. Main CI deployed the compatible
+Vite update, not Expo; the live website stayed on Vite throughout. CI/CD follow-up can now
+begin without conflating first distribution with broad-release or website acceptance.

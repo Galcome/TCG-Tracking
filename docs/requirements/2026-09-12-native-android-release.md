@@ -44,3 +44,9 @@ deployment succeeded. Firebase now lists `alpha` with one tester. Android upload
 exact-main green CI; no branch exception is used. Expo web has an isolated production-config
 preview, but live Hosting remains Vite until authenticated parity and a separate reviewed
 deploy/rollback change pass. See the parity tracker's approved rollout checkpoint.
+
+Distribution completed: exact-main CI passed and verified Android **0.1.0 (1)** was
+uploaded/distributed to **`alpha`**, Firebase release **`6g3rouq688fb0`**. No Android EAS
+build was used. Installed-device acceptance and secure signing-key backup remain pending.
+Dependency availability fixes and authenticated preview parity are required before broad
+Expo distribution or live website cutover. CI/CD follow-up starts after this checkpoint.
