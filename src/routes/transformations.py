@@ -151,7 +151,7 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
 def crack_case(
     payload: CrackRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> TransformationRead:
     """Open sealed cases into the boxes inside them.
 
@@ -271,7 +271,7 @@ def _hit_costs(payload: RipRequest) -> list[transformations.RipCostSpec]:
 def rip_open(
     payload: RipRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> TransformationRead:
     """Open boxes or packs, and record the hits worth tracking.
 
@@ -402,7 +402,7 @@ class RipPreviewRead(BaseModel):
 def preview_rip(
     payload: RipPreviewRequest,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> RipPreviewRead:
     """Simulate product-wide FIFO without product or accounting writes/reservations."""
     if db.get(Product, payload.product_id) is None:
@@ -457,7 +457,7 @@ def preview_rip(
 def list_transformations(
     product_id: uuid.UUID | None = Query(default=None),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[TransformationRead]:
     """What has been opened, newest first.
 
@@ -490,7 +490,7 @@ def void_transformation(
     transformation_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> TransformationRead:
     """Undo it. The case comes back, the boxes go away, and the row stays as the reason."""
     record = db.get(Transformation, transformation_id)

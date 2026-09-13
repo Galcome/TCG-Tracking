@@ -123,7 +123,7 @@ def list_products(
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> ProductList:
     """Search and filter products, each with its derived stock and cost figures.
 
@@ -201,7 +201,7 @@ def list_products(
 def create_product(
     payload: ProductCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> ProductDetail:
     """Create a product, optionally with the purchase that brought it into stock.
 
@@ -269,7 +269,7 @@ def product_candidates(
     variant: str | None = Query(default=None, max_length=80),
     language: str | None = Query(default=None, max_length=40),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> list[ProductCandidateRead]:
     """Suggest existing products; the caller must still explicitly reuse or create.
 
@@ -334,7 +334,7 @@ def _detail(db: Session, product: Product) -> ProductDetail:
 def read_product(
     product_id: uuid.UUID,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> ProductDetail:
     product = db.get(Product, product_id)
     if product is None:
@@ -347,7 +347,7 @@ def update_product(
     product_id: uuid.UUID,
     payload: ProductUpdate,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> ProductDetail:
     product = db.get(Product, product_id)
     if product is None:
@@ -382,7 +382,7 @@ def update_product(
 def delete_product(
     product_id: uuid.UUID,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Response:
     """Delete a product created by mistake.
 

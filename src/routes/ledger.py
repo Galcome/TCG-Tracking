@@ -192,7 +192,7 @@ def _after(record, before: dict[str, Any]) -> dict[str, Any]:
 def create_purchase(
     payload: PurchaseCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Purchase:
     _require_product(db, payload.product_id)
 
@@ -240,7 +240,7 @@ def update_purchase(
     purchase_id: uuid.UUID,
     payload: PurchaseUpdate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Purchase:
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
     # Match the generic void path's Product -> Purchase order. Refresh after the lock so
@@ -294,7 +294,7 @@ def void_purchase(
     purchase_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Purchase:
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
     ledger.void(
@@ -317,7 +317,7 @@ def list_sales(
     limit: int = Query(default=DEFAULT_SALE_LIMIT, ge=1, le=MAX_SALE_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SaleList:
     """The sales ledger across every product.
 
@@ -366,7 +366,7 @@ def list_sales(
 def preview_sale(
     payload: SalePreviewRequest,
     _: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> SalePreview:
     """What a sale would do, without doing it.
 
@@ -420,7 +420,7 @@ def preview_sale(
 def create_sale(
     payload: SaleCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Sale:
     _require_product(db, payload.product_id)
     ledger.lock_products(db, [payload.product_id])
@@ -471,7 +471,7 @@ def update_sale(
     sale_id: uuid.UUID,
     payload: SaleUpdate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Sale:
     sale = _require_active(db, Sale, sale_id, "Sale")
     # Sale edits compete with grading returns, moves and other sales through the product
@@ -532,7 +532,7 @@ def void_sale(
     sale_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> Sale:
     sale = _require_active(db, Sale, sale_id, "Sale")
     ledger.void(db, sale, entity_type="sale", member_id=member.id, reason=payload.reason)
@@ -548,7 +548,7 @@ def void_sale(
 def create_adjustment(
     payload: AdjustmentCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> InventoryAdjustment:
     _require_product(db, payload.product_id)
 
@@ -594,7 +594,7 @@ def update_adjustment(
     adjustment_id: uuid.UUID,
     payload: AdjustmentUpdate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> InventoryAdjustment:
     adjustment = _require_active(db, InventoryAdjustment, adjustment_id, "Adjustment")
     # Keep edits in the same Product-first order as ledger.void before applying fields or
@@ -641,7 +641,7 @@ def void_adjustment(
     adjustment_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> InventoryAdjustment:
     adjustment = _require_active(db, InventoryAdjustment, adjustment_id, "Adjustment")
     ledger.void(
@@ -658,7 +658,7 @@ def void_adjustment(
 def create_move(
     payload: MoveCreate,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> StockMove:
     """Shift stock between buckets. Changes where it sits, never how much there is.
 
@@ -712,7 +712,7 @@ def void_move(
     move_id: uuid.UUID,
     payload: VoidRequest,
     member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session),
+    db: Session = Depends(db_session, scope="function"),
 ) -> StockMove:
     move = _require_active(db, StockMove, move_id, "Move")
     ledger.void(db, move, entity_type="move", member_id=member.id, reason=payload.reason)
