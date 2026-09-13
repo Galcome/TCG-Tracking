@@ -64,7 +64,7 @@ try {
         Push-Location -LiteralPath (Join-Path $taskAppRoot 'android')
         try {
             $taskToolchain = Join-Path $taskAppRoot 'scripts/mobile/cmake-toolchain.gradle'
-            & $taskWrapper assembleRelease '-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m' --max-workers=2 --init-script $taskToolchain
+            & $taskWrapper ':app:assembleRelease' '-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m' --max-workers=2 --init-script $taskToolchain
             if ($LASTEXITCODE -ne 0) { throw 'Gradle release build failed' }
         } finally { Pop-Location }
         if ((Get-SourceFingerprint) -ne $taskSourceFingerprint) { throw 'Release sources changed during build; rebuild before distribution' }

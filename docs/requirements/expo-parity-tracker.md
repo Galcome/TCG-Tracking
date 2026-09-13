@@ -600,3 +600,22 @@ The production backend must first receive the reviewed reporting-period and rip-
 changes required by this app, or an explicitly approved compatible test API must be selected.
 No Android device is connected; installed-device auth/relaunch/camera/sharing and telemetry
 acceptance remain pending. iOS native setup and cloud build are not yet validated.
+
+Independent final review found no remaining issues in the corrected signature parser or
+source/APK receipt guards. Its earlier assumption about `apksigner` digest formatting was
+withdrawn after checking the installed tool and actual APK. Native implementation is
+committed as `79c5ec3`; unrelated untracked Vite Android/iOS directories remain untouched.
+
+The frozen-source rebuild subsequently succeeded in 11m 21s and wrote a verified receipt.
+Branch publication and draft PR [#82](https://github.com/Galcome/TCG-Tracking/pull/82) preserve
+the normal review/main release path without merging or deploying. Existing remote backend
+tests, web builds and CodeQL passed; Expo checks caught a clean-install lock failure caused
+by indirect Reanimated 4.6/Worklets 0.12 versus Expo core's supported Worklets range.
+
+Pinned the installed Expo SDK's recommended pair as direct dependencies (Reanimated 4.5.1,
+Worklets 0.10.1), without overrides or workflow redesign. Independent review confirmed the
+remediation. A real Node 22/npm 10 clean install passed after releasing the identified idle
+Gradle daemon/compiler that held Windows jar locks. All 107 app tests and Expo dependency
+compatibility checks passed again. This source change invalidates the previous APK receipt;
+the corrected dependency set still needs final packaging. Local builds now target only
+`:app:assembleRelease`, avoiding unrelated library release assembly targets.
