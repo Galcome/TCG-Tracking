@@ -1115,6 +1115,14 @@ async function signIn(page: Page) {
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
 }
+test('bundled font failures fall back to readable text without blocking authentication', async ({ page }) => {
+  let attemptedFonts = 0;
+  await page.route('**/*.ttf', route => { attemptedFonts++; return route.abort(); });
+  await signIn(page);
+  await expect(page.getByLabel('Main navigation', { exact: true }).getByRole('button', { name: 'Dashboard', exact: true })).toBeEnabled();
+  expect(attemptedFonts).toBeGreaterThan(0);
+});
+
 test('session restoration and signout use the real Firebase SDK; API membership gates the dashboard',async({page})=>{
   await signIn(page);
   await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();

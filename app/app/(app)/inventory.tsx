@@ -9,6 +9,7 @@ import { BUCKETS, BUCKET_LABELS, type Bucket, type Product } from '../../lib/api
 import { money } from '../../lib/format';
 import { ProductForms } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
+import { GameIdentity } from '../../components/game-identity';
 export default function Inventory() {
   const api = useApi();
   const params = useLocalSearchParams<{ bucket?: string }>();
@@ -50,7 +51,8 @@ export default function Inventory() {
     {products.data?.items.length === 0 && <Card><Copy>No products match these filters.</Copy></Card>}
     {products.data?.items.map(p=><Card key={p.id}>
       <Row><View style={{flex:1,minWidth:160}}><Button variant="link" label={p.name} onPress={()=>router.push({pathname:'/products/[productId]',params:{productId:p.id}})} />
-        <Copy muted>{p.game.name} · {p.product_type.name}{p.set_name ? ' · '+p.set_name : ''}</Copy></View>
+        <GameIdentity slug={p.game.slug} name={p.game.name} />
+        <Copy muted>{p.product_type.name}{p.set_name ? ' · '+p.set_name : ''}</Copy></View>
         <View style={{minWidth:80,alignItems:'center'}}><Copy>{bucket ? p.stats.by_bucket[bucket] : p.stats.quantity_on_hand}</Copy><Copy muted>{bucket ? 'In '+BUCKET_LABELS[bucket] : 'In stock'}</Copy></View></Row>
       <Row>{BUCKETS.map(b=><Text key={b} style={{color:colors[b],backgroundColor:colors.raised,padding:8,borderRadius:8}}>{BUCKET_LABELS[b]} {p.stats.by_bucket[b]}</Text>)}</Row>
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}

@@ -8,7 +8,9 @@ import { AddProductDialog } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { useSession } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
+import { useTypography } from '../../context/TypographyContext';
 export default function ProtectedLayout() {
+  const fonts = useTypography();
   const { session, loading, error, signOut } = useSession();
   const [actionError, setActionError] = useState<unknown>(null);
   const [adding, setAdding] = useState(false);
@@ -33,7 +35,7 @@ export default function ProtectedLayout() {
       onPress={() => router.push(link.bucket ? { pathname: '/inventory', params: { bucket: link.bucket } } : link.href)}
       style={({ pressed }) => ({ flex: isDesktop || wrapNavigation ? undefined : 1, width: wrapNavigation ? '25%' : undefined, minWidth: 0, minHeight: 48, paddingVertical: 8, paddingHorizontal: isDesktop ? 12 : 0, alignItems: isDesktop ? 'flex-start' : 'center', justifyContent: 'center', gap: 3, borderRadius: 8, backgroundColor: selected ? colors.raised : 'transparent', opacity: pressed ? 0.7 : !member.data ? 0.45 : 1 })}>
       {!isDesktop ? <Text accessible={false} style={{ color: selected ? tint : colors.muted, fontSize: 19 }}>{link.icon}</Text> : null}
-      <Text style={{ maxWidth: '100%', textAlign: isDesktop ? 'left' : 'center', color: selected ? tint : colors.muted, fontSize: isDesktop ? 14 : 10, fontWeight: selected ? '700' : '500' }}>{isDesktop ? link.label : link.short}</Text>
+      <Text style={{ maxWidth: '100%', textAlign: isDesktop ? 'left' : 'center', color: selected ? tint : colors.muted, fontSize: isDesktop ? 14 : 10, fontWeight: selected ? '700' : '500', fontFamily: selected ? fonts.bold : fonts.medium }}>{isDesktop ? link.label : link.short}</Text>
     </Pressable>;
   });
   if (loading) return <Loading />;

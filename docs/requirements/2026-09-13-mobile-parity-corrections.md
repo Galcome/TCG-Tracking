@@ -36,7 +36,7 @@ share recipients, keyboard/full-height form, navigation, larger text and safe-ar
 remain real-device gates.
 
 This slice begins design recovery, not completion of the entire website design port.
-Bundled Inter/Space Grotesk, full game iconography, restrained holo/lattice treatments,
+Restrained holo/lattice treatments, broader game-marker coverage,
 responsive desktop density and representative-screen visual approval remain tracked.
 Every journey in the audit matrix still needs explicit comparative acceptance evidence.
 Provider availability advisories remain separate fix work; no AI-estimated prices or slab
@@ -62,3 +62,22 @@ the usage limit before final handoff. Root inspected the retained edits and comp
 integration checks, but the final combined independent review remains outstanding.
 Publication is a draft PR only until that review and CI acceptance are complete.
 No new APK, Expo preview deployment or live Hosting switch has occurred in this slice.
+
+## Visual recovery checkpoint
+
+Restored locally bundled Inter (400/500/600/700) and Space Grotesk (700) via Expo runtime
+font loading. Load errors unblock startup with system-text fallback; no CDN font fetch.
+Only selected font assets are imported. Shared controls, headings, brand and navigation
+use the restored typography without disabling font scaling. Inventory and product detail
+reuse the website's six game-marker geometries via SDK-compatible react-native-svg;
+unknown games retain a colored orb and visible text. Additional native dependencies
+require a fresh signed rebuild, not an update to the existing first-alpha receipt.
+
+Lint/typecheck, 109 units, Expo dependency compatibility and all three fixture exports
+pass. Added browser font-failure acceptance; it remains pending CI execution. No signed
+APK or representative-screen/device visual approval is implied.
+
+First PR CI run executed 33 Expo browser scenarios: 30 passed; three failed on ambiguous
+page/form selectors after navigation restoration. Scoped Product type to Add product
+dialog and Store quantity to textbox in commit `ef7f6f7`; financial assertions and workflow
+remain unchanged. Subsequent CI acceptance is pending, as is final independent review.

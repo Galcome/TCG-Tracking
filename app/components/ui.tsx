@@ -2,39 +2,45 @@ import { useState, type PropsWithChildren, type ReactNode } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, useResponsiveLayout } from '../context/ThemeContext';
+import { useTypography } from '../context/TypographyContext';
 export function Brand() {
+  const fonts = useTypography();
   return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0, maxWidth: '100%' }}>
     <View accessible={false} style={{ width: 30, height: 36, flexShrink: 0 }}>
       <View style={{ position: 'absolute', width: 22, height: 29, borderRadius: 4, borderWidth: 1, borderColor: colors.vault, transform: [{ rotate: '-18deg' }], left: 0, top: 3 }} />
       <View style={{ position: 'absolute', width: 22, height: 29, borderRadius: 4, borderWidth: 1, borderColor: colors.store, transform: [{ rotate: '12deg' }], left: 7, top: 3 }} />
       <View style={{ position: 'absolute', width: 22, height: 29, borderRadius: 4, borderWidth: 1, borderColor: colors.accent, backgroundColor: colors.raised, left: 4 }} />
-    </View><Text style={{ color: colors.text, fontSize: 18, fontWeight: '700', flexShrink: 1 }}>TCG Investments</Text>
+    </View><Text style={{ color: colors.text, fontSize: 18, fontWeight: '700', fontFamily: fonts.display, flexShrink: 1 }}>TCG Investments</Text>
   </View>;
 }
 export function Copy({ children, muted = false }: PropsWithChildren<{ muted?: boolean }>) {
-  return <Text style={[styles.copy, muted && { color: colors.muted }]}>{children}</Text>;
+  const fonts = useTypography();
+  return <Text style={[styles.copy, { fontFamily: fonts.body }, muted && { color: colors.muted }]}>{children}</Text>;
 }
-export function Heading({ children }: PropsWithChildren) { return <Text accessibilityRole="header" style={styles.heading}>{children}</Text>; }
+export function Heading({ children }: PropsWithChildren) { const fonts = useTypography(); return <Text accessibilityRole="header" style={[styles.heading, { fontFamily: fonts.display }]}>{children}</Text>; }
 export function Card({ children }: PropsWithChildren) { return <View style={styles.card}>{children}</View>; }
 export function Row({ children }: PropsWithChildren) { return <View style={styles.row}>{children}</View>; }
 export function Button({ label, onPress, disabled = false, danger = false, variant = 'secondary' }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean; variant?: 'primary' | 'secondary' | 'link' }) {
+  const fonts = useTypography();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }}
     disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.button, variant === 'primary' && { backgroundColor: colors.accent, borderColor: colors.accent }, variant === 'link' && { backgroundColor: 'transparent', borderColor: 'transparent', paddingHorizontal: 0 }, { opacity: disabled ? 0.45 : pressed ? 0.7 : 1 }, danger && { borderColor: colors.loss }]}>
-    <Text style={{ color: danger ? colors.loss : variant === 'primary' ? colors.background : variant === 'link' ? colors.accent : colors.text, fontWeight: '600' }}>{label}</Text>
+    <Text style={{ color: danger ? colors.loss : variant === 'primary' ? colors.background : variant === 'link' ? colors.accent : colors.text, fontWeight: '600', fontFamily: fonts.strong }}>{label}</Text>
   </Pressable>;
 }
 export function Field({ label, ...props }: TextInputProps & { label: string }) {
-  return <View style={styles.field}><Text style={styles.label}>{label}</Text>
+  const fonts = useTypography();
+  return <View style={styles.field}><Text style={[styles.label, { fontFamily: fonts.medium }]}>{label}</Text>
     <TextInput {...props} accessibilityLabel={label} placeholderTextColor={colors.muted}
-      style={[styles.input, props.multiline && { minHeight: 80 }, props.style]} /></View>;
+      style={[styles.input, { fontFamily: fonts.body }, props.multiline && { minHeight: 80 }, props.style]} /></View>;
 }
 export function Choice({ label, value, options, onChange, disabled = false }: {
   label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean;
 }) {
+  const fonts = useTypography();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const close = () => { setOpen(false); setQ(''); };
-  return <View style={styles.field}><Text style={styles.label}>{label}</Text>
+  return <View style={styles.field}><Text style={[styles.label, { fontFamily: fonts.medium }]}>{label}</Text>
     <Button label={label + ': ' + (options.find(o => o.value === value)?.label ?? 'Choose')} disabled={disabled} onPress={() => setOpen(true)} />
     <Sheet title={label} open={open} onClose={close}>
       {options.length > 10 && <Field label="Find option" value={q} onChangeText={setQ} />}
@@ -60,8 +66,9 @@ export function Page({ title, children }: PropsWithChildren<{ title: string }>) 
 }
 export function Loading() { return <ActivityIndicator accessibilityLabel="Loading" color={colors.accent} style={{ padding: 30 }} />; }
 export function ErrorNotice({ error, retry }: { error: unknown; retry?: () => void }) {
+  const fonts = useTypography();
   if (!error) return null;
-  return <Card><Text accessibilityRole="alert" style={{ color: colors.loss }}>{error instanceof Error ? error.message : 'Something went wrong'}</Text>
+  return <Card><Text accessibilityRole="alert" style={{ color: colors.loss, fontFamily: fonts.body }}>{error instanceof Error ? error.message : 'Something went wrong'}</Text>
     {retry && <Button label="Try again" onPress={retry} />}</Card>;
 }
 export const styles = StyleSheet.create({
