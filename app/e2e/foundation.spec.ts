@@ -1,6 +1,35 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+test('mobile detail prioritizes contextual actions and preserves pricing drafts in disclosures', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const product = await (await request.post(API + '/api/v1/products', { data: {
+    name: 'Long product identity for mobile hierarchy regression', game_id: games[0].id,
+    product_type_id: types.find((type: { slug: string }) => type.slug === 'single').id,
+    initial_purchase: { quantity: 1, amount: '10.01', funding: [] },
+  } })).json();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await signIn(page);
+  await page.goto('/products/' + product.id);
+  await expect(page.getByRole('button', { name: 'Record sale', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Move stock', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New sale', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Edit product', exact: true })).toHaveCount(0);
+  const manage = page.getByRole('button', { name: 'Manage product', exact: true });
+  await expect(manage).toHaveAttribute('aria-expanded', 'false');
+  await manage.click();
+  await expect(page.getByRole('button', { name: 'Edit product', exact: true })).toBeVisible();
+  const pricing = page.getByRole('button', { name: 'Market pricing', exact: true });
+  await pricing.click();
+  await page.getByLabel('Category ID', { exact: true }).fill('3');
+  await pricing.click();
+  await expect(page.getByLabel('Category ID', { exact: true })).toBeHidden();
+  await pricing.click();
+  await expect(page.getByLabel('Category ID', { exact: true })).toHaveValue('3');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test('compact shell keeps navigation reachable and global forms reuse the protected workflows', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
@@ -13,13 +42,13 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
     await page.setViewportSize({ width, height: 900 });
     const navigation = page.getByLabel('Main navigation', { exact: true });
     await expect(navigation.getByRole('button', { name: 'Dashboard', exact: true })).toBeEnabled();
-    await expect(navigation.getByRole('button')).toHaveCount(7);
+    await expect(navigation.getByRole('button')).toHaveCount(width < 1000 ? 5 : 7);
     const navigationBox = await navigation.boundingBox();
     if (width < 1000) {
       expect(navigationBox!.y).toBeGreaterThan(600);
       expect(navigationBox!.y + navigationBox!.height).toBeGreaterThanOrEqual(895);
     }
-    for (const label of ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
+    for (const label of width < 1000 ? ['Dashboard', 'Stock', 'Vault', 'Sales', 'More'] : ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
       const box = await navigation.getByRole('button', { name: label, exact: true }).boundingBox();
       expect(box, label + ' must be rendered without scrolling').not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -30,19 +59,21 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
     }
   }
   await page.setViewportSize({ width: 390, height: 900 });
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'New product', exact: true }).click();
   await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'New sale', exact: true }).click();
   await page.getByLabel('Search products in stock', { exact: true }).fill(product.name);
   await page.getByRole('button', { name: product.name + ' · 1 in stock', exact: true }).click();
   await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByLabel('Main navigation', { exact: true }).getByRole('button', { name: 'Inventory', exact: true }).click();
+  await page.getByLabel('Main navigation', { exact: true }).getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Stock:/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Show filters', exact: true }).click();
   await page.getByRole('button', { name: 'Stock: In stock', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Stock', exact: true }).getByRole('button', { name: 'All products', exact: true }).click();
+  await page.getByRole('dialog', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).getByRole('button', { name: 'All products', exact: true }).click();
   await page.getByRole('button', { name: 'Hide filters', exact: true }).click();
   await expect(page.getByText('All games · All types · All products · Hide archived', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show filters', exact: true }).click();
@@ -105,6 +136,7 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
     product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id } })).json();
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Add purchase', exact: true }).click();
   await page.getByLabel('Total paid', { exact: true }).fill('10.01');
   await page.getByRole('button', { name: 'Show optional details', exact: true }).click();
@@ -148,6 +180,7 @@ test('optional grading valuations retry separately from committed grading and pr
     initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } })).json();
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   let sends = 0;
   let returns = 0;
   page.on('request', req => {
@@ -186,6 +219,7 @@ test('catalogue archive preserves money, history blocks deletion and mistaken em
     initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } })).json();
   await signIn(page);
   await page.goto('/products/' + tracked.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Permanently delete', exact: true })).toBeDisabled();
   await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
@@ -200,11 +234,13 @@ test('catalogue archive preserves money, history blocks deletion and mistaken em
   expect(archived.stats.remaining_cost).toBe('10.01');
   expect(archived.stats.quantity_on_hand).toBe(1);
   await page.goto('/products/' + tracked.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Restore archived product', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Archive product', exact: true })).toBeVisible();
   const mistaken = await (await request.post(API + '/api/v1/products', { data: { ...identity, name: 'Mistaken empty card' } })).json();
   await page.goto('/products/' + mistaken.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
   await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
   await page.getByRole('button', { name: 'Permanently delete', exact: true }).click();
@@ -225,6 +261,7 @@ test('pricing requires explicit printing confirmation and keeps mapping writes o
   } }));
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   const controls = page.getByRole('group', { name: 'Pricing controls', exact: true });
   await controls.getByRole('button', { name: 'Confirm mapping', exact: true }).click();
   await expect(controls.getByText('Product ID is required.', { exact: true })).toBeVisible();
@@ -270,6 +307,7 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
   ] }));
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   const controls = page.getByRole('group', { name: 'Pricing controls', exact: true });
   await controls.getByRole('button', { name: 'Load free catalog options', exact: true }).click();
   await controls.getByRole('button', { name: 'Catalog category: Choose a category', exact: true }).click();
@@ -316,6 +354,7 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   } }));
   await signIn(page);
   await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent sales · selected period', { exact: true })).toBeVisible();
@@ -358,6 +397,7 @@ test('photo suggestions preserve identity and manual input without creating inve
   page.on('request', req => { if (req.method() === 'POST' && /\/products$|\/transformations\/rip$/.test(req.url())) writes++; });
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Rip open', exact: true }).click();
   await page.getByRole('textbox', { name: 'Hit 1 name', exact: true }).fill('Manual card retained');
   const chooser = page.waitForEvent('filechooser');
@@ -398,6 +438,7 @@ test('lineage retries independently and keeps deep trees readable without changi
   });
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   const lineage = page.getByRole('group', { name: 'Lineage report', exact: true });
   await expect(lineage.getByText('Lineage read test rejection', { exact: true })).toBeVisible();
   await lineage.getByRole('button', { name: 'Try again', exact: true }).click();
@@ -434,6 +475,7 @@ test('inventory CSV downloads every page and refuses a failed follow-up page', a
   const downloads: string[] = [];
   page.on('download', download => downloads.push(download.suggestedFilename()));
   await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Reports', exact: true }).click();
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export all inventory CSV', exact: true }).click();
@@ -488,6 +530,7 @@ test('Reports rollups show honest empty states without invented values', async (
   await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ contentType: 'application/json',
     body: JSON.stringify({ sales_missing_cost: 0, products_with_negative_stock: 0, negative_stock_products: [] }) }));
   await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Reports', exact: true }).click();
   for (const text of ['No tier sales yet.', 'No set holdings or sales yet.', 'No remaining purchase lots.', 'No data issues found.']) {
     await expect(page.getByText(text, { exact: true })).toBeVisible();
@@ -530,6 +573,7 @@ test('Reports rollups separate realized returns from holdings and recover indepe
     }) });
   });
   await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Reports', exact: true }).click();
   await expect(page.getByText('Tier read test rejection', { exact: true })).toBeVisible();
   const set = page.getByRole('group', { name: 'Set: Fixture set holdings', exact: true });
@@ -588,6 +632,7 @@ test('Reports filters requests, preserves unknown and zero, and retries failed r
     ]) });
   });
   await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Reports', exact: true }).click();
   await expect(page.getByText('Report read test rejection', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
@@ -628,6 +673,7 @@ test('reporting period defaults to 60 days and stays shared across navigation an
   await expect(page.getByRole('button', { name: 'Reporting period: 90 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Reporting period: 90 days', exact: true }).click();
   await page.getByRole('button', { name: '30 days', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Reports', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
@@ -654,7 +700,9 @@ test('Vault keeps market quotes separate from unknown manual value and recovers 
   await expect(page.getByText('Vault report temporarily unavailable', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   const holding = page.getByRole('group', { name, exact: true });
-  await expect(holding.getByText('Not valued', { exact: true })).toBeVisible();
+  await expect(holding.getByText('Unknown', { exact: true }).first()).toBeVisible();
+  await holding.getByRole('button', { name: 'Valuation details', exact: true }).click();
+  await expect(holding.getByText('Not valued yet', { exact: true })).toBeVisible();
   await expect(holding.getByText('$99.99', { exact: true })).toBeVisible();
   await expect(holding.getByText('Stale', { exact: true })).toBeVisible();
   await expect(holding.getByText('tcgcsv', { exact: true })).toBeVisible();
@@ -686,6 +734,7 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   await page.getByRole('button', { name: 'Vault', exact: true }).click();
   const holding = page.getByRole('group', { name: product.name, exact: true });
   await expect(holding).toBeVisible();
+  await expect(holding.getByText('Unknown', { exact: true }).first()).toBeVisible();
   await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
   await expect(page.getByLabel('Value per unit (CAD)', { exact: true })).toHaveValue('');
   await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('19.99');
@@ -715,9 +764,10 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   expect(older.ok()).toBeTruthy();
   expect((await readHolding()).value).toBe('0.00');
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   await expect(page.getByRole('button', { name: 'Record valuation', exact: true })).toBeVisible();
-  await expect(page.getByText('Cost $10.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('Profit $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $10.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Realized profit $0.00', { exact: true })).toBeVisible();
   const after = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   expect(after.stats.quantity_on_hand).toBe(2);
   expect(after.stats.remaining_cost).toBe('10.00');
@@ -745,6 +795,7 @@ test('grading can cancel an unreturned submission and reuse an existing graded p
   const cancelled = await send();
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Void grading submission', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Cancelled before shipment');
   await page.getByRole('button', { name: 'Cancel submission', exact: true }).click();
@@ -794,6 +845,7 @@ test('rip previews unsaved hits using FIFO and ignores late allocations without 
   });
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Rip open', exact: true }).click();
   await page.getByLabel('Hit 1 name', { exact: true }).fill('Unsaved preview hit');
   await expect(page.getByText('Allocated cost: $10.01', { exact: true })).toBeVisible();
@@ -828,6 +880,7 @@ test('manual rip retains confirmed identity after a rejected write and never inv
   const source = await created.json();
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Rip open', exact: true }).click();
   await page.getByLabel('Hit 1 name', { exact: true }).fill('Expo manually identified hit');
   await page.getByLabel('Hit 1 value', { exact: true }).fill('500.29');
@@ -871,6 +924,7 @@ test('grading retains stock until return and carries exact fees plus card identi
   const source = await created.json();
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   await expect(page.getByRole('button', { name: 'Crack open', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Rip open', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Send to grading', exact: true }).click();
@@ -920,6 +974,7 @@ test('crack form validates the split and carries exact cost into inline-created 
   const source = await created.json();
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Crack open', exact: true }).click();
   await page.getByLabel('Boxes per case', { exact: true }).fill('6');
   await page.getByLabel('Child name', { exact: true }).fill('Expo inline split boxes');
@@ -975,15 +1030,16 @@ test('transformation history links outputs and reverses the whole cost chain', a
   expect(transformation.inherited_purchase_date).toBe('2025-01-02');
   await signIn(page);
   await page.goto('/products/' + source.id);
+  await openProductSections(page);
   const history = page.getByRole('group', { name: 'Transformation ' + transformation.id, exact: true });
   await expect(history.getByText('Inherited purchase date 2025-01-02 · Bulk write-off $0.00', { exact: true })).toBeVisible();
   await history.getByRole('button', { name: 'Output: ' + child.name, exact: true }).first().click();
-  await expect(page.getByText('Cost $900.01', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $900.01', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Undo crack', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Reverse complete case opening');
   await page.getByRole('button', { name: 'Undo transformation', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByText('Cost $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $0.00', { exact: true })).toBeVisible();
   const restored = await (await request.get(API + '/api/v1/products/' + source.id)).json();
   expect(restored.stats.quantity_on_hand).toBe(1);
   expect(restored.stats.remaining_cost).toBe('900.01');
@@ -992,6 +1048,7 @@ test('transformation history links outputs and reverses the whole cost chain', a
 });
 test('money adjustments use exact cents and transfer void restores both balances', async ({ page, request }) => {
   await signIn(page);
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Money', exact: true })).toBeVisible();
   const readAccounts = async () => (await request.get(API + '/api/v1/money/accounts')).json();
@@ -1042,6 +1099,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   const product = await created.json();
   await signIn(page);
   await page.goto('/products/' + product.id);
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Record sale', exact: true }).click();
   await page.getByLabel('Total received', { exact: true }).fill('80.00');
   await page.getByLabel('Platform fees', { exact: true }).fill('5.00');
@@ -1053,7 +1111,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   await page.getByRole('dialog', { name: /^Record sale/ }).getByRole('button', { name: 'Record sale', exact: true }).click();
   expect((await saleResponse).ok()).toBeTruthy();
   await expect(page.getByText('On hand 1', { exact: true })).toBeVisible();
-  await expect(page.getByText('Profit $25.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Realized profit $25.00', { exact: true })).toBeVisible();
   const accountsAfterSale = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterSale.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('75.00');
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
@@ -1076,7 +1134,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
 });
 test('product, purchase, move and audited reversal preserve exact server totals', async ({ page, request }) => {
   await signIn(page);
-  await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
   await page.getByRole('button', { name: 'Add product', exact: true }).click();
   const availableGames = await (await request.get(API + '/api/v1/games')).json();
   const setsResponse = await request.get(API + '/api/v1/sets?game=' + availableGames[0].slug);
@@ -1102,7 +1160,8 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   expect(afterUnfundedPurchase.total_owed).toBe(beforeUnfundedPurchase.total_owed);
   await page.getByLabel('Search products', { exact: true }).fill('Expo mutation journey');
   await page.getByRole('button', { name: 'Expo mutation journey', exact: true }).click();
-  await expect(page.getByText('Cost $84.33', { exact: true })).toBeVisible();
+  await openProductSections(page);
+  await expect(page.getByText('Remaining cost $84.33', { exact: true })).toBeVisible();
   const productId = new URL(page.url()).pathname.split('/').pop()!;
   const readProduct = async () => (await request.get(API + '/api/v1/products/' + productId)).json();
   expect((await readProduct()).collector_number).toBe('042');
@@ -1116,14 +1175,14 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Quantity', { exact: true }).fill('1');
   await page.getByLabel('Total paid', { exact: true }).fill('10.00');
   await page.getByRole('button', { name: 'Save purchase', exact: true }).click();
-  await expect(page.getByText('Cost $94.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $94.33', { exact: true })).toBeVisible();
   await expect(page.getByText('On hand 3', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Move stock', exact: true }).click();
   await page.getByLabel('How many', { exact: true }).fill('1');
   await page.getByRole('dialog', { name: /^Move stock/ }).getByRole('button', { name: 'Move stock', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Move stock/ })).toHaveCount(0);
   expect((await readProduct()).stats.by_bucket).toMatchObject({ inventory: 2, store: 1, vault: 0 });
-  await expect(page.getByText('Cost $94.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $94.33', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Void move', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Wrong shelf in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
@@ -1136,7 +1195,7 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Total paid', { exact: true }).fill('20.00');
   await page.getByLabel('Why the change?', { exact: true }).fill('Receipt correction in test');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByText('Cost $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $104.33', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Adjust stock', exact: true }).click();
   await page.getByLabel('Change', { exact: true }).fill('-1');
   await page.getByRole('button', { name: 'Save adjustment', exact: true }).click();
@@ -1145,7 +1204,7 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Reason', { exact: true }).fill('Count verified in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
   await expect(page.getByText('On hand 3', { exact: true })).toBeVisible();
-  await expect(page.getByText('Cost $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Remaining cost $104.33', { exact: true })).toBeVisible();
 });
 const API = 'http://127.0.0.1:8101';
 async function firebaseFixture(page: Page) {
@@ -1161,12 +1220,20 @@ async function firebaseFixture(page: Page) {
   await page.route('https://securetoken.googleapis.com/**', async route=>route.fulfill({contentType:'application/json',
     body:JSON.stringify({id_token:token,access_token:token,refresh_token:'test-refresh',expires_in:'3600',user_id:'e2e-user',token_type:'Bearer'})}));
 }
+async function openProductSections(page: Page) {
+  for (const title of ['Manage product', 'Market pricing', 'Rip, crack and grading', 'Cost lineage', 'Transaction history']) {
+    const toggle = page.getByRole('button', { name: title, exact: true });
+    await expect(toggle).toBeVisible();
+    if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  }
+}
+
 async function signIn(page: Page) {
   await firebaseFixture(page);await page.goto('/');
   await page.getByLabel('Email',{exact:true}).fill('e2e@example.test');
   await page.getByLabel('Password',{exact:true}).fill('test-password');
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Account',exact:true})).toBeVisible();
 }
 test('bundled font failures fall back to readable text without blocking authentication', async ({ page }) => {
   let attemptedFonts = 0;
@@ -1181,6 +1248,7 @@ test('session restoration and signout use the real Firebase SDK; API membership 
   await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Account',exact:true}).click();
   await page.getByRole('button',{name:'Sign out',exact:true}).click();
   await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
 });
@@ -1205,7 +1273,7 @@ for(const width of [390,768,1536]) {
       initial_purchase:{quantity:2,amount:'83.33',bucket:'inventory'}}});
     expect(created.ok()).toBeTruthy();
     await signIn(page);
-    await page.getByRole('button',{name:'Inventory',exact:true}).click();
+    await page.getByLabel('Main navigation', { exact: true }).getByRole('button',{name:width >= 1000 ? 'Inventory' : 'Stock',exact:true}).click();
     const filtered = page.waitForResponse(r => {
       const url = new URL(r.url());
       return url.pathname === '/api/v1/products' && url.searchParams.get('q') === name;
@@ -1224,7 +1292,7 @@ for(const width of [390,768,1536]) {
     await page.screenshot({ path: 'output/playwright/expo-inventory-' + width + '.png', fullPage: true });
     await page.getByRole('button',{name,exact:true}).click();
     await expect(page.getByRole('heading',{name,exact:true})).toBeVisible();
-    await expect(page.getByText('Cost $83.33',{exact:true})).toBeVisible();
+    await expect(page.getByText('Remaining cost $83.33',{exact:true})).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading',{name,exact:true})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();

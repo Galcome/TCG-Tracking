@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
-import { View } from 'react-native'
+import { Text, View } from 'react-native'
 
 import { RecordValuationDialog } from '../../components/valuation-form'
-import { Button, Card, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
+import { Button, Card, Copy, Disclosure, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
+import { colors, useResponsiveLayout } from '../../context/ThemeContext'
+import { useTypography } from '../../context/TypographyContext'
 import { type VaultHolding } from '../../lib/api'
 import { money, percent } from '../../lib/format'
 
@@ -39,15 +41,17 @@ function daysLabel(value: number | null, known: string, unknown: string): string
     : `${known ? `${known} ` : ''}${value} day${value === 1 ? '' : 's'}`
 }
 
-function manualAttention(holding: VaultHolding): string {
-  if (holding.value === null) return 'Attention: no manual valuation recorded'
+function manualStatus(holding: VaultHolding): string {
+  if (holding.value === null) return 'Manual valuation not recorded yet'
   if (
     holding.days_since_valued !== null &&
     holding.days_since_valued > MANUAL_REVIEW_DAYS
   ) {
-    return `Attention: manual valuation is ${holding.days_since_valued} days old · annual review after ${MANUAL_REVIEW_DAYS} days`
+    return `Manual valuation is ${holding.days_since_valued} days old · review after ${MANUAL_REVIEW_DAYS} days`
   }
-  return `Manual valuation age: ${daysLabel(holding.days_since_valued, '', 'unknown')}`
+  return holding.days_since_valued === null
+    ? 'Manual valuation age unavailable'
+    : `Manual valuation age: ${holding.days_since_valued} day${holding.days_since_valued === 1 ? '' : 's'}`
 }
 
 function Metric({ label, children }: { label: string; children: React.ReactNode }) {
@@ -62,16 +66,18 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
 function ManualValuation({ holding }: { holding: VaultHolding }) {
   return (
     <Card>
-      <Copy muted>Manual valuation · an estimate, not cost or profit</Copy>
-      <Row>
-        <Metric label="Value per unit">
-          {holding.value === null ? 'Not valued' : money(holding.value)}
-        </Metric>
-        <Metric label="Valued on">
-          {holding.valued_on === null ? 'No date' : shortDate(holding.valued_on)}
-        </Metric>
-      </Row>
-      <Copy muted>{manualAttention(holding)}</Copy>
+      <Copy muted>Manual valuation · per-unit estimate, separate from cost and profit</Copy>
+      {holding.value === null ? (
+        <Copy>Not valued yet</Copy>
+      ) : (
+        <Row>
+          <Metric label="Value per unit">{money(holding.value)}</Metric>
+          <Metric label="Valued on">
+            {holding.valued_on === null ? 'Date unavailable' : shortDate(holding.valued_on)}
+          </Metric>
+        </Row>
+      )}
+      <Copy muted>{manualStatus(holding)}</Copy>
     </Card>
   )
 }
@@ -80,21 +86,10 @@ function MarketEstimate({ holding }: { holding: VaultHolding }) {
   const estimate = holding.market_estimate
   return (
     <Card>
-      <Copy muted>Market estimate · separate provider quote</Copy>
-      {!estimate ? (
+      <Copy muted>Market quote · separate from manual valuation and appreciation</Copy>
+      {!estimate || estimate.value === null ? <Copy>Market quote unavailable</Copy> : (
         <>
-          <Copy>Unavailable</Copy>
-          <Row>
-            <Metric label="Source">No provider quote</Metric>
-            <Metric label="Captured on">No date</Metric>
-            <Metric label="Status">Unavailable</Metric>
-          </Row>
-        </>
-      ) : (
-        <>
-          <Metric label="Estimated value per unit">
-            {estimate.value === null ? 'Unavailable' : money(estimate.value)}
-          </Metric>
+          <Metric label="Estimated value per unit">{money(estimate.value)}</Metric>
           <Row>
             <Metric label="Source">{estimate.provider || 'Unknown'}</Metric>
             <Metric label="Captured on">
@@ -108,6 +103,54 @@ function MarketEstimate({ holding }: { holding: VaultHolding }) {
   )
 }
 
+function summarySlot({ isDesktop, width, fontScale }: MetricSlotProps) {
+  if (isDesktop) return { flex: 1, minWidth: 0 }
+  if (fontScale > 1.35) return { width: '100%' as const }
+  return { width: width < 360 ? '47.5%' as const : '48%' as const }
+}
+
+type MetricSlotProps = {
+  isDesktop: boolean
+  width: number
+  fontScale: number
+}
+
+function SummaryMetric({
+  label,
+  value,
+  detail,
+  slot,
+}: {
+  label: string
+  value: string
+  detail?: string
+  slot: MetricSlotProps
+}) {
+  const fonts = useTypography()
+  return (
+    <View style={[summarySlot(slot), { gap: 3, paddingVertical: 3 }]}>
+      <Text style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 12 }} allowFontScaling>
+        {label}
+      </Text>
+      <Text
+        style={{
+          color: colors.text,
+          fontFamily: fonts.display,
+          fontSize: 21,
+          lineHeight: 27,
+          fontWeight: '700',
+          fontVariant: ['tabular-nums'],
+          flexShrink: 1,
+        }}
+        allowFontScaling
+      >
+        {value}
+      </Text>
+      {detail ? <Copy muted>{detail}</Copy> : null}
+    </View>
+  )
+}
+
 function HoldingCard({
   holding,
   onValue,
@@ -115,39 +158,43 @@ function HoldingCard({
   holding: VaultHolding
   onValue: () => void
 }) {
+  const { isDesktop, width, fontScale } = useResponsiveLayout()
+  const slot = { isDesktop, width, fontScale }
   return (
     <View role="group" accessibilityLabel={holding.product_name}>
       <Card>
         <Row>
-          <View style={{ flex: 1, minWidth: 190, gap: 3 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Copy>{holding.product_name}</Copy>
             <Copy muted>
               {daysLabel(holding.days_held, 'Held for', 'Held age unknown')}
-              {' · '}
-              {holding.days_in_store_first === null
-                ? 'No Store history'
-                : `Moved to Vault after ${holding.days_in_store_first} day${holding.days_in_store_first === 1 ? '' : 's'} in the Store`}
             </Copy>
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 3 }}>
-            <Copy>{holding.units} unit{holding.units === 1 ? '' : 's'}</Copy>
-            <Copy muted>Quantity in Vault</Copy>
-          </View>
         </Row>
 
-        <Row>
-          <Metric label="Cost">{money(holding.cost)}</Metric>
-          <Metric label="Appreciation · not realized profit">
-            {holding.appreciation === null ? 'Unknown' : signedMoney(holding.appreciation)}
-            {holding.appreciation_pct === null ? '' : ` · ${percent(holding.appreciation_pct)}`}
-          </Metric>
-          <Metric label="Annualised appreciation">
-            {holding.annualised === null ? 'Unknown' : percent(holding.annualised)}
-          </Metric>
-        </Row>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <SummaryMetric label="Cost" value={money(holding.cost)} detail="total holding cost" slot={slot} />
+          <SummaryMetric label="Units" value={String(holding.units)} detail="in Vault" slot={slot} />
+          <SummaryMetric label="Manual value · per unit" value={holding.value === null ? 'Unknown' : money(holding.value)} detail={holding.value === null ? 'Record a valuation when ready' : 'estimate, not cost'} slot={slot} />
+          <SummaryMetric label="Appreciation · unrealized" value={holding.appreciation === null ? 'Unknown' : signedMoney(holding.appreciation)} detail={holding.appreciation_pct === null ? undefined : percent(holding.appreciation_pct)} slot={slot} />
+        </View>
 
-        <ManualValuation holding={holding} />
-        <MarketEstimate holding={holding} />
+        <Disclosure title="Valuation details">
+          <ManualValuation holding={holding} />
+          <MarketEstimate holding={holding} />
+          <Card>
+            <Copy muted>Holding context</Copy>
+            <Copy>
+              {holding.days_in_store_first === null
+                ? 'Store move history unavailable'
+                : `Moved to Vault after ${holding.days_in_store_first} day${holding.days_in_store_first === 1 ? '' : 's'} in the Store`}
+            </Copy>
+            <Copy muted>
+              Annualised appreciation:{' '}
+              {holding.annualised === null ? 'Unknown' : percent(holding.annualised)}
+            </Copy>
+          </Card>
+        </Disclosure>
 
         <Row>
           <Button
@@ -180,10 +227,7 @@ export default function Vault() {
 
   return (
     <Page title="Vault">
-      <Copy muted>
-        Held on purpose and measured on appreciation. Search is local to the loaded Vault
-        report; the API does not provide a server-side Vault filter.
-      </Copy>
+      <Copy muted>Held on purpose; estimates stay separate from cost and profit. Search loaded holdings.</Copy>
       <Field
         label="Search Vault holdings"
         value={searchInput}

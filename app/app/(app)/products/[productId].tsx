@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Button, Card, Copy, ErrorNotice, Loading, Page, Row } from '../../../components/ui';
+import { Button, Card, Copy, Disclosure, ErrorNotice, Loading, Page, Row } from '../../../components/ui';
+import { View, Text } from 'react-native';
+import { colors } from '../../../context/ThemeContext';
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
 import { RecordSaleDialog } from '../../../components/sale-form';
 import { ProductOperations } from '../../../components/product-operations';
@@ -21,28 +23,32 @@ export default function ProductDetail() {
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
   return <Page title={p?.name ?? 'Product'}>
+    <Button variant="link" label="Back to stock" onPress={() => router.push('/inventory')} />
     <ErrorNotice error={product.error} retry={()=>{void product.refetch();}} />{product.isPending&&<Loading />}
     {p&&<><Card><GameIdentity slug={p.game.slug} name={p.game.name} /><Copy>{p.product_type.name}</Copy>
-      <Copy>{[p.set_name,p.collector_number,p.variant,p.language,p.condition,p.grading_company,p.grade,p.cert_number].filter(Boolean).join(' · ')}</Copy>
-      <Row><Copy>On hand {p.stats.quantity_on_hand}</Copy><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit {money(p.stats.realized_profit)}</Copy></Row>
-      <Copy muted>{p.notes ?? 'No notes'}</Copy></Card>
-      <Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'purchase', label: 'Add purchase' },
-        { mode: 'move', label: 'Move stock' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
+      <Copy>{[p.set_name && p.name.includes(p.set_name) ? null : p.set_name,p.collector_number,p.variant,p.language,p.condition,p.grading_company,p.grade,p.cert_number].filter(Boolean).join(' · ')}</Copy>
+      <Row>{(['inventory', 'store', 'vault'] as const).map(bucket => <View key={bucket} style={{ padding: 8, borderRadius: 8, backgroundColor: colors.raised }}><Text style={{ color: colors[bucket], fontSize: 14 }}>{bucket === 'inventory' ? 'Inventory' : bucket === 'store' ? 'Store' : 'Vault'} {p.stats.by_bucket[bucket]}</Text></View>)}</Row>
+      <Copy>On hand {p.stats.quantity_on_hand}</Copy>
+      <Row><Copy>Remaining cost {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit {money(p.stats.realized_profit)}</Copy></Row>
+      {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
+      <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
+      <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'purchase', label: 'Add purchase' },
+        { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
           <Button key={action.mode} label={action.label} onPress={() => setForm({ mode: action.mode })} />)}</Row>
-      {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
-      <Button label="Record sale" onPress={() => setSelling(true)} />
-      {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       <Button label="Record valuation" onPress={() => setValuing(true)} />
+      <ProductLifecycle product={p} /></Disclosure>
+      {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
+      {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
-      <PricingControls product={p} />
-      <ProductLifecycle product={p} />
-      <ProductOperations key={p.id} product={p} />
-      <LineageReport productId={p.id} />
-      {p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
+      <Card><Copy muted>Market estimate · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No market estimate' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}</Card>
+      <Disclosure title="Market pricing"><PricingControls product={p} /></Disclosure>
+      <Disclosure title="Rip, crack and grading"><ProductOperations key={p.id} product={p} /></Disclosure>
+      <Disclosure title="Cost lineage"><LineageReport productId={p.id} /></Disclosure>
+      <Disclosure title="Transaction history">{p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>
           {t.kind !== 'move' && <Button label={'Edit ' + t.kind} onPress={() => setForm({ mode: 'transaction', transaction: t })} />}
           <Button label={'Void ' + t.kind} danger onPress={() => setForm({ mode: 'void', transaction: t })} />
-        </Row>}</Card>)}</>}
+        </Row>}</Card>)}</Disclosure></>}
   </Page>;
 }

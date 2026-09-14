@@ -29,7 +29,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Email', { exact: true }).fill('e2e@example.test')
   await page.getByLabel('Password', { exact: true }).fill('test-password')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Account', exact: true })).toBeVisible()
 }
 
 async function chooseType(page: Page, typeName: string) {
@@ -58,7 +58,7 @@ test('sealed entry derives names, keeps manual corrections, and keeps optional f
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(setSuggestions(games[0].id)) })
   })
   await signIn(page)
-  await page.getByRole('button', { name: 'Inventory', exact: true }).click()
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click()
   await page.getByRole('button', { name: 'Add product', exact: true }).click()
   await chooseType(page, sealed.name)
 
@@ -109,7 +109,7 @@ test('raw and graded card entry stays manual and slab fields are type-appropriat
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(setSuggestions(games[0].id)) })
   })
   await signIn(page)
-  await page.getByRole('button', { name: 'Inventory', exact: true }).click()
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click()
   await page.getByRole('button', { name: 'Add product', exact: true }).click()
   await chooseType(page, raw.name)
   await page.getByLabel('Set', { exact: true }).fill('Stellar')

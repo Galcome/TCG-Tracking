@@ -1,5 +1,5 @@
 import { useState, type PropsWithChildren, type ReactNode } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, useResponsiveLayout } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
@@ -19,8 +19,15 @@ export function Copy({ children, muted = false }: PropsWithChildren<{ muted?: bo
   return <Text style={[styles.copy, { fontFamily: fonts.body }, muted && { color: colors.muted }]}>{children}</Text>;
 }
 export function Heading({ children }: PropsWithChildren) { const fonts = useTypography(); return <Text accessibilityRole="header" style={[styles.heading, { fontFamily: fonts.display }]}>{children}</Text>; }
-export function Card({ children, accent = false }: PropsWithChildren<{ accent?: boolean }>) { return <View style={[styles.card, accent && { overflow: 'hidden', borderTopColor: colors.accent }]}>{accent ? <CardBackdrop /> : null}{children}</View>; }
+export function Card({ children, accent = false, style }: PropsWithChildren<{ accent?: boolean; style?: StyleProp<ViewStyle> }>) { return <View style={[styles.card, accent && { overflow: 'hidden', borderTopColor: colors.accent }, style]}>{accent ? <CardBackdrop /> : null}{children}</View>; }
 export function Row({ children }: PropsWithChildren) { return <View style={styles.row}>{children}</View>; }
+export function Disclosure({ title, children }: PropsWithChildren<{ title: string }>) {
+  const [open, setOpen] = useState(false);
+  const fonts = useTypography();
+  return <View style={{ gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={() => setOpen(value => !value)} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderColor: colors.edge }}>
+    <Text style={{ color: colors.text, fontFamily: fonts.strong, fontSize: 16, flexShrink: 1 }}>{title}</Text><Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{open ? '−' : '+'}</Text>
+  </Pressable><View style={{ display: open ? 'flex' : 'none', gap: 12 }}>{children}</View></View>;
+}
 export function Button({ label, onPress, disabled = false, danger = false, variant = 'secondary' }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean; variant?: 'primary' | 'secondary' | 'link' }) {
   const fonts = useTypography();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }}
