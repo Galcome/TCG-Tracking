@@ -24,7 +24,7 @@ export function Row({ children }: PropsWithChildren) { return <View style={style
 export function Disclosure({ title, children }: PropsWithChildren<{ title: string }>) {
   const [open, setOpen] = useState(false);
   const fonts = useTypography();
-  return <View style={{ gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={() => setOpen(value => !value)} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderColor: colors.edge }}>
+  return <View style={{ gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel={title} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(value => !value)} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderColor: colors.edge }}>
     <Text style={{ color: colors.text, fontFamily: fonts.strong, fontSize: 16, flexShrink: 1 }}>{title}</Text><Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{open ? '−' : '+'}</Text>
   </Pressable><View style={{ display: open ? 'flex' : 'none', gap: 12 }}>{children}</View></View>;
 }
@@ -60,6 +60,7 @@ export function Sheet({ title, children, open, onClose, dismissDisabled = false,
   const insets = useSafeAreaInsets();
   const { isDesktop } = useResponsiveLayout();
   const close = () => { if (!dismissDisabled) onClose(); };
+  if (!open) return null;
   return <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
     <KeyboardAvoidingView enabled={Platform.OS !== 'web'} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.backdrop, !isDesktop && { padding: 0, paddingTop: insets.top, paddingBottom: insets.bottom }]}><View role="dialog" accessibilityLabel={title} accessibilityViewIsModal style={[styles.sheet, !isDesktop && { flex: 1, maxHeight: '100%', borderRadius: 0 }]}>
       <Row><Heading>{title}</Heading><Button label="Close" disabled={dismissDisabled} onPress={close} /></Row>

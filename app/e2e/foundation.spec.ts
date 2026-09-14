@@ -19,6 +19,7 @@ test('mobile detail prioritizes contextual actions and preserves pricing drafts 
   const manage = page.getByRole('button', { name: 'Manage product', exact: true });
   await expect(manage).toHaveAttribute('aria-expanded', 'false');
   await manage.click();
+  await expect(manage).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('button', { name: 'Edit product', exact: true })).toBeVisible();
   const pricing = page.getByRole('button', { name: 'Market pricing', exact: true });
   await pricing.click();
@@ -61,6 +62,7 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
   await page.setViewportSize({ width: 390, height: 900 });
   if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'New product', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'More', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
@@ -750,7 +752,7 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   expect((await valuation).postDataJSON()).toMatchObject({ product_id: product.id, value: '19.99', captured_on: '2025-06-02' });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await readHolding()).toMatchObject({ units: 2, value: '19.99', cost: '10.00', appreciation: '29.98', valued_on: '2025-06-02' });
-  await expect(holding.getByText(/19\.99/)).toBeVisible();
+  await expect(holding.getByText('$19.99', { exact: true }).first()).toBeVisible();
   // Zero is an explicit estimate, never "not valued"; the latest dated snapshot wins.
   await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
   await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('0.00');
@@ -804,6 +806,7 @@ test('grading can cancel an unreturned submission and reuse an existing graded p
   expect(rows.find((s: { id: string }) => s.id === cancelled.id).status).toBe('voided');
   await send();
   await page.reload();
+  await openProductSections(page);
   await page.getByRole('button', { name: 'Record grading return', exact: true }).click();
   await page.getByLabel('Grade', { exact: true }).fill('10');
   await page.getByRole('button', { name: /^Graded card:/ }).click();
@@ -1034,6 +1037,7 @@ test('transformation history links outputs and reverses the whole cost chain', a
   const history = page.getByRole('group', { name: 'Transformation ' + transformation.id, exact: true });
   await expect(history.getByText('Inherited purchase date 2025-01-02 · Bulk write-off $0.00', { exact: true })).toBeVisible();
   await history.getByRole('button', { name: 'Output: ' + child.name, exact: true }).first().click();
+  await openProductSections(page);
   await expect(page.getByText('Remaining cost $900.01', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Undo crack', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Reverse complete case opening');
@@ -1048,7 +1052,7 @@ test('transformation history links outputs and reverses the whole cost chain', a
 });
 test('money adjustments use exact cents and transfer void restores both balances', async ({ page, request }) => {
   await signIn(page);
-  await page.getByRole('button', { name: 'More', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Money', exact: true })).toBeVisible();
   const readAccounts = async () => (await request.get(API + '/api/v1/money/accounts')).json();
