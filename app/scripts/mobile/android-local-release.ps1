@@ -84,17 +84,13 @@ try {
             ConvertTo-Json | Set-Content -LiteralPath $taskReceiptPath -Encoding UTF8
     }
     if ($Command -in @('distribute', 'release')) {
-        # Main-only by default. First internal branch exception requires explicit consent.
-        $branch = (& git branch --show-current).Trim()
-        if ($branch -ne 'main' -and $env:TCG_INTERNAL_BRANCH_RELEASE_APPROVED -ne '1') { throw 'Distribution requires main or explicit first-internal-build approval' }
+        # Verify the actual remote main commit, not a mutable local branch label.
+        # Detached origin/main allows release from the isolated Codex worktree.
+        & node scripts/mobile/assert-main-release.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Exact remote-main release validation failed' }
         if (-not (Test-Path -LiteralPath $taskReceiptPath)) { throw 'Missing build receipt; build with this script first' }
         $taskReceipt = Get-Content -LiteralPath $taskReceiptPath -Raw | ConvertFrom-Json
         if ($taskReceipt.source -ne (Get-SourceFingerprint) -or $taskReceipt.apk -ne (Get-ReleaseFileHash $taskApk)) { throw 'Sources or APK differ from validated build receipt' }
-        if ($branch -eq 'main') {
-            $taskSha = (& git rev-parse HEAD).Trim()
-            $taskRuns = & gh run list --workflow ci.yml --commit $taskSha --status success --limit 5 --json headSha,conclusion | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or -not ($taskRuns | Where-Object { $_.headSha -eq $taskSha -and $_.conclusion -eq 'success' })) { throw 'Green CI for the exact main commit is required' }
-        }
         $taskAapt = Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/aapt.exe'
         $taskBadging = (& $taskAapt dump badging $taskApk | Out-String)
         $taskConfig = Get-Content -LiteralPath app.json -Raw | ConvertFrom-Json
