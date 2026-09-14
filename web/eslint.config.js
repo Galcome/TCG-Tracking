@@ -4,7 +4,9 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  // Native projects contain generated JavaScript assets after a Gradle build;
+  // they are not part of the Vite source lint surface.
+  { ignores: ['dist/**', 'android/**', 'ios/**'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

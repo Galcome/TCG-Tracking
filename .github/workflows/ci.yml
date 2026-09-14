@@ -102,6 +102,41 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      - name: Check mobile configuration
+        run: npm run test:mobile-config
+
+      - name: Build mobile bundle
+        run: npm run mobile:build
+
+      - name: Refuse browser PWA artifacts in mobile bundle
+        run: npm run test:mobile-bundle
+
+      - name: Sync Capacitor projects
+        run: npx cap sync
+
+      - name: Select Java 21 for Capacitor
+        shell: bash
+        run: |
+          if [ -z "${JAVA_HOME_21_X64:-}" ]; then
+            echo "::error::Java 21 is required by Capacitor 8 and is not installed on this runner."
+            exit 1
+          fi
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: Android debug build
+        shell: bash
+        run: |
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$android_sdk" ] || [ ! -d "$android_sdk/platforms" ]; then
+            echo "::error::Android SDK is required for the Capacitor native guard."
+            exit 1
+          fi
+          if [ ! -d "$android_sdk/platforms/android-36" ]; then
+            yes | sdkmanager --licenses >/dev/null || true
+            sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          fi
+          (cd android && bash gradlew assembleDebug --no-daemon)
+
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
