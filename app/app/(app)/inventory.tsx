@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { Pressable, Text } from 'react-native';
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui';
 import { useApi } from '../../context/AppContext';
-import { useResponsiveLayout } from '../../context/ThemeContext';
+import { colors, useResponsiveLayout } from '../../context/ThemeContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product } from '../../lib/api';
 import { ProductForms } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
@@ -35,8 +36,8 @@ export default function Inventory() {
     {operation ? <ProductForms product={operation.product} mode={operation.mode} onClose={() => setOperation(null)} /> : null}
     {selling ? <RecordSaleDialog product={selling} onClose={() => setSelling(null)} /> : null}
     <Row><Button label="All stock" onPress={() => { router.setParams({ bucket: '' }); setOffset(0); }} />
-      {BUCKETS.map(b => <Button key={b} label={BUCKET_LABELS[b] + ' ' + (products.data?.bucket_totals[b] ?? '')}
-        onPress={() => { router.setParams({ bucket: b }); setOffset(0); }} />)}</Row>
+      {BUCKETS.map(b => <Pressable key={b} accessibilityRole="button" accessibilityLabel={BUCKET_LABELS[b] + ' ' + (products.data?.bucket_totals[b] ?? '')} accessibilityState={{ selected: bucket === b }} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 8, backgroundColor: bucket === b ? colors.raised : 'transparent', borderWidth: 1, borderColor: bucket === b ? colors[b] : colors.edge }}
+        onPress={() => { router.setParams({ bucket: b }); setOffset(0); }}><Text style={{ color: colors[b], fontSize: 14 }}>{BUCKET_LABELS[b]} {products.data?.bucket_totals[b] ?? ''}</Text></Pressable>)}</Row>
     <Field label="Search products" value={search} onChangeText={setSearch} />
     {!isDesktop ? <Button label={filtersOpen ? 'Hide filters' : 'Show filters'} onPress={() => setFiltersOpen(value => !value)} /> : null}
     {!isDesktop && !filtersOpen ? <Copy muted>{[games.data?.find(g => g.slug === game)?.name ?? 'All games', types.data?.find(t => t.slug === type)?.name ?? 'All types', stock === 'in' ? 'In stock' : stock === 'out' ? 'Sold out' : 'All products', includeArchived ? 'Including archived' : 'Hide archived'].join(' · ')}</Copy> : null}
