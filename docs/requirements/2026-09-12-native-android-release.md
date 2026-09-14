@@ -37,3 +37,16 @@ receipt, approved certificate, package/version and embedded production/native co
 Work is pushed to draft PR #82. Expo CI passes 107 units and 31 browser tests plus fixture
 bundle exports. A deterministic backend coverage test is pushed for CI validation; local DB
 auth blocks that test locally. No App Distribution upload or production deployment occurred.
+
+September 13 follow-on: Joseph authorized the normal main release path and conditional
+website cutover. PR #82's final checks passed and it merged as `1850890`; its Railway API
+deployment succeeded. Firebase now lists `alpha` with one tester. Android upload awaits
+exact-main green CI; no branch exception is used. Expo web has an isolated production-config
+preview, but live Hosting remains Vite until authenticated parity and a separate reviewed
+deploy/rollback change pass. See the parity tracker's approved rollout checkpoint.
+
+Distribution completed: exact-main CI passed and verified Android **0.1.0 (1)** was
+uploaded/distributed to **`alpha`**, Firebase release **`6g3rouq688fb0`**. No Android EAS
+build was used. Installed-device acceptance and secure signing-key backup remain pending.
+Dependency availability fixes and authenticated preview parity are required before broad
+Expo distribution or live website cutover. CI/CD follow-up starts after this checkpoint.

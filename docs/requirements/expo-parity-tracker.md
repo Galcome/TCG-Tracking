@@ -656,3 +656,72 @@ testers, review/deploy required backend compatibility changes, and satisfy the d
 main/exact-green-CI rule (or obtain the explicitly requested first-internal exception).
 Installed Android-device acceptance and secure keystore backup remain necessary; iOS cloud
 release remains deferred until the Android distribution checkpoint is cleared.
+
+### Approved production rollout — September 13
+
+Joseph approved normal PR merge/backend deployment and Android distribution to `alpha`,
+plus a conditional Expo website switch only after production verification. Final PR-head
+CI passed every required check, including the deterministic backend coverage test; Terra's
+integration review found no code-level release blocker. PR #82 merged as
+`1850890a9961ba00cba9696c4006145548947c14`. Railway API deployment
+`777f277e-94ed-43c7-bf47-9c1b26af456e` succeeded on that commit. Exact-main CI is still
+the upload gate; no feature-branch exception is being used.
+
+Firebase CLI confirms `alpha` has one tester. A separate temporary main release clone
+holds the unchanged, previously verified APK/receipt, avoiding edits to Joseph's main
+checkout or a branch-name bypass. Installed-device acceptance is still pending.
+
+The real-production Expo web export is staged, not live:
+https://tcg-tracking--expo-review-vj02wcg8.web.app (seven-day channel). Root and inventory
+deep links and the compiled production API bundle returned HTTP 200. Its exact origin
+was appended to Railway API CORS without removing existing origins or adding a wildcard.
+Configuration redeployment `a1cab5d5-f2cb-4525-bbf1-567743059852` succeeded; HTTP 200 health
+returns the exact preview origin in its CORS header. Connected browser tooling failed at
+initialization. Playwright CLI verified login rendering at default/390px widths with zero
+console errors, but authenticated production parity is not proven.
+Production OpenAPI is intentionally disabled; its 404 is not a deployment failure.
+
+**Do not switch Hosting yet.** Main CI still publishes `web/dist`, so a manual Expo
+promotion would be undone on the next main push. Cutover requires a separately reviewed
+Hosting/CI change, successful authenticated read-only comparisons (inventory, money,
+dashboard/reports at 60d/90d), and a retained known-good Vite channel/artifact. Restore the
+Vite Hosting artifact only for rollback, never the database. After the first Android
+upload, address CI/CD automation with local Gradle/Firebase Android and EAS-cloud iOS;
+do not copy Household's historical Android EAS workflow or unrelated credentials.
+
+Rollback preparation: cloned the current live Vite artifact to `vite-rollback-pr82`.
+Its URL returned HTTP 200 and HTML matched the then-current live site:
+https://tcg-tracking--vite-rollback-pr82-5xpc970w.web.app. This snapshot expires September
+20, 2026; retain/renew a known-good snapshot before any later cutover. Restore with
+`firebase hosting:clone tcg-tracking:vite-rollback-pr82 tcg-tracking:live --project tcg-tracking`,
+after confirming the intended snapshot still exists. No rollback/promotion has occurred.
+
+Release runtime note: invoking the PowerShell release script directly under PowerShell 7
+failed the source receipt guard because its sorting differs from Windows PowerShell 5.1.
+All source files and APK bytes in the main clone match the assigned checkout. Windows
+PowerShell 5.1, the documented npm-script/build runtime, reproduces the exact build receipt.
+Use that runtime for distribution; do not rewrite the receipt or bypass verification.
+Firebase CLI uses a process-scoped real Node 22 executable to avoid the observed Node 24
+shutdown assertion and nested-npx PowerShell shim problem. No machine-wide runtime changes.
+
+Dependency assessment found release follow-ups, not a verified auth bypass: the backend's
+PyJWT 2.11.0 can amplify JWKS fetches for unknown token key IDs (fixed in 2.13.0), and
+Expo Router's `query-string` dependency uses vulnerable malformed-percent decoding
+(`decode-uri-component`, fixed in 0.5.0). Fix both before broad Expo distribution/web
+cutover. Existing fixed-HTTPS JWKS URL and RS256-only key validation rule out the reviewed
+scheme/JWK-HMAC mixing paths; Mako is migration tooling and uuid's affected buffer APIs
+are not application calls. See [PyJWT advisory](https://github.com/advisories/GHSA-fhv5-28vv-h8m8)
+and [decoder advisory](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr). Internal `alpha`
+remains one-tester device validation, not broad-release acceptance. Backend dependency
+remediation is isolated on `fix/auth-dependency-security`; no APK receipt is rewritten.
+
+Android distribution checkpoint: exact-main CI run
+https://github.com/Galcome/TCG-Tracking/actions/runs/34754413911 passed all backend,
+Vite build/E2E, required-test and Hosting deployment jobs. Windows PowerShell 5.1 verified
+the unchanged receipt/signature/package/version, then Firebase successfully uploaded and
+distributed **0.1.0 (1)** to **`alpha`**, release **`6g3rouq688fb0`**. Tester access:
+https://appdistribution.firebase.google.com/testerapps/1:304233430839:android:75a3507eda63cefe3b64b2/releases/6g3rouq688fb0
+Do not retain the CLI's temporary signed binary-download URL. Device login, relaunch,
+camera/share and telemetry acceptance remain pending. Main CI deployed the compatible
+Vite update, not Expo; the live website stayed on Vite throughout. CI/CD follow-up can now
+begin without conflating first distribution with broad-release or website acceptance.
