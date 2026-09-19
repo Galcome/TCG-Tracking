@@ -91,6 +91,28 @@ def test_settings_rejects_wildcard_cors_in_production():
         )
 
 
+def test_the_worker_needs_no_cors_in_production():
+    """It serves no HTTP; the nightly price refresh must not die over a web setting."""
+    settings = make_settings(
+        app_env="production",
+        app_role="worker",
+        allowed_origins="*",
+        allowed_member_emails="a@example.com",
+    )
+    assert settings.app_role == "worker"
+
+
+@pytest.mark.parametrize("role", ["api", "combined"])
+def test_http_roles_still_reject_wildcard_cors_in_production(role):
+    with pytest.raises(ValueError, match="ALLOWED_ORIGINS"):
+        make_settings(
+            app_env="production",
+            app_role=role,
+            allowed_origins="*",
+            allowed_member_emails="a@example.com",
+        )
+
+
 def test_settings_allows_explicit_cors_in_production():
     settings = make_settings(
         app_env="production",
