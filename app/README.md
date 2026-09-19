@@ -56,7 +56,9 @@ permission is requested. Native photo permission/camera/library behavior needs d
 
 EAS profiles retain Household's current local app-version policy. Before distribution,
 reconcile the package/bundle ID, Firebase registrations, native Google credential flow,
-signing, version increment, telemetry, app icons, and environment configuration. Native
+signing, version increment, telemetry, and environment configuration. Branded iOS and
+Android adaptive icons are now wired from `assets/`; regenerate them with
+`node scripts/generate-app-icons.mjs` after intentional brand changes. Native
 email/password persistence is explicitly initialized with AsyncStorage, but actual
 kill/relaunch and token refresh must be verified on devices. Native Google is enabled only
 in a validated Android build; installed-device authentication remains unverified.
@@ -79,7 +81,7 @@ dependencies do not activate ordinary local/web exports. Opted-in Android native
 validate the registered service app/package/project and Google web client; iOS native
 validation remains unsupported. Public-key shape is checked,
 not ownership or deployed backend compatibility. Passing validates configuration only;
-native Google, telemetry, icons, signing, device acceptance, distribution approval and a
+native Google, telemetry, signing, device acceptance, distribution approval and a
 separately approved website cutover are still required. No cloud action is performed.
 Ordinary local exports/test fixtures remain unchanged.
 

@@ -28,10 +28,10 @@ export function Disclosure({ title, children }: PropsWithChildren<{ title: strin
     <Text style={{ color: colors.text, fontFamily: fonts.strong, fontSize: 16, flexShrink: 1 }}>{title}</Text><Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{open ? '−' : '+'}</Text>
   </Pressable><View style={{ display: open ? 'flex' : 'none', gap: 12 }}>{children}</View></View>;
 }
-export function Button({ label, onPress, disabled = false, danger = false, variant = 'secondary' }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean; variant?: 'primary' | 'secondary' | 'link' }) {
+export function Button({ label, onPress, disabled = false, danger = false, variant = 'secondary', style }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean; variant?: 'primary' | 'secondary' | 'link'; style?: StyleProp<ViewStyle> }) {
   const fonts = useTypography();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }}
-    disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.button, variant === 'primary' && { backgroundColor: colors.accent, borderColor: colors.accent }, variant === 'link' && { backgroundColor: 'transparent', borderColor: 'transparent', paddingHorizontal: 0 }, { opacity: disabled ? 0.45 : pressed ? 0.7 : 1 }, danger && { borderColor: colors.loss }]}>
+    disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.button, variant === 'primary' && { backgroundColor: colors.accent, borderColor: colors.accent }, variant === 'link' && { backgroundColor: 'transparent', borderColor: 'transparent', paddingHorizontal: 0 }, { opacity: disabled ? 0.45 : pressed ? 0.7 : 1 }, danger && { borderColor: colors.loss }, style]}>
     <Text style={{ color: danger ? colors.loss : variant === 'primary' ? colors.background : variant === 'link' ? colors.accent : colors.text, fontWeight: '600', fontFamily: fonts.strong }}>{label}</Text>
   </Pressable>;
 }
@@ -56,13 +56,17 @@ export function Choice({ label, value, options, onChange, disabled = false }: {
         <Button key={o.value} label={o.label} disabled={disabled} onPress={() => { onChange(o.value); close(); }} />)}
     </Sheet></View>;
 }
-export function Sheet({ title, children, open, onClose, dismissDisabled = false, footer }: PropsWithChildren<{ title: string; open: boolean; onClose: () => void; dismissDisabled?: boolean; footer?: ReactNode }>) {
+export function Sheet({ title, children, open, onClose, dismissDisabled = false, footer, compact = false }: PropsWithChildren<{ title: string; open: boolean; onClose: () => void; dismissDisabled?: boolean; footer?: ReactNode; compact?: boolean }>) {
   const insets = useSafeAreaInsets();
   const { isDesktop } = useResponsiveLayout();
   const close = () => { if (!dismissDisabled) onClose(); };
   if (!open) return null;
   return <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
-    <KeyboardAvoidingView enabled={Platform.OS !== 'web'} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.backdrop, !isDesktop && { padding: 0, paddingTop: insets.top, paddingBottom: insets.bottom }]}><View role="dialog" accessibilityLabel={title} accessibilityViewIsModal style={[styles.sheet, !isDesktop && { flex: 1, maxHeight: '100%', borderRadius: 0 }]}>
+    <KeyboardAvoidingView enabled={Platform.OS !== 'web'} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.backdrop, !isDesktop && (compact
+      ? { justifyContent: 'flex-end', paddingHorizontal: 12, paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 12) }
+      : { padding: 0, paddingTop: insets.top, paddingBottom: insets.bottom })]}><View role="dialog" accessibilityLabel={title} accessibilityViewIsModal style={[styles.sheet, !isDesktop && (compact
+        ? { maxHeight: '80%', borderRadius: 16 }
+        : { flex: 1, maxHeight: '100%', borderRadius: 0 })]}>
       <Row><Heading>{title}</Heading><Button label="Close" disabled={dismissDisabled} onPress={close} /></Row>
       <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>{children}</ScrollView>
       {footer ? <View style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 12, gap: 8 }}>{footer}</View> : null}

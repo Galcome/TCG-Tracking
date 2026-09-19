@@ -10,7 +10,7 @@ import {
   type Api,
   type Bucket,
   type ProductCandidate,
-  type ProductDetail,
+  type Product,
   type ReadCard,
   type RipPreview,
 } from '../lib/api'
@@ -38,8 +38,9 @@ import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } f
 import { PhotoReader } from './photo-reader'
 
 export interface RipDialogProps {
-  product: ProductDetail
+  product: Product
   onClose: () => void
+  initialBucket?: Bucket
 }
 
 type IdentityField = 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'
@@ -343,14 +344,16 @@ function bucketLabel(bucket: Bucket, count: number): string {
 /**
  * Photo suggestions and manual entry share human-controlled identity and save decisions.
  */
-export function RipDialog({ product, onClose }: RipDialogProps) {
+export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
   const productTypes = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
 
   const held = product.stats.by_bucket
   const [fromBucket, setFromBucket] = useState<Bucket>(
-    BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
+    initialBucket && (held[initialBucket] ?? 0) > 0
+      ? initialBucket
+      : BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
   )
   const [sourceQuantity, setSourceQuantity] = useState('1')
   const [occurredOn, setOccurredOn] = useState(todayIso())

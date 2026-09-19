@@ -49,7 +49,7 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
       expect(navigationBox!.y).toBeGreaterThan(600);
       expect(navigationBox!.y + navigationBox!.height).toBeGreaterThanOrEqual(895);
     }
-    for (const label of width < 1000 ? ['Dashboard', 'Stock', 'Vault', 'Sales', 'More'] : ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
+    for (const label of width < 1000 ? ['Dashboard', 'Stock', 'Add', 'Sales', 'More'] : ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
       const box = await navigation.getByRole('button', { name: label, exact: true }).boundingBox();
       expect(box, label + ' must be rendered without scrolling').not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -60,28 +60,32 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
     }
   }
   await page.setViewportSize({ width: 390, height: 900 });
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('button', { name: 'New product', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'More', exact: true })).toHaveCount(0);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const quickActions = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+  await expect(quickActions).toBeVisible();
+  await page.getByRole('button', { name: 'Add product', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Quick actions', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('button', { name: 'New sale', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) < 1000 ? 'Record sale' : 'New sale', exact: true }).click();
   await page.getByLabel('Search products in stock', { exact: true }).fill(product.name);
   await page.getByRole('button', { name: product.name + ' · 1 in stock', exact: true }).click();
   await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByLabel('Main navigation', { exact: true }).getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Stock:/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Filters', exact: true }).click();
   await page.getByRole('button', { name: 'Stock: In stock', exact: true }).click();
   await page.getByRole('dialog', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).getByRole('button', { name: 'All products', exact: true }).click();
-  await page.getByRole('button', { name: 'Hide filters', exact: true }).click();
-  await expect(page.getByText('All games · All types · All products · Hide archived', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true })).toBeVisible();
+  await expect(page.getByText('All products', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Filters', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Stock: All products', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide filters', exact: true }).click();
-  await page.getByRole('button', { name: 'Vault', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('dialog', { name: 'More', exact: true }).getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(page).toHaveURL(/\/vault$/);
   expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
@@ -94,11 +98,17 @@ test('responsive stock cards preserve action guards and keep controls within the
     product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
     initial_purchase: { quantity: 1, amount: '10.00', funding: [] },
   } })).json();
+  const ripProduct = await (await request.post(API + '/api/v1/products', { data: {
+    name: 'Rip-ready booster box', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'booster-box').id,
+    set_name: 'Rip-ready set', initial_purchase: { quantity: 1, amount: '100.00', bucket: 'store', funding: [] },
+  } })).json();
+  const emptyRipProduct = { ...ripProduct, id: '99999999-9999-4999-8999-999999999999', name: 'Empty booster box', stats: { ...ripProduct.stats, quantity_on_hand: 0, by_bucket: { inventory: 0, store: 0, vault: 0 } } };
   await page.route(API + '/api/v1/products?*', route => route.fulfill({ json: {
-    items: [product,
+    items: [product, ripProduct, emptyRipProduct,
       { ...product, id: '77777777-7777-4777-8777-777777777777', name: 'Empty stock fixture', stats: { ...product.stats, quantity_on_hand: 0, by_bucket: { inventory: 0, store: 0, vault: 0 } } },
       { ...product, id: '88888888-8888-4888-8888-888888888888', name: 'Archived stock fixture', is_archived: true },
-    ], total: 3, bucket_totals: { inventory: 2, store: 0, vault: 0 },
+    ], total: 5, bucket_totals: { inventory: 2, store: 1, vault: 0 },
   } }));
   await signIn(page);
   await page.goto('/inventory');
@@ -116,8 +126,19 @@ test('responsive stock cards preserve action guards and keep controls within the
         expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
       }
     }
+    const ripCard = page.getByRole('group', { name: 'Stock product: Rip-ready booster box', exact: true });
+    await expect(ripCard.getByRole('button', { name: 'Rip', exact: true })).toBeEnabled();
+    await expect(page.getByRole('group', { name: 'Stock product: Stock action fixture', exact: true }).getByRole('button', { name: 'Rip', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Stock product: Empty booster box', exact: true }).getByRole('button', { name: 'Rip', exact: true })).toBeDisabled();
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
   }
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.getByRole('button', { name: 'Store 1', exact: true }).click();
+  await page.getByRole('group', { name: 'Stock product: Rip-ready booster box', exact: true }).getByRole('button', { name: 'Rip', exact: true }).click();
+  const rip = page.getByRole('dialog', { name: 'Rip open — Rip-ready booster box', exact: true });
+  await expect(rip).toBeVisible();
+  await expect(rip.getByRole('button', { name: 'Ripped out of: Store (1)', exact: true })).toBeVisible();
+  await rip.getByRole('button', { name: 'Close', exact: true }).click();
   const active = page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true });
   await active.getByRole('button', { name: 'Sell', exact: true }).click();
   await expect(page.getByLabel('Total received', { exact: true })).toBeVisible();
@@ -356,16 +377,19 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   } }));
   await signIn(page);
   await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
   await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
-  await expect(page.getByText('Recent sales · selected period', { exact: true })).toBeVisible();
-  await expect(page.getByText('Where it sold · gross sales by channel', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sales insights', exact: true }).click();
+  await expect(page.getByText('Where it sold', { exact: true })).toBeVisible();
   await expect(page.getByText('Fixture channel', { exact: true })).toBeVisible();
-  await expect(page.getByText('$20.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('$20.00 gross', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Recent sales', exact: true }).click();
   await page.getByRole('button', { name: 'Edit sale: Dashboard sale fixture', exact: true }).click();
   await expect(page.getByLabel('Total received', { exact: true })).toHaveValue('20.00');
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Monthly trend', exact: true }).click();
   const trend = page.getByRole('group', { name: 'Monthly trading trend', exact: true });
   await expect(trend.getByText('Spent $90,071,992,547,409.92', { exact: true })).toBeVisible();
   await expect(trend.getByText('Revenue $0.00', { exact: true })).toBeVisible();
@@ -1114,6 +1138,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   const saleResponse = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/sales');
   await page.getByRole('dialog', { name: /^Record sale/ }).getByRole('button', { name: 'Record sale', exact: true }).click();
   expect((await saleResponse).ok()).toBeTruthy();
+  await expect(page.getByRole('dialog', { name: /^Record sale/ })).toHaveCount(0);
   await expect(page.getByText('On hand 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Realized profit $25.00', { exact: true })).toBeVisible();
   const accountsAfterSale = await (await request.get(API + '/api/v1/money/accounts')).json();

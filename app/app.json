@@ -2,17 +2,20 @@
   "expo": {
     "name": "TCG Investments",
     "slug": "tcg-investments",
-    "version": "0.1.2",
+    "version": "0.1.3",
+    "icon": "./assets/icon.png",
     "scheme": "tcginvestments",
     "userInterfaceStyle": "dark",
     "ios": {
+      "icon": "./assets/icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.galcome.tcgtracking"
     },
     "android": {
       "package": "com.galcome.tcgtracking",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0e1a"
       }
     },
