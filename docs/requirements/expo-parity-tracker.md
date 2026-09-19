@@ -26,10 +26,10 @@ foundation owner until its interface is stable.
 | Pricing | Catalog discovery/manual confirmation, variants/subtypes, mapping enable/disable, refresh, stale/unavailable, graded exclusions | `pricing.spec.ts` | Partial: mapping/discovery no-write browser checks verified; native acceptance pending |
 | Reports/Vault | Group/filter/month/tier/set/lineage, ageing, attention, manual valuations, appreciation separate from profit, CSV export | `rollups.spec.ts`, `vault.spec.ts`, `reports-chart.spec.ts`, `exports.spec.ts` | Partial: browser reports/Vault/lineage/CSV verified; native sharing and consolidated review pending |
 | Platform adapters | Native photo URI/browser File, CSV download/native sharing, safe area/keyboard, denied permissions, app relaunch | New Expo device and browser tests | Partial: browser adapters and native exports verified; operating-system/device acceptance pending |
-| Money tone (2026-09-19 F1) | Signed profit/ROI/appreciation/balances green/red, zero/unknown neutral, on every screen | Web `toneFor` parity; new Playwright tone checks | Pending: slice A |
-| Sealed pricing (F2-F4) | Packs/boxes/ETBs/collections/decks eligible, suggested mapping, holding value + unrealized P&L, Set up price CTA | `pricing.spec.ts`; new pytest eligibility | Pending: slice B |
-| Set sync (F5) | Daily TCGCSV group sync, recent releases lead suggestions | New pytest with fake groups feed | Pending: slice C |
-| Live scan (F6-F8) | Camera session list with prices, Rip + Add singles, vision provider fallback, per-member limits | New pytest lookup/fallback; scanner unit tests; device acceptance | Pending: slice D |
+| Money tone (2026-09-19 F1) | Signed profit/ROI/appreciation/balances green/red, zero/unknown neutral, on every screen | Web `toneFor` parity; new Playwright tone checks | Built: PR #97 (local lint/typecheck/tests pass); device check pending |
+| Sealed pricing (F2-F4) | Packs/boxes/ETBs/collections/decks eligible, suggested mapping, holding value + unrealized P&L, Set up price CTA | `pricing.spec.ts`; new pytest eligibility | Built: PR #101 (pytest 100% coverage, app checks pass); merge after #96-#100 |
+| Set sync (F5) | Daily TCGCSV group sync, recent releases lead suggestions | New pytest with fake groups feed | Built: PR #98 (pytest 100% coverage); first nightly sync after merge |
+| Live scan (F6-F8) | Camera session list with prices, Rip + Add singles, vision provider fallback, per-member limits | New pytest lookup/fallback; scanner unit tests; device acceptance | Built: PR #102 on #101 (977 pytest, 100% coverage; app 136 tests, android/web export); needs new Android build + device acceptance |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
 
 ## Acceptance evidence
