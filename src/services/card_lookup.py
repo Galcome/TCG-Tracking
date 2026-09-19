@@ -150,6 +150,7 @@ def lookup(
     number: str | None,
     variant: str | None,
     provider: TCGCSVProvider,
+    kind: str = "Single",
     fx: BankOfCanadaProvider,
     today: date | None = None,
 ) -> Lookup:
@@ -165,7 +166,7 @@ def lookup(
 
     found = price_match.match(
         price_match.Identity(
-            name=name, set_name=card_set.name, kind="Single", number=number, variant=variant
+            name=name, set_name=card_set.name, kind=kind, number=number, variant=variant
         ),
         provider.group_products(game.tcgcsv_category_id, card_set.tcgcsv_group_id),
     )
