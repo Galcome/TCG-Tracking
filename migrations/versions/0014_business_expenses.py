@@ -44,7 +44,8 @@ def downgrade() -> None:
     # every balance they touched, so refuse instead.
     op.execute(
         "DO $$ BEGIN IF EXISTS (SELECT 1 FROM money_movements WHERE kind = 'expense') THEN "
-        "RAISE EXCEPTION 'money_movements holds expenses; export and remove them before downgrading'; "
+        "RAISE EXCEPTION 'money_movements holds expenses; "
+        "export and remove them before downgrading'; "
         "END IF; END $$"
     )
     op.drop_constraint(
