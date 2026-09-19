@@ -11,7 +11,7 @@ import { useTypography } from '../../context/TypographyContext';
 import { usePeriodPreference } from '../../lib/period-preference';
 import { money, percent } from '../../lib/format';
 import { EditTransactionDialog } from '../../components/product-forms';
-import { EXPENSE_CATEGORY_LABELS, saleAsTransaction, type SaleRow } from '../../lib/api';
+import { EXPENSE_CATEGORY_LABELS, saleAsTransaction, type Dashboard as DashboardData, type SaleRow } from '../../lib/api';
 
 type MetricSlotProps = {
   isDesktop: boolean;
@@ -100,6 +100,23 @@ function HeroProfit({
   </Card>;
 }
 
+function StockWorth({ data }: { data: DashboardData }) {
+  const fonts = useTypography();
+  if (data.units_in_stock === 0) return null;
+  if (data.priced_units === 0) return <Card>
+    <Copy muted>Stock value</Copy>
+    <Copy>No market prices yet. Set up a price from any stock card to see what the shelf is worth.</Copy>
+    <Button variant="link" label="Open stock" onPress={() => router.push('/inventory')} />
+  </Card>;
+  const partial = data.priced_units < data.units_in_stock;
+  return <Card>
+    <Copy muted>{partial ? 'Market value of priced stock' : 'Market value of stock'}</Copy>
+    <Text style={{ color: colors.text, fontFamily: fonts.display, fontSize: 28, lineHeight: 34, fontWeight: '700', fontVariant: ['tabular-nums'] }} allowFontScaling>{money(data.market_value)}</Text>
+    <Row><Copy>Unrealized <Signed value={data.unrealized_gain}>{money(data.unrealized_gain)}</Signed></Copy><Copy muted>vs {money(data.priced_cost)} cost</Copy></Row>
+    <Copy muted>Priced {data.priced_units} of {data.units_in_stock} unit{data.units_in_stock === 1 ? '' : 's'}{data.stale_units > 0 ? ` · ${data.stale_units} on stale quotes` : ''}</Copy>
+  </Card>;
+}
+
 export default function Dashboard() {
   const api = useApi();
   const { period, setPeriod, hydrated } = usePeriodPreference();
@@ -118,6 +135,7 @@ export default function Dashboard() {
     <ErrorNotice error={dashboard.error} retry={() => { void dashboard.refetch(); }} />
     {dashboard.isPending && <Loading />}
     {data && <><HeroProfit netProfit={data.net_profit} realizedProfit={data.realized_profit} expenses={data.expenses} roi={data.roi} costOfSales={data.cost_of_sales} saleCount={data.sale_count} width={width} />
+    <StockWorth data={data} />
     <MetricGrid>
       <MetricTile label="Stock at cost" value={money(data.inventory_at_cost)} detail={`${data.units_in_stock} unit${data.units_in_stock === 1 ? '' : 's'} · all time`} slot={slot} />
       <MetricTile label="Sales" value={money(data.total_sales)} detail={`${data.sale_count} recorded · selected period`} slot={slot} />

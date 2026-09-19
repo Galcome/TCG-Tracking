@@ -167,6 +167,8 @@ class CardLookupRequest(BaseModel):
     set_name: str = Field(default="", max_length=200)
     collector_number: str | None = Field(default=None, max_length=40)
     variant: str | None = Field(default=None, max_length=80)
+    #: The product type, e.g. "Booster Box", so a sealed search is not described as a card.
+    kind: str = Field(default="Single", min_length=1, max_length=80)
 
     @field_validator("name", "set_name")
     @classmethod

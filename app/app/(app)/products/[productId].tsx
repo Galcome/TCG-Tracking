@@ -14,6 +14,7 @@ import { RecordValuationDialog } from '../../../components/valuation-form';
 import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
 import { money } from '../../../lib/format';
+import { canCrack, canRip } from '../../../lib/product-types';
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
   const api = useApi();
@@ -31,9 +32,8 @@ export default function ProductDetail() {
       <Copy>On hand {p.stats.quantity_on_hand}</Copy>
       <Row><Copy>Remaining cost {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
       {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
-      <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
-      <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'purchase', label: 'Add purchase' },
-        { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
+      <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
+      <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
           <Button key={action.mode} label={action.label} onPress={() => setForm({ mode: action.mode })} />)}</Row>
       <Button label="Record valuation" onPress={() => setValuing(true)} />
       <ProductLifecycle product={p} /></Disclosure>
@@ -43,7 +43,7 @@ export default function ProductDetail() {
       <Card><Copy muted>Market estimate · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No market estimate' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}</Card>
       <PriceSuggestion product={p} />
       <Disclosure title="Market pricing"><PricingControls product={p} /></Disclosure>
-      <Disclosure title="Rip, crack and grading"><ProductOperations key={p.id} product={p} /></Disclosure>
+      <Disclosure title="Rip, crack and grading" defaultOpen={p.stats.quantity_on_hand > 0 && (canRip(p.product_type.slug) || canCrack(p.product_type.slug))}><ProductOperations key={p.id} product={p} /></Disclosure>
       <Disclosure title="Cost lineage"><LineageReport productId={p.id} /></Disclosure>
       <Disclosure title="Transaction history">{p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
