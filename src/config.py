@@ -106,6 +106,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_prod_cors(self) -> "Settings":
+        # The pricing worker serves no HTTP, so CORS means nothing there. Requiring it made
+        # the nightly refresh die at import on a service nobody set ALLOWED_ORIGINS for.
+        if self.app_role == "worker":
+            return self
         origins = {origin.strip() for origin in self.allowed_origins.split(",")}
         if self.is_production and "*" in origins:
             raise ValueError("ALLOWED_ORIGINS cannot include '*' in production.")
