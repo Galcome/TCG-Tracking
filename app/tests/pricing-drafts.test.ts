@@ -5,6 +5,8 @@ import type { CatalogMapping, Product, PricingRefresh } from '../lib/api.ts'
 import {
   canUseFreeMarketPricing,
   catalogId,
+  marketPosition,
+  preferredSubtype,
   pricingEligibilityMessage,
   pricingMappingDraft,
   pricingRefreshSummary,
@@ -80,7 +82,35 @@ test('pricing eligibility allows only ungraded supported product types', () => {
   assert.equal(canUseFreeMarketPricing(product({ grading_company: 'PSA' })), false)
   assert.equal(canUseFreeMarketPricing(product({ condition: 'Near Mint' })), true)
   assert.equal(pricingEligibilityMessage(product({ grading_company: 'PSA' })), 'Market pricing is manual for graded products.')
-  assert.equal(pricingEligibilityMessage(product({ product_type: { id: 'type', name: 'Pack', slug: 'booster-pack', is_system: true, sort_order: 0 } })), 'Market pricing supports raw cards, booster boxes, and sealed cases only.')
+  for (const slug of ['booster-pack', 'box-set', 'collection', 'deck']) {
+    assert.equal(canUseFreeMarketPricing(product({ product_type: { id: 'type', name: slug, slug, is_system: true, sort_order: 0 } })), true, slug)
+  }
+  assert.equal(pricingEligibilityMessage(product({ product_type: { id: 'type', name: 'Lot', slug: 'lot', is_system: true, sort_order: 0 } })), 'Market pricing supports raw cards and sealed products only.')
+})
+
+test('market position is exact cents of the stock on hand against its remaining cost', () => {
+  const estimate = (value: string | null, status: 'fresh' | 'stale' | 'unavailable' = 'fresh') => ({
+    value, status, captured_on: '2026-09-19', provider: 'tcgcsv', source_revision: null,
+  })
+  const holding = (quantity: number, remaining: string, value: string | null, status?: 'fresh' | 'stale' | 'unavailable') => {
+    const base = product({})
+    return { stats: { ...base.stats, quantity_on_hand: quantity, remaining_cost: remaining }, market_estimate: estimate(value, status) }
+  }
+  assert.deepEqual(marketPosition(holding(36, '100.00', '4.99')), { value: '179.64', unrealized: '79.64' })
+  assert.deepEqual(marketPosition(holding(2, '310.50', '150.1', 'stale')), { value: '300.20', unrealized: '-10.30' })
+  assert.deepEqual(marketPosition(holding(1, '0.95', '0.90')), { value: '0.90', unrealized: '-0.05' })
+  assert.equal(marketPosition(holding(0, '0.00', '4.99')), null)
+  assert.equal(marketPosition(holding(3, '9.00', null)), null)
+  assert.equal(marketPosition(holding(3, '9.00', '4.99', 'unavailable')), null)
+  assert.equal(marketPosition(holding(3, 'n/a', '4.99')), null)
+  assert.equal(marketPosition({ ...holding(3, '9.00', null), market_estimate: null }), null)
+})
+
+test('the preferred printing is the product variant, then Normal, then the first listed', () => {
+  assert.equal(preferredSubtype(['Holofoil', 'Normal', 'Reverse Holofoil'], ' reverse holofoil '), 'Reverse Holofoil')
+  assert.equal(preferredSubtype(['Holofoil', 'Normal'], 'Special Illustration Rare'), 'Normal')
+  assert.equal(preferredSubtype(['Holofoil', 'Reverse Holofoil'], null), 'Holofoil')
+  assert.equal(preferredSubtype([], undefined), 'Normal')
 })
 
 test('mapping drafts retain exact IDs while catalog query IDs are safe positive numbers', () => {

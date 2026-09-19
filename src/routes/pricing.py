@@ -20,10 +20,12 @@ from src.schemas.pricing import (
     CatalogMappingRead,
     CatalogMappingUpdate,
     PricingRefreshRead,
+    PricingSuggestionRead,
     TCGCSVCategoryRead,
     TCGCSVGroupRead,
     TCGCSVProductRead,
 )
+from src.services import price_match
 from src.services import pricing as pricing_service
 
 router = APIRouter()
@@ -85,6 +87,40 @@ def list_catalog_products(
     except pricing_service.PricingError as error:
         raise _catalog_error(error) from error
     return [TCGCSVProductRead.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/suggestion", response_model=PricingSuggestionRead)
+def suggest_listing(
+    product_id: uuid.UUID,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> PricingSuggestionRead:
+    """The listing this product most likely is, to prefill the mapping form.
+
+    May cost one cheap model call when the name alone cannot settle it, so the app asks
+    only for a product that has no mapping yet.
+    """
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    if not pricing_service.is_pricing_eligible(product):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=pricing_service.eligibility_error(product),
+        )
+    try:
+        found = price_match.suggest(product, catalog_provider)
+    except pricing_service.PricingError as error:
+        raise _catalog_error(error) from error
+    return PricingSuggestionRead(
+        candidates=[
+            TCGCSVProductRead.model_validate(row, from_attributes=True)
+            for row in found.candidates
+        ],
+        suggested_index=found.suggested,
+        method=found.method,
+        message=found.message,
+    )
 
 
 def _mapping_values(payload: CatalogMappingCreate | CatalogMappingUpdate) -> dict:

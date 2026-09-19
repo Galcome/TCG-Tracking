@@ -51,7 +51,7 @@ export interface BalanceAdjustmentPayload {
 /** Keep this bound explicit because the API's adjustment field is a JSON number. */
 export const MAX_ADJUSTMENT_CENTS = 100_000_000_000
 
-function decimalCents(value: string): bigint | null {
+export function decimalCents(value: string): bigint | null {
   if (!isMoneyString(value, true)) return null
   const [whole, fraction = ''] = value.split('.')
   return BigInt(whole + fraction.padEnd(2, '0'))

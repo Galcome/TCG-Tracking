@@ -182,8 +182,8 @@ def test_mapping_create_rejects_missing_and_non_numeric_tcgcsv_fields(client, ma
 
 def test_mapping_create_rejects_graded_and_unsupported_products(client, db, game_id):
     graded_type = db.scalar(select(ProductType.id).where(ProductType.slug == "graded-card"))
-    pack_type = db.scalar(select(ProductType.id).where(ProductType.slug == "booster-pack"))
-    assert graded_type and pack_type
+    lot_type = db.scalar(select(ProductType.id).where(ProductType.slug == "lot"))
+    assert graded_type and lot_type
 
     def create(name, product_type_id):
         response = client.post(
@@ -202,12 +202,12 @@ def test_mapping_create_rejects_graded_and_unsupported_products(client, db, game
     assert response.status_code == 422
     assert "manual" in response.json()["detail"]
 
-    unsupported = create("Loose Pack", pack_type)
+    unsupported = create("Mixed Lot", lot_type)
     response = client.post(
         "/api/v1/pricing/mappings", json=mapping_payload(unsupported["id"])
     )
     assert response.status_code == 422
-    assert "supports raw cards" in response.json()["detail"]
+    assert "raw cards and sealed products" in response.json()["detail"]
 
 
 def test_pricing_refresh_is_authenticated_and_returns_service_summary(client, monkeypatch):

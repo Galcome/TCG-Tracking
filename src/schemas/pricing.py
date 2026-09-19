@@ -142,6 +142,21 @@ class TCGCSVProductRead(BaseModel):
     image_url: str | None = Field(default=None, max_length=500)
     url: str | None = Field(default=None, max_length=500)
     subtypes: list[str] = Field(default_factory=list, max_length=20)
+    number: str | None = Field(default=None, max_length=40)
+
+
+class PricingSuggestionRead(BaseModel):
+    """The catalog listings a product most likely is, best guess first when there is one.
+
+    `suggested_index` points into `candidates`. `method` says who picked it: `exact` when
+    the name (and number) left one listing, `ai` when a model chose among near misses.
+    Neither creates a mapping; the person still confirms.
+    """
+
+    candidates: list[TCGCSVProductRead]
+    suggested_index: int | None = None
+    method: Literal["exact", "ai"] | None = None
+    message: str | None = None
 
 
 class PricingRefreshRead(BaseModel):

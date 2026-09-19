@@ -116,6 +116,16 @@ export interface TCGCSVProduct {
   image_url: string | null
   url: string | null
   subtypes: string[]
+  /** The printed card number, when the catalog has one. */
+  number?: string | null
+}
+
+/** The listings a product most likely is. Nothing is mapped until a person confirms. */
+export interface PricingSuggestion {
+  candidates: TCGCSVProduct[]
+  suggested_index: number | null
+  method: 'exact' | 'ai' | null
+  message: string | null
 }
 
 export interface Transaction {
@@ -937,6 +947,9 @@ export function createApi(request: ApiRequest) { return {
     limit?: number
   }) =>
     request<TCGCSVProduct[]>(`/api/v1/pricing/catalog/products${query(input)}`),
+
+  pricingSuggestion: (productId: string) =>
+    request<PricingSuggestion>(`/api/v1/pricing/suggestion${query({ product_id: productId })}`),
 
   createPricingMapping: (input: CatalogMappingCreateInput) =>
     request<CatalogMapping>('/api/v1/pricing/mappings', {

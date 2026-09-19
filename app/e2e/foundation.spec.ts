@@ -341,7 +341,7 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
   await controls.getByRole('button', { name: 'Find products', exact: true }).click();
   await controls.getByRole('button', { name: 'Use this listing', exact: true }).click();
   await expect(controls.getByLabel('Product ID', { exact: true })).toHaveValue('456');
-  await expect(controls.getByLabel('Subtype / printing', { exact: true })).toHaveValue('Reverse Holofoil');
+  await expect(controls.getByLabel('Subtype / printing', { exact: true })).toHaveValue('Normal');
   const mappings = await (await request.get(API + '/api/v1/pricing/mappings?product_id=' + product.id)).json();
   expect(mappings).toEqual([]);
   const latest = await (await request.get(API + '/api/v1/products/' + product.id)).json();
@@ -1190,8 +1190,7 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await expect(page.getByRole('heading', { name: 'Add product', exact: true })).toHaveCount(0);
   const afterUnfundedPurchase = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(afterUnfundedPurchase.total_owed).toBe(beforeUnfundedPurchase.total_owed);
-  await page.getByLabel('Search products', { exact: true }).fill('Expo mutation journey');
-  await page.getByRole('button', { name: 'Expo mutation journey', exact: true }).click();
+  await expect(page).toHaveURL(/\/products\/[0-9a-f-]+$/);
   await openProductSections(page);
   await expect(page.getByText('Remaining cost $84.33', { exact: true })).toBeVisible();
   const productId = new URL(page.url()).pathname.split('/').pop()!;

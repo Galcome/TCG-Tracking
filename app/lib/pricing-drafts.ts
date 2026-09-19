@@ -4,12 +4,18 @@ import type {
   Product,
   PricingRefresh,
 } from './api'
+import { decimalCents } from './money-drafts'
 
+/** Mirrors the server: every factory-sealed product has one listing and market price. */
 export const FREE_MARKET_PRICING_TYPES = [
   'single',
   'raw-single',
+  'booster-pack',
   'booster-box',
   'sealed-case',
+  'box-set',
+  'collection',
+  'deck',
 ] as const
 
 export const EMPTY_PRICING_MAPPING: CatalogMappingDraft = {
@@ -40,7 +46,7 @@ export function pricingEligibilityMessage(product: PricingIdentity): string {
   ) {
     return 'Market pricing is manual for graded products.'
   }
-  return 'Market pricing supports raw cards, booster boxes, and sealed cases only.'
+  return 'Market pricing supports raw cards and sealed products only.'
 }
 
 export function pricingMappingDraft(mapping: CatalogMapping | null | undefined): CatalogMappingDraft {
@@ -76,4 +82,37 @@ export function validatePricingMappingDraft(draft: CatalogMappingDraft): string 
 export function pricingRefreshSummary(result: PricingRefresh): string {
   const summary = `Checked ${result.attempted}: ${result.refreshed} refreshed, ${result.skipped} skipped, ${result.stale} stale, ${result.unavailable} unavailable.`
   return result.errors.length > 0 ? `${summary} ${result.errors.join(' ')}` : summary
+}
+
+function centsString(cents: bigint): string {
+  const sign = cents < 0n ? '-' : ''
+  const abs = cents < 0n ? -cents : cents
+  return `${sign}${abs / 100n}.${String(abs % 100n).padStart(2, '0')}`
+}
+
+/**
+ * What the stock on hand is worth at today's estimate and how far that is from its cost.
+ * Exact cents throughout, so a 36-pack box never drifts a cent from the ledger. Null when
+ * there is nothing on hand or no usable estimate - the card then offers to set one up.
+ */
+export function marketPosition(
+  product: Pick<Product, 'stats' | 'market_estimate'>,
+): { value: string; unrealized: string } | null {
+  const estimate = product.market_estimate
+  const quantity = product.stats.quantity_on_hand
+  if (!estimate?.value || estimate.status === 'unavailable' || quantity <= 0) return null
+  const unit = decimalCents(estimate.value)
+  const cost = decimalCents(product.stats.remaining_cost)
+  if (unit === null || cost === null) return null
+  const value = unit * BigInt(quantity)
+  return { value: centsString(value), unrealized: centsString(value - cost) }
+}
+
+/** The printing a listing is most likely held in: the product's own variant, else Normal. */
+export function preferredSubtype(subtypes: string[], variant: string | null | undefined): string {
+  const wanted = variant?.trim().toLocaleLowerCase()
+  return subtypes.find((subtype) => subtype.toLocaleLowerCase() === wanted)
+    ?? subtypes.find((subtype) => subtype === 'Normal')
+    ?? subtypes[0]
+    ?? 'Normal'
 }

@@ -68,7 +68,16 @@ type Dialog =
   | 'grade'
   | null
 
-const FREE_MARKET_PRICING_TYPES = new Set(['single', 'raw-single', 'booster-box', 'sealed-case'])
+const FREE_MARKET_PRICING_TYPES = new Set([
+  'single',
+  'raw-single',
+  'booster-pack',
+  'booster-box',
+  'sealed-case',
+  'box-set',
+  'collection',
+  'deck',
+])
 
 const EMPTY_MAPPING: CatalogMappingDraft = {
   external_product_id: '',
