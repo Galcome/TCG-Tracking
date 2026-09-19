@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { View } from 'react-native';
 import { useApi } from '../context/AppContext';
 import { monthLabel, reportMoney } from '../lib/reports';
-import { Card, Copy, ErrorNotice, Heading, Loading, Row } from './ui';
+import { Card, Copy, ErrorNotice, Heading, Loading, Row, Signed } from './ui';
 
 /** Calendar-month server totals, never recomputed from filtered client transactions. */
 export function MonthlyTrend() {
@@ -19,7 +19,7 @@ export function MonthlyTrend() {
       <Row>
         <Copy>Spent {reportMoney(month.spent)}</Copy>
         <Copy>Revenue {reportMoney(month.revenue)}</Copy>
-        <Copy>Realized profit {reportMoney(month.realized_profit)}</Copy>
+        <Copy>Realized profit <Signed value={month.realized_profit}>{reportMoney(month.realized_profit)}</Signed></Copy>
       </Row>
       <Copy>{month.units_bought} units bought · {month.units_sold} units sold</Copy>
     </Card>)}

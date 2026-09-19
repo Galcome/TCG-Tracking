@@ -7,7 +7,7 @@ import { PeriodSelector } from '../../components/period-selector'
 import { MonthlyTrend } from '../../components/monthly-trend'
 import { CsvButton } from '../../components/csv-button'
 import { AgingReport, AttentionReport, SetReport, TierReport } from '../../components/report-rollups'
-import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui'
+import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
 import {
@@ -187,12 +187,12 @@ function GroupRowCard({ row, groupBy }: { row: GroupRow; groupBy: GroupBy }) {
             <Copy muted>{row.units_sold} sold · {row.units_in_stock} on hand</Copy>
           </View>
           <View style={styles.profit}>
-            <Copy>{money(row.realized_profit)}</Copy>
+            <Copy><Signed value={row.realized_profit}>{money(row.realized_profit)}</Signed></Copy>
             <Copy muted>Realized profit</Copy>
           </View>
         </Row>
         <Row>
-          <Metric label="ROI">{percent(row.roi)}</Metric>
+          <Metric label="ROI"><Signed value={row.roi}>{percent(row.roi)}</Signed></Metric>
           <Metric label="Revenue">{money(row.revenue)}</Metric>
           <Metric label="Cost of sales">{money(row.cost_of_sales)}</Metric>
           <Metric label="Inventory at cost">{money(row.inventory_at_cost)}</Metric>
@@ -202,7 +202,7 @@ function GroupRowCard({ row, groupBy }: { row: GroupRow; groupBy: GroupBy }) {
           <Metric label="Sold">{row.units_sold}</Metric>
           <Metric label="Average days held">{row.avg_days_held === null ? 'Unknown' : `${row.avg_days_held}d`}</Metric>
           <Metric label="Sell-through">{percent(row.sell_through)}</Metric>
-          <Metric label="Profit per day">{money(row.profit_per_day)}</Metric>
+          <Metric label="Profit per day"><Signed value={row.profit_per_day}>{money(row.profit_per_day)}</Signed></Metric>
         </Row>
         {row.sales_missing_cost > 0 ? (
           <Copy muted>{row.sales_missing_cost} sale{row.sales_missing_cost === 1 ? '' : 's'} with unknown cost</Copy>
@@ -235,7 +235,7 @@ function ReturnByTime({ rows, noun }: { rows: GroupRow[]; noun: string }) {
                 <Copy>{row.label}</Copy>
                 <Copy muted>{row.units_sold} sold · {row.avg_days_held}d held</Copy>
               </View>
-              <Copy>{percent(row.roi)}</Copy>
+              <Copy><Signed value={row.roi}>{percent(row.roi)}</Signed></Copy>
             </View>
           ))}
         </Card>
