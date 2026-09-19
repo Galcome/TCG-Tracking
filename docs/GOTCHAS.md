@@ -367,3 +367,34 @@ curl -sI https://tcg-tracking.web.app/inventory | grep -i cache-control
 
 The general rule, and it is the same one as the retired Gemini model above: a config that
 is correct in the file can still be wrong in production. Check the thing the user touches.
+
+## Android Release - A Fresh Worktree Silently Mints A New Signing Key
+
+`app/.native-release/` holds the release keystore and its password, and it is gitignored -
+correctly, since it is key material. The consequence is that it is **per-worktree**: a new
+worktree, or a fresh clone, starts with no signing key at all.
+
+`ensure-signing.mjs` used to generate one whenever the keystore was absent. That is right
+for bootstrapping a brand-new project and wrong for everything after it. The generated key
+carries the same `CN=TCG Tracking Android` subject, so nothing looks unusual, but it is a
+different key:
+
+- the build only fails at the very end, after roughly eight minutes of Gradle, with
+  `APK is not signed with the approved TCG release certificate`
+- had that check not existed, the APK would have installed nowhere: Android refuses to
+  upgrade an existing install whose signing certificate differs
+
+Observed 2026-09-19 on the 0.1.7 / versionCode 8 release, twice, before the cause was found.
+
+The script now reads `androidSigningSha256` from `app/release-target.json` and:
+
+- refuses to generate a key at all once a certificate is pinned, telling you to restore
+  `.native-release` from your backup
+- compares the keystore's actual certificate fingerprint against the pinned one *before*
+  Gradle runs, so a wrong key costs seconds instead of a full build
+
+**So keep a backup of `app/.native-release/`.** It is the only copy of the key that can
+ship an upgrade to an existing install, and nothing in git protects it. To set up a new
+worktree for release work, copy `tcg-release.jks` and `signing-password` into its
+`app/.native-release/` from a worktree that already has them; the build fingerprints the
+result and will tell you immediately if it is the wrong key.
