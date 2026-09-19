@@ -33,6 +33,11 @@ class Game(Base, _TaxonomyMixin):
         CheckConstraint("length(trim(slug)) > 0", name="ck_games_slug_present"),
     )
 
+    #: TCGplayer category on TCGCSV. NULL means the game has no catalog to sync sets from.
+    tcgcsv_category_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, unique=True, index=True
+    )
+
 
 class ProductType(Base, _TaxonomyMixin):
     __tablename__ = "product_types"

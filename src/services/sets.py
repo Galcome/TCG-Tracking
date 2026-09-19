@@ -1,21 +1,22 @@
 """Sets: resolving a typed name to a record, and suggesting the right ones.
 
 Two sources feed one ranked list. What the group has **actually bought**, most recently
-first, is primary. The **seeded release calendar** is a bonus layered on top, so a brand-new
-set is one tap before anyone has bought it.
+first, is primary. The **release calendar** is layered on top, so a brand-new set is one tap
+before anyone has bought it.
 
-That order is deliberate. A seeded calendar goes stale; unmaintained, in six months it
-confidently names the wrong latest set, which is worse than having none. With used sets
-leading, the day the calendar ages out nothing breaks - suggestions simply fall back to what
-the group really buys, and no maintenance chore has been created.
+The calendar is kept current by the daily catalog sync (`set_sync`), so a set released in
+the last `NEW_RELEASE_DAYS` leads even over used sets: launch week is when somebody enters
+boxes of it for the first time, and burying it under last month's set is how "the new set
+isn't in the list" happens. Past that window the used sets lead again, so a sync that stops
+running degrades to what the group really buys rather than to a stale guess.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,10 @@ SIMILARITY_THRESHOLD = 0.3
 DID_YOU_MEAN_THRESHOLD = 0.55
 
 DEFAULT_SUGGESTION_LIMIT = 8
+
+#: A set released this recently leads the list even over what the group already buys.
+#: Launch week is exactly when somebody is entering boxes of it for the first time.
+NEW_RELEASE_DAYS = 60
 
 
 def resolve(
@@ -107,9 +112,13 @@ def suggestions(
             | (func.word_similarity(search, CardSet.name) >= SIMILARITY_THRESHOLD)
         )
 
-    # Used sets lead, most recent first; the calendar fills whatever is left, newest
-    # release first. `nullslast` on the aggregate is what puts never-used sets below.
+    # Fresh releases lead, newest first. Then used sets, most recent first; the calendar
+    # fills whatever is left, newest release first. `nullslast` on the aggregate is what
+    # puts never-used sets below.
+    recent = CardSet.released_on.between(when - timedelta(days=NEW_RELEASE_DAYS), when)
     statement = statement.order_by(
+        case((recent, 0), else_=1),
+        case((recent, CardSet.released_on)).desc().nullslast(),
         last_used.desc().nullslast(),
         CardSet.released_on.desc().nullslast(),
         CardSet.name,

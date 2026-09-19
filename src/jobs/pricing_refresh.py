@@ -4,6 +4,9 @@ This process is a private Railway service, not a public HTTP endpoint. It receiv
 same secret Neon ``DATABASE_URL`` as the API, requires ``APP_ROLE=worker``, and calls the
 pricing service directly. PostgreSQL's transaction advisory lock protects against an
 overlapping run. The API service remains the only service that runs migrations.
+
+Before prices, it syncs the set calendar from the same catalog so new releases become
+selectable. That step is best-effort: a catalog hiccup must never cost a day of prices.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
 from src.database import get_db
-from src.services import pricing
+from src.services import pricing, set_sync
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,30 @@ def _log_summary(summary: pricing.RefreshSummary) -> None:
             len(summary.errors),
             summary.errors,
         )
+
+
+def sync_sets(
+    *,
+    sync_fn: Callable[..., set_sync.SyncSummary] = set_sync.sync,
+    db_factory: Callable[[], AbstractContextManager] = get_db,
+) -> set_sync.SyncSummary | None:
+    """Link and create sets once; failures are logged and never block the price refresh."""
+    try:
+        with db_factory() as db:
+            summary = sync_fn(db)
+    except (pricing.PricingError, SQLAlchemyError) as error:
+        logger.warning("set_sync_failed error=%s", type(error).__name__)
+        return None
+    logger.info(
+        "set_sync_complete games=%d created=%d linked=%d errors=%d",
+        summary.games,
+        summary.created,
+        summary.linked,
+        len(summary.errors),
+    )
+    if summary.errors:
+        logger.warning("set_sync_game_errors messages=%s", summary.errors)
+    return summary
 
 
 def run(
@@ -116,6 +143,7 @@ def main() -> int:
     if settings.app_role != "worker":
         logger.error("pricing_refresh_refused app_role=%s expected=worker", settings.app_role)
         return 2
+    sync_sets()
     try:
         run()
     except PricingJobError as error:
@@ -138,4 +166,5 @@ __all__ = [
     "RETRY_DELAYS_SECONDS",
     "main",
     "run",
+    "sync_sets",
 ]
