@@ -29,7 +29,7 @@ foundation owner until its interface is stable.
 | Money tone (2026-09-19 F1) | Signed profit/ROI/appreciation/balances green/red, zero/unknown neutral, on every screen | Web `toneFor` parity; new Playwright tone checks | Built: PR #97 (local lint/typecheck/tests pass); device check pending |
 | Sealed pricing (F2-F4) | Packs/boxes/ETBs/collections/decks eligible, suggested mapping, holding value + unrealized P&L, Set up price CTA | `pricing.spec.ts`; new pytest eligibility | Built: PR #101 (pytest 100% coverage, app checks pass); merge after #96-#100 |
 | Set sync (F5) | Daily TCGCSV group sync, recent releases lead suggestions | New pytest with fake groups feed | Built: PR #98 (pytest 100% coverage); first nightly sync after merge |
-| Live scan (F6-F8) | Camera session list with prices, Rip + Add singles, vision provider fallback, per-member limits | New pytest lookup/fallback; scanner unit tests; device acceptance | Built: PR #102 on #101 (977 pytest, 100% coverage; app 136 tests, android/web export); needs new Android build + device acceptance |
+| Live scan (F6-F8) | Camera session list with prices, Rip + Add singles, explicit identity/listing confirmation, separate actual paid cost, vision provider fallback, per-member limits | New pytest lookup/fallback; scanner unit tests; device acceptance | Built: PR #102 on #101 (pytest 100% coverage; app 138 tests, Android/web/iOS exports); needs new Android build + device acceptance |
 | Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
 
 ## Acceptance evidence

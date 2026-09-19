@@ -74,7 +74,7 @@ operator-triggered refresh. It is separate from the private cron process.
 
 ## Product boundaries
 
-Gemini is an identity assistant only and does not update prices or participate in this job.
-No Groq integration currently exists; any future provider must keep the same identity-only
-boundary. TCGCSV is a free USD source converted with the dated Bank of Canada USD/CAD rate;
-its market price is not condition-specific. Slabs remain manual.
+Gemini, Groq, Anthropic, and OpenAI form an optional identity-only fallback chain; none of
+them updates prices or participates in this job. TCGCSV is the sole market-price source and
+is converted from USD with the dated Bank of Canada USD/CAD rate. Its market price is not
+condition-specific. Slabs remain manual.

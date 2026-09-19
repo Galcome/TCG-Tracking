@@ -108,9 +108,8 @@ The daily job should:
    checkpoint is due.
 5. Queue ambiguous matches and large moves for human review.
 
-No AI call is needed after an external product ID is confirmed. Gemini remains an
-identity-only assistant and may not update prices. There is currently no Groq integration in
-this repository; if one is added later, the same identity-only boundary applies.
+No AI call is needed after an external product ID is confirmed. The configured Gemini,
+Groq, Anthropic, and OpenAI fallback chain remains identity-only and may not update prices.
 Search-grounded AI may help an operator resolve an exception, but its listings are evidence
 for review, not an automatic valuation.
 
