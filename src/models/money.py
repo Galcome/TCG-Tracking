@@ -26,6 +26,7 @@ That single flip is why every event the group described falls out of one rule:
 | Patrick puts cash into Joint | Joint +X, Patrick -X | Cash in, and he is owed for it |
 | Sale paid in store credit | That shop +X | Credit to spend there, and no cash anywhere |
 | Purchase paid with store credit | That shop -X | Credit spent down |
+| Sleeves bought from Joint | Joint -X | Cash down, and profit down by X |
 
 **Store credit is value, not money.** A store-credit account sums like the joint one - it is
 something the group owns and can spend - but it is never added into a cash figure. Selling a
@@ -81,15 +82,42 @@ MOVEMENT_PROCEEDS = "proceeds"
 MOVEMENT_TRANSFER = "transfer"
 #: A correction, or an opening balance. One leg, signed, with no counterparty.
 MOVEMENT_ADJUSTMENT = "adjustment"
+#: Overhead with no stock behind it - sleeves, a show table, a subscription. Legs are money
+#: out of whoever paid, exactly like funding; the difference is that it lands in profit as a
+#: period cost instead of in any product's cost basis.
+MOVEMENT_EXPENSE = "expense"
 MOVEMENT_KINDS = (
     MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
     MOVEMENT_TRANSFER,
     MOVEMENT_ADJUSTMENT,
+    MOVEMENT_EXPENSE,
+)
+
+#: Fixed on purpose: a free-text category splits "Sleeves" and "sleeves" into two totals,
+#: and the point of recording overhead is a total per category someone can take to a tax
+#: return. "other" requires a note saying what it was.
+EXPENSE_CATEGORY_OTHER = "other"
+EXPENSE_CATEGORIES = (
+    "supplies",
+    "shipping_supplies",
+    "show_fees",
+    "subscriptions",
+    "travel",
+    "grading_fees",
+    EXPENSE_CATEGORY_OTHER,
 )
 
 _ACCOUNT_KIND_CHECK = "kind IN ('joint', 'member', 'store_credit')"
-_MOVEMENT_KIND_CHECK = "kind IN ('funding', 'proceeds', 'transfer', 'adjustment')"
+_MOVEMENT_KIND_CHECK = (
+    "kind IN ('funding', 'proceeds', 'transfer', 'adjustment', 'expense')"
+)
+#: Spelled out rather than built from EXPENSE_CATEGORIES so no SQL is ever assembled from
+#: strings; a test pins the two together.
+_EXPENSE_CATEGORY_CHECK = (
+    "expense_category IS NULL OR expense_category IN ('supplies', 'shipping_supplies', "
+    "'show_fees', 'subscriptions', 'travel', 'grading_fees', 'other')"
+)
 _STATUS_CHECK = "status IN ('active', 'voided')"
 
 
@@ -171,6 +199,13 @@ class MoneyMovement(Base, TimestampMixin):
             "(purchase_id IS NOT NULL)::int + (sale_id IS NOT NULL)::int <= 1",
             name="ck_money_movements_one_cause",
         ),
+        CheckConstraint(_EXPENSE_CATEGORY_CHECK, name="ck_money_movements_expense_category"),
+        # Every expense has a category and nothing else does, so a category total can never
+        # silently include a transfer.
+        CheckConstraint(
+            "(kind = 'expense') = (expense_category IS NOT NULL)",
+            name="ck_money_movements_expense_has_category",
+        ),
         Index("ix_money_movements_status_date", "status", "occurred_on"),
         Index("ix_money_movements_purchase", "purchase_id"),
         Index("ix_money_movements_sale", "sale_id"),
@@ -188,6 +223,7 @@ class MoneyMovement(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(10), nullable=False, default=STATUS_ACTIVE)
     void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expense_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default=DEFAULT_CURRENCY)
 
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(

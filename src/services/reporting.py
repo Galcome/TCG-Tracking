@@ -23,6 +23,7 @@ from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.member import Member
 from src.models.money import (
     ACCOUNT_STORE_CREDIT,
+    MOVEMENT_EXPENSE,
     MOVEMENT_PROCEEDS,
     MoneyAccount,
     MoneyMovement,
@@ -64,6 +65,12 @@ def period_start(period: str, today: date | None = None) -> date | None:
     return None
 
 
+@dataclass(frozen=True)
+class ExpenseTotal:
+    category: str
+    amount_cents: int
+
+
 @dataclass
 class Dashboard:
     realized_profit_cents: int = 0
@@ -92,6 +99,19 @@ class Dashboard:
     #: figure is the same class of lie as valuing unpriced stock at zero.
     store_credit_cents: int = 0
 
+    #: Overhead dated inside the period: sleeves, show tables, subscriptions. A period
+    #: cost, never folded into a lot's cost basis, so FIFO and ROI stay trading-only.
+    expenses_cents: int = 0
+    #: The same, per category, largest first. Only categories with spending appear.
+    expenses_by_category: list[ExpenseTotal] = field(default_factory=list)
+    #: Lifetime overhead paid in money (any account but store credit), for the cash balance.
+    expenses_paid_cents: int = 0
+
+    @property
+    def net_profit_cents(self) -> int:
+        """What the business actually made in the period: trading profit less overhead."""
+        return self.realized_profit_cents - self.expenses_cents
+
     @property
     def cash_received_cents(self) -> int:
         """Of everything sales brought in, the part that was actually money."""
@@ -107,7 +127,9 @@ class Dashboard:
         Store credit is excluded: it is value received, but it cannot pay for anything
         outside the shop that issued it.
         """
-        return self.cash_received_cents - self.total_invested_cents
+        return (
+            self.cash_received_cents - self.total_invested_cents - self.expenses_paid_cents
+        )
 
     @property
     def roi(self) -> float | None:
@@ -263,6 +285,42 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
                 MoneyMovement.status == STATUS_ACTIVE,
                 MoneyMovement.kind == MOVEMENT_PROCEEDS,
                 MoneyAccount.kind == ACCOUNT_STORE_CREDIT,
+            )
+        )
+        or 0
+    )
+
+    # Overhead. Expense legs are all negative, so the spend is the negated sum. Undated
+    # expenses cannot exist (the form defaults to today), but a null date would still only
+    # count toward all-time, the same as an undated sale.
+    expense_legs = (
+        select(MoneyMovement.expense_category, func.sum(-MoneyPosting.delta_cents))
+        .select_from(MoneyPosting)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.kind == MOVEMENT_EXPENSE)
+    )
+    in_period = expense_legs
+    if start is not None:
+        in_period = in_period.where(
+            MoneyMovement.occurred_on.is_not(None), MoneyMovement.occurred_on >= start
+        )
+    rows = db.execute(
+        in_period.group_by(MoneyMovement.expense_category).order_by(
+            func.sum(-MoneyPosting.delta_cents).desc(), MoneyMovement.expense_category
+        )
+    ).all()
+    result.expenses_by_category = [ExpenseTotal(category, int(cents)) for category, cents in rows]
+    result.expenses_cents = sum(total.amount_cents for total in result.expenses_by_category)
+    result.expenses_paid_cents = int(
+        db.scalar(
+            select(func.coalesce(func.sum(-MoneyPosting.delta_cents), 0))
+            .select_from(MoneyPosting)
+            .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+            .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+            .where(
+                MoneyMovement.status == STATUS_ACTIVE,
+                MoneyMovement.kind == MOVEMENT_EXPENSE,
+                MoneyAccount.kind != ACCOUNT_STORE_CREDIT,
             )
         )
         or 0

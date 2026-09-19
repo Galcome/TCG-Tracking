@@ -3,7 +3,7 @@
 Funding and proceeds are not created here - they belong to the purchase and the sale that
 caused them, and are written by those endpoints through `services.money`. What lives here is
 everything with no stock behind it: seeing where the money is, moving it between accounts,
-and setting the opening balances carried over from the spreadsheet.
+paying for overhead, and setting the opening balances carried over from the spreadsheet.
 
 Permissions are flat, as everywhere else in this app. Three trusted people do not need an
 approval step; the audit trail is what makes a mistake recoverable.
@@ -23,6 +23,7 @@ from src.models.money import (
     ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     MOVEMENT_ADJUSTMENT,
+    MOVEMENT_EXPENSE,
     MOVEMENT_KINDS,
     MOVEMENT_TRANSFER,
     MoneyAccount,
@@ -35,6 +36,7 @@ from src.schemas.money_ledger import (
     AccountList,
     AccountRead,
     AdjustmentCreate,
+    ExpenseCreate,
     FundingLeg,
     MovementList,
     MovementRead,
@@ -278,6 +280,7 @@ def _serialise(
                 purchase_id=movement.purchase_id,
                 sale_id=movement.sale_id,
                 product_name=product_names.get(movement.id),
+                expense_category=movement.expense_category,
                 notes=movement.notes,
                 status=movement.status,
             )
@@ -440,6 +443,56 @@ def create_adjustment(
             "kind": MOVEMENT_ADJUSTMENT,
             "account": str(account.id),
             "amount_cents": payload.amount,
+        },
+    )
+    return _one(db, movement)
+
+
+@router.post("/expenses", response_model=MovementRead, status_code=status.HTTP_201_CREATED)
+def create_expense(
+    payload: ExpenseCreate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> MovementRead:
+    """Record overhead: money that left the business with no stock coming back.
+
+    Legs post only against the accounts that paid, all negative. The counterparty is the
+    P&L, not an account - the same shape a purchase's funding has. Paid from a member's own
+    pocket, the business now owes them; paid with store credit, the credit goes down and
+    cash does not.
+
+    Not editable: a wrong expense is voided and entered again, as a transfer is, so the
+    trail shows both.
+    """
+    if payload.paid_from is None:
+        money.ensure_accounts(db)
+        joint = db.scalars(select(MoneyAccount).where(MoneyAccount.kind == ACCOUNT_JOINT)).one()
+        paid = [(joint.id, payload.amount)]
+    else:
+        paid = resolve_funding(
+            db, legs=payload.paid_from, landed_cost=payload.amount, default_member_id=member.id
+        )
+
+    movement = money.record_movement(
+        db,
+        kind=MOVEMENT_EXPENSE,
+        legs=[(account_id, -amount) for account_id, amount in paid],
+        occurred_on=payload.occurred_on,
+        member_id=member.id,
+        notes=payload.notes,
+        expense_category=payload.category,
+    )
+    ledger.record_audit(
+        db,
+        entity_type="money_movement",
+        entity_id=movement.id,
+        action="create",
+        member_id=member.id,
+        after={
+            "kind": MOVEMENT_EXPENSE,
+            "category": payload.category,
+            "amount_cents": payload.amount,
+            "paid_from": [str(account_id) for account_id, _ in paid],
         },
     )
     return _one(db, movement)
