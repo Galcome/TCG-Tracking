@@ -15,7 +15,7 @@ import {
 } from '../lib/lineage-report'
 import { percent } from '../lib/format'
 import { reportMoney } from '../lib/reports'
-import { Button, Card, Copy, ErrorNotice, Loading, Row } from './ui'
+import { Button, Card, Copy, ErrorNotice, Loading, Row, Signed } from './ui'
 
 function Metric({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -32,7 +32,7 @@ function SummaryMetric({
   hint,
 }: {
   label: string
-  value: string
+  value: ReactNode
   hint?: string
 }) {
   return (
@@ -85,7 +85,7 @@ function LineageSummary({ report }: { report: LineageRollup }) {
         />
         <SummaryMetric
           label="Realized profit"
-          value={reportMoney(report.realized_profit)}
+          value={<Signed value={report.realized_profit}>{reportMoney(report.realized_profit)}</Signed>}
         />
         <SummaryMetric
           label="Remaining cost"
@@ -98,7 +98,7 @@ function LineageSummary({ report }: { report: LineageRollup }) {
         />
         <SummaryMetric
           label="ROI"
-          value={percent(report.roi)}
+          value={<Signed value={report.roi}>{percent(report.roi)}</Signed>}
           hint={plural(report.units_sold, 'unit') + ' sold'}
         />
       </View>

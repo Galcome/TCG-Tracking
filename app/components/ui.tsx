@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, useResponsiveLayout } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
 import { CardBackdrop } from './card-backdrop';
+import { tone } from '../lib/format';
 export function Brand() {
   const fonts = useTypography();
   return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0, maxWidth: '100%' }}>
@@ -17,6 +18,15 @@ export function Brand() {
 export function Copy({ children, muted = false }: PropsWithChildren<{ muted?: boolean }>) {
   const fonts = useTypography();
   return <Text style={[styles.copy, { fontFamily: fonts.body }, muted && { color: colors.muted }]}>{children}</Text>;
+}
+/** Text colour for a signed figure; undefined inherits the surrounding colour. */
+export function toneColor(value: string | number | null | undefined): string | undefined {
+  const direction = tone(value);
+  return direction ? colors[direction] : undefined;
+}
+/** Nest inside Copy/Text to colour just the figure: `<Copy>Profit <Signed value={x}>{money(x)}</Signed></Copy>`. */
+export function Signed({ value, children }: PropsWithChildren<{ value: string | number | null | undefined }>) {
+  return <Text style={{ color: toneColor(value) }}>{children}</Text>;
 }
 export function Heading({ children }: PropsWithChildren) { const fonts = useTypography(); return <Text accessibilityRole="header" style={[styles.heading, { fontFamily: fonts.display }]}>{children}</Text>; }
 export function Card({ children, accent = false, style }: PropsWithChildren<{ accent?: boolean; style?: StyleProp<ViewStyle> }>) { return <View style={[styles.card, accent && { overflow: 'hidden', borderTopColor: colors.accent }, style]}>{accent ? <CardBackdrop /> : null}{children}</View>; }

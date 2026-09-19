@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { View } from 'react-native'
 
 import { BalanceAdjustmentDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
-import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row } from '../../components/ui'
+import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
 import { money } from '../../lib/format'
@@ -63,7 +63,7 @@ function AccountCard({
             <Copy>{account.name}</Copy>
             <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
           </View>
-          <Copy>{money(account.balance)}</Copy>
+          <Copy><Signed value={account.balance}>{money(account.balance)}</Signed></Copy>
         </Row>
         <Row>
           <Button label="Move money" onPress={onTransfer} />
@@ -85,7 +85,7 @@ function MovementLegs({ movement }: { movement: Movement }) {
     <View style={{ gap: 4 }}>
       {movement.legs.map((leg) => (
         <Copy key={leg.account_id} muted>
-          {leg.account_name} · {movementAccountKindLabel(leg.account_kind)} · cash flow {money(leg.amount)}
+          {leg.account_name} · {movementAccountKindLabel(leg.account_kind)} · cash flow <Signed value={leg.amount}>{money(leg.amount)}</Signed>
         </Copy>
       ))}
     </View>
@@ -176,7 +176,7 @@ export function Money(_props: MoneyProps = {}) {
             <Row>
               <View style={{ flex: 1, minWidth: 150 }}>
                 <Copy muted>In the joint account</Copy>
-                <Copy>{money(accounts.data.joint_balance)}</Copy>
+                <Copy><Signed value={accounts.data.joint_balance}>{money(accounts.data.joint_balance)}</Signed></Copy>
                 <Copy muted>Cash the group can spend</Copy>
               </View>
               <View style={{ flex: 1, minWidth: 150 }}>
