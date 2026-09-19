@@ -301,20 +301,20 @@ def test_choose_when_nobody_answers_is_unavailable(monkeypatch, all_keys):
 
 
 def test_a_photo_is_read_by_the_fallback_when_gemini_is_down(monkeypatch, all_keys):
-    vision._last_call_at = 0.0
+    vision._usage.clear()
     Network(monkeypatch, gemini=503, groq='{"cards": [{"name": "Pikachu", "set": "151"}]}')
 
     cards = vision.read_cards(PNG.data, PNG.content_type)
 
     assert [(card.name, card.set_name) for card in cards] == [("Pikachu", "151")]
-    vision._last_call_at = 0.0
+    vision._usage.clear()
 
 
 def test_an_honest_empty_photo_is_not_sent_down_the_chain(monkeypatch, all_keys):
     """No card it could name is a real answer; three more providers agreeing costs money."""
-    vision._last_call_at = 0.0
+    vision._usage.clear()
     network = Network(monkeypatch, gemini='{"cards": []}')
 
     assert vision.read_cards(PNG.data, PNG.content_type) == []
     assert network.hosts == [GEMINI]
-    vision._last_call_at = 0.0
+    vision._usage.clear()

@@ -15,23 +15,28 @@ from src.models.catalog import (
 )
 from src.models.member import Member
 from src.models.product import Product
+from src.models.taxonomy import Game
 from src.schemas.pricing import (
+    CardLookupRead,
+    CardLookupRequest,
     CatalogMappingCreate,
     CatalogMappingRead,
     CatalogMappingUpdate,
+    PricedListingRead,
     PricingRefreshRead,
     PricingSuggestionRead,
     TCGCSVCategoryRead,
     TCGCSVGroupRead,
     TCGCSVProductRead,
 )
-from src.services import price_match
+from src.services import card_lookup, price_match
 from src.services import pricing as pricing_service
 
 router = APIRouter()
 
 MAX_MAPPINGS = 200
 catalog_provider = pricing_service.TCGCSVProvider()
+fx_provider = pricing_service.BankOfCanadaProvider()
 
 
 def _catalog_error(error: pricing_service.PricingError) -> HTTPException:
@@ -115,6 +120,51 @@ def suggest_listing(
     return PricingSuggestionRead(
         candidates=[
             TCGCSVProductRead.model_validate(row, from_attributes=True)
+            for row in found.candidates
+        ],
+        suggested_index=found.suggested,
+        method=found.method,
+        message=found.message,
+    )
+
+
+@router.post("/lookup", response_model=CardLookupRead)
+def lookup_card(
+    payload: CardLookupRequest,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> CardLookupRead:
+    """The catalog listing and market value for a card that is not a product yet.
+
+    Live scan calls this once per new card it reads. May cost one cheap model call when
+    code cannot settle the set or the listing. Writes nothing: the scan row is prefilled
+    and the person still adds it.
+    """
+    game = db.get(Game, payload.game_id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
+    try:
+        found = card_lookup.lookup(
+            db,
+            game,
+            name=payload.name,
+            set_name=payload.set_name,
+            number=payload.collector_number,
+            variant=payload.variant,
+            provider=catalog_provider,
+            fx=fx_provider,
+        )
+    except pricing_service.PricingError as error:
+        raise _catalog_error(error) from error
+    return CardLookupRead(
+        set_id=found.set_id,
+        set_name=found.set_name,
+        candidates=[
+            PricedListingRead(
+                listing=TCGCSVProductRead.model_validate(row.listing, from_attributes=True),
+                subtype=row.subtype,
+                market_cents=row.market_cents,
+            )
             for row in found.candidates
         ],
         suggested_index=found.suggested,

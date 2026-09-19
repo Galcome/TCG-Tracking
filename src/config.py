@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: The environments this app knows how to be. A closed set on purpose: every
@@ -63,11 +63,16 @@ class Settings(BaseSettings):
     #: Fallbacks, tried in this order when the one before fails or answers nonsense. Each
     #: is skipped while its key is blank, so any one key switches the feature on.
     groq_api_key: str = ""
-    groq_model: str = "qwen/qwen3.6-27b"
+    groq_model: str = "qwen/qwen3.8-27b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
     openai_api_key: str = ""
     openai_model: str = "gpt-5.6-luna"
+
+    #: Photos or live-scan frames one member may have read per day. A scan samples a frame
+    #: about every second while the camera is steady, so this is the spend ceiling: at
+    #: roughly $0.002 a frame, 400 is under a dollar a day per member.
+    vision_daily_frame_limit: int = Field(default=400, ge=1)
 
     @field_validator("database_url", "direct_database_url")
     @classmethod

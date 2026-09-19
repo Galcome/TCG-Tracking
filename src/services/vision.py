@@ -25,14 +25,18 @@ Before that, a failed or garbled answer moves on to the next provider in `ai.PRO
 from __future__ import annotations
 
 import json
+import threading
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import date
 
+from src.config import settings
 from src.services import ai
 
-#: Deliberately blunt. A retry loop against a free tier is how the free tier stops being
-#: free, and nothing here is worth that - the fallback is typing, which always works.
-MIN_SECONDS_BETWEEN_CALLS = 3.0
+#: Per member. Live scan samples a frame about once a second, so this is the fastest a
+#: steady camera may go; a retry loop in a broken client is refused rather than paid for.
+MIN_SECONDS_BETWEEN_CALLS = 1.0
 
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
@@ -69,7 +73,17 @@ class VisionUnavailable(RuntimeError):
     """No key, rate limited, or the call failed. Callers fall back to typing."""
 
 
-_last_call_at = 0.0
+@dataclass
+class _Usage:
+    last_call_at: float = 0.0
+    day: date | None = None
+    count: int = 0
+
+
+#: In process memory: one API instance, and a restart forgiving a day's count is cheaper
+#: than a table. Keyed by member so one person scanning never throttles another.
+_usage: dict[uuid.UUID | None, _Usage] = {}
+_usage_lock = threading.Lock()
 
 
 def is_configured() -> bool:
@@ -77,12 +91,18 @@ def is_configured() -> bool:
     return ai.is_configured()
 
 
-def _rate_limit() -> None:
-    global _last_call_at
-    now = time.monotonic()
-    if now - _last_call_at < MIN_SECONDS_BETWEEN_CALLS:
-        raise VisionUnavailable("Give it a few seconds between photos.")
-    _last_call_at = now
+def _rate_limit(member_id: uuid.UUID | None) -> None:
+    now, today = time.monotonic(), date.today()
+    with _usage_lock:
+        usage = _usage.setdefault(member_id, _Usage())
+        if usage.day != today:
+            usage.day, usage.count = today, 0
+        if usage.count >= settings.vision_daily_frame_limit:
+            raise VisionUnavailable("Today's card reading limit is used up. Type them in.")
+        if now - usage.last_call_at < MIN_SECONDS_BETWEEN_CALLS:
+            raise VisionUnavailable("Give it a second between photos.")
+        usage.last_call_at = now
+        usage.count += 1
 
 
 def _parse(text: str) -> list[ReadCard] | None:
@@ -121,14 +141,16 @@ def _parse(text: str) -> list[ReadCard] | None:
     return cards
 
 
-def read_cards(image: bytes, content_type: str) -> list[ReadCard]:
+def read_cards(
+    image: bytes, content_type: str, member_id: uuid.UUID | None = None
+) -> list[ReadCard]:
     """What the model thinks it can see. Raises `VisionUnavailable` rather than guessing."""
     if not is_configured():
         raise VisionUnavailable("No vision key is configured.")
     if len(image) > MAX_IMAGE_BYTES:
         raise VisionUnavailable("That photo is too large. Try a smaller one.")
 
-    _rate_limit()
+    _rate_limit(member_id)
 
     try:
         cards = ai.ask(_PROMPT, _parse, image=ai.Image(image, content_type))
