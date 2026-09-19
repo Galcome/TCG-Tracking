@@ -26,7 +26,7 @@ export default function Inventory() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
-  const [operation, setOperation] = useState<{ product: Product; mode: 'move' | 'edit' } | null>(null);
+  const [operation, setOperation] = useState<{ product: Product; mode: 'move' } | null>(null);
   const [selling, setSelling] = useState<Product | null>(null);
   const [ripping, setRipping] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
@@ -38,7 +38,7 @@ export default function Inventory() {
     stock === 'out' ? 'Sold out' : stock === '' ? 'All products' : null, includeArchived ? 'Archived included' : null].filter(Boolean);
   return <Page title={bucket ? BUCKET_LABELS[bucket] : 'Stock'}>
     {isDesktop ? <Button label="Add product" onPress={() => setAdding(true)} /> : null}
-    {adding && <ProductForms mode="add" onClose={() => setAdding(false)} />}
+    {adding && <ProductForms mode="add" initialName={products.data?.items.length === 0 ? q.trim() : undefined} onClose={() => setAdding(false)} />}
     {operation ? <ProductForms product={operation.product} mode={operation.mode} onClose={() => setOperation(null)} /> : null}
     {selling ? <RecordSaleDialog product={selling} onClose={() => setSelling(null)} /> : null}
     {ripping ? <RipDialog product={ripping} initialBucket={bucket || undefined} onClose={() => setRipping(null)} /> : null}
@@ -59,12 +59,12 @@ export default function Inventory() {
       onChange={v=>{setIncludeArchived(v === 'include');setOffset(0);}} /></Row> : null}
     <ErrorNotice error={products.error ?? games.error ?? types.error} retry={()=>{void products.refetch();void games.refetch();void types.refetch();}} />
     {products.isPending && <Loading />}
-    {products.data?.items.length === 0 && <Card><Copy>No products match these filters.</Copy></Card>}
+    {products.data?.items.length === 0 && <Card><Copy>No products match these filters.</Copy>
+      {q.trim() ? <Button variant="primary" label={`Add "${q.trim()}"`} onPress={() => setAdding(true)} /> : null}</Card>}
     {products.data?.items.map(p => <StockCard key={p.id} product={p} bucket={bucket} dense={isDesktop}
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
-      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
-      onEdit={() => setOperation({ product: p, mode: 'edit' })} />)}
+      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined} />)}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}
   </Page>;

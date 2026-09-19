@@ -29,6 +29,7 @@ import {
 } from '../lib/api'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { RecordValuationDialog } from './valuation-form'
+import { DateField } from './date-field'
 
 /** Graders worth a quick tap; the text field remains available for every other company. */
 export const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC'] as const
@@ -265,13 +266,7 @@ export function SendToGradingDialog({ product, onClose }: SendToGradingDialogPro
         onChangeText={setGradingCompany}
         placeholder="PSA, BGS, or another grader"
       />
-      <Field
-        label="Sent on"
-        value={sentOn}
-        onChangeText={setSentOn}
-        keyboardType="numbers-and-punctuation"
-        placeholder="YYYY-MM-DD"
-      />
+      <DateField label="Sent on" value={sentOn} onChange={setSentOn} />
       <BucketChoice value={bucket} counts={counts} onChange={setBucket} />
       <Choice
         label="After sending"
@@ -515,13 +510,7 @@ export function ReturnFromGradingDialog({
       {!canReturn ? <ErrorNotice error={new Error('Only an outstanding submission can be returned.')} /> : null}
       <Row>
         <Field label="Grade" value={grade} onChangeText={setGrade} autoFocus placeholder="10" editable={!lockedChild} />
-        <Field
-          label="Came back on"
-          value={returnedOn}
-          onChangeText={setReturnedOn}
-          keyboardType="numbers-and-punctuation"
-          placeholder="YYYY-MM-DD"
-        />
+        <DateField label="Came back on" value={returnedOn} onChange={setReturnedOn} />
       </Row>
       <Choice
         label="Graded card"

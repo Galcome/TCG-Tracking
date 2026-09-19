@@ -20,7 +20,7 @@ import {
 import { percent } from '../../lib/format'
 import { usePeriodPreference } from '../../lib/period-preference'
 import type { GroupBy, GroupRow, ReportFilters, Taxonomy } from '../../lib/api'
-import { collectPages, groupCsv, inventoryCsv } from '../../lib/csv'
+import { collectPages, expensesCsv, groupCsv, inventoryCsv } from '../../lib/csv'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <Text accessibilityRole="header" style={styles.sectionTitle}>{children}</Text>
@@ -280,6 +280,8 @@ export default function Reports() {
           create={() => groupCsv(`tcg-by-${groupBy}`, sorted)} />
         <CsvButton label="Export all inventory CSV"
           create={async () => inventoryCsv(await collectPages((offset, limit) => api.products({ stock: 'in', offset, limit })))} />
+        <CsvButton label="Export expenses CSV"
+          create={async () => expensesCsv(await collectPages((offset, limit) => api.movements({ kind: 'expense', offset, limit })))} />
       </Row>
       <ErrorNotice error={rows.error} retry={() => { void rows.refetch() }} />
       {rows.isPending ? <Loading /> : null}

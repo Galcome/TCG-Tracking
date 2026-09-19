@@ -149,10 +149,14 @@ class Sale(Base, _LedgerEntry):
         CheckConstraint(_STATUS_CHECK, name="ck_sales_status"),
         CheckConstraint(_BUCKET_CHECK, name="ck_sales_bucket"),
         Index("ix_sales_product_status", "product_id", "status"),
+        Index("ix_sales_order_id", "order_id"),
     )
 
     product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: Shared by the lines of one multi-item sale, so a show sale to one buyer stays one
+    #: transaction. NULL for a sale recorded on its own.
+    order_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     gross_amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     platform_fees_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

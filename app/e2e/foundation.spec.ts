@@ -116,7 +116,7 @@ test('responsive stock cards preserve action guards and keep controls within the
     await page.setViewportSize({ width, height: 900 });
     for (const name of ['Stock action fixture', 'Empty stock fixture', 'Archived stock fixture']) {
       const card = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
-      await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeEnabled();
+      await expect(card.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
       for (const label of ['Sell', 'Move']) {
         const action = card.getByRole('button', { name: label, exact: true });
         if (name === product.name) await expect(action).toBeEnabled(); else await expect(action).toBeDisabled();
@@ -146,8 +146,6 @@ test('responsive stock cards preserve action guards and keep controls within the
   await active.getByRole('button', { name: 'Move', exact: true }).click();
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Move stock', exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  await active.getByRole('button', { name: 'Edit', exact: true }).click();
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(product.name);
 });
 
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
@@ -177,6 +175,12 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
   const funding = (await (await request.get(API + '/api/v1/money/movements?kind=funding&limit=200')).json()).items.find((m: { product_name: string }) => m.product_name === product.name);
   expect(funding.legs.map((leg: { amount: string }) => leg.amount).sort()).toEqual(['-5.10','-5.20']);
   await page.getByRole('button', { name: 'Record sale', exact: true }).click();
+  const now = new Date();
+  const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+  const saleDate = page.getByLabel('Sale date', { exact: true });
+  await expect(saleDate).toHaveAttribute('type', 'date');
+  await expect(saleDate).toHaveValue(today);
+  await expect(saleDate).toHaveAttribute('max', today);
   await page.getByLabel('Total received', { exact: true }).fill('20.00');
   await page.getByRole('button', { name: 'Split proceeds', exact: true }).click();
   await page.getByRole('button', { name: /^Proceeds 1 account:/ }).click();
@@ -193,6 +197,35 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
   const proceeds = (await (await request.get(API + '/api/v1/money/movements?kind=proceeds&limit=200')).json()).items.find((m: { product_name: string }) => m.product_name === product.name);
   expect(proceeds.legs.map((leg: { amount: string }) => leg.amount)).toEqual(['10.00','10.00']);
   expect(proceeds.legs.some((leg: { account_kind: string }) => leg.account_kind === 'store_credit')).toBe(true);
+});
+
+test('one sale form records several products to one buyer with shared fees', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const single = types.find((item: { slug: string }) => item.slug === 'single').id;
+  const make = async (name: string) => (await (await request.post(API + '/api/v1/products', { data: { name, game_id: games[0].id,
+    product_type_id: single, initial_purchase: { quantity: 1, amount: '5.00', funding: [] } } })).json());
+  const first = await make('Order line Pikachu');
+  const second = await make('Order line Eevee');
+  await signIn(page);
+  await page.goto('/products/' + first.id);
+  await page.getByRole('button', { name: 'Record sale', exact: true }).click();
+  await page.getByLabel('Total received', { exact: true }).fill('20.00');
+  await page.getByRole('button', { name: 'Add another item', exact: true }).click();
+  await page.getByLabel('Find another product', { exact: true }).fill('Order line Eevee');
+  await page.getByRole('button', { name: 'Order line Eevee · 1 in stock', exact: true }).click();
+  await expect(page.getByLabel('Sold for', { exact: true })).toHaveValue('20.00');
+  await page.getByLabel('Order line Eevee sold for', { exact: true }).fill('30.00');
+  await page.getByLabel('Platform fees', { exact: true }).fill('5.00');
+  await expect(page.getByText('Realized profit (order)')).toBeVisible();
+  await expect(page.getByText(/Order line Eevee · 1 sold · fees \$3\.00/)).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Record 2-item sale', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const sales = (await (await request.get(API + '/api/v1/sales?limit=200')).json()).items
+    .filter((sale: { product_id: string }) => sale.product_id === first.id || sale.product_id === second.id);
+  expect(sales).toHaveLength(2);
+  expect(new Set(sales.map((sale: { order_id: string }) => sale.order_id)).size).toBe(1);
+  expect(sales.map((sale: { platform_fees: string }) => sale.platform_fees).sort()).toEqual(['2.00', '3.00']);
 });
 
 test('optional grading valuations retry separately from committed grading and preserve zero', async ({ page, request }) => {
@@ -374,9 +407,16 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
     average_sale: null, units_in_stock: 1, sale_count: 0, sales_missing_cost: 0, undated_sales: 1,
     products_with_negative_stock: 0, net_proceeds: '5.00', fees_paid: '1.01', store_credit: '2.00',
     cash_received: '3.00', cash_balance: '-17.01',
+    expenses: '1.00', expenses_by_category: [{ category: 'supplies', amount: '1.00' }], net_profit: '90071992547408.91',
+    market_value: '12.00', priced_cost: '10.01', unrealized_gain: '1.99', priced_units: 1, stale_units: 1,
   } }));
   await signIn(page);
-  await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('Expenses $1.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Market value of stock', { exact: true })).toBeVisible();
+  await expect(page.getByText('$12.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('$1.99', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
@@ -396,7 +436,9 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   await expect(trend.getByText('Realized profit -$0.01', { exact: true })).toBeVisible();
   // Signed figures carry the theme's gain/loss tones; costs stay neutral.
   await expect(trend.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
-  await expect(page.getByText('$90,071,992,547,409.91', { exact: true }).first()).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await page.getByRole('button', { name: 'Period cost and trading', exact: true }).click();
+  await expect(page.getByText('Expenses · Supplies', { exact: true })).toBeVisible();
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
@@ -1119,6 +1161,61 @@ test('money adjustments use exact cents and transfer void restores both balances
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect((await readAccounts()).joint_balance).toBe(before.joint_balance);
 });
+test('an expense takes two fields from Add, pays from joint and lowers net profit', async ({ page, request }) => {
+  await signIn(page);
+  const board = async () => (await request.get(API + '/api/v1/dashboard?period=all')).json();
+  const cents = (s: string) => BigInt(s.replace('.', ''));
+  const before = await board();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) < 1000 ? 'Add expense' : 'New expense', exact: true }).click();
+  await page.getByLabel('How much', { exact: true }).fill('12.34');
+  await page.getByRole('button', { name: 'Shipping supplies', exact: true }).click();
+  const created = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/expenses');
+  await page.getByRole('button', { name: 'Save expense', exact: true }).click();
+  const response = await created;
+  const sent = response.request().postDataJSON();
+  expect(sent.category).toBe('shipping_supplies');
+  expect(sent.amount).toBe('12.34');
+  expect(sent.occurred_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(sent.paid_from).toHaveLength(1);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const after = await board();
+  expect(cents(after.net_profit)).toBe(cents(before.net_profit) - 1234n);
+  expect(after.realized_profit).toBe(before.realized_profit);
+  const { id } = await response.json();
+  expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
+  expect((await board()).net_profit).toBe(before.net_profit);
+});
+
+test('common actions sit one tap from where they are needed', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const name = 'Tap trim box ' + Date.now();
+  const box = await (await request.post(API + '/api/v1/products', { data: {
+    name, game_id: games[0].id, product_type_id: types.find((t: { slug: string }) => t.slug === 'booster-box').id,
+    initial_purchase: { quantity: 1, amount: '50.00', purchase_date: '2025-01-01', funding: [] },
+  } })).json();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: 'Rip a box', exact: true }).click();
+  await page.getByLabel('Find a box or pack', { exact: true }).fill(name);
+  await page.getByRole('button', { name: `Rip ${name} · 1 in stock`, exact: true }).click();
+  const rip = page.getByRole('dialog', { name: 'Rip open — ' + name, exact: true });
+  await expect(rip).toBeVisible();
+  await rip.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await page.goto('/products/' + box.id);
+  await expect(page.getByRole('button', { name: 'Add purchase', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rip open', exact: true })).toBeVisible();
+
+  const missing = 'Nothing like this ' + Date.now();
+  await page.goto('/inventory');
+  await page.getByLabel('Search products', { exact: true }).fill(missing);
+  await page.getByRole('button', { name: `Add "${missing}"`, exact: true }).click();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(missing);
+});
+
 test('sale preview, store-credit proceeds and void preserve server money and stock', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
@@ -1164,6 +1261,45 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   const accountsAfterVoid = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterVoid.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('0.00');
 });
+test('adding a product can start from the price catalog and saves its mapping', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const knownSets = await (await request.get(API + '/api/v1/sets?game=' + games[0].slug)).json();
+  const setName = knownSets.items[0].name;
+  const unique = 'Catalog Pikachu ' + Date.now();
+  let asked: Record<string, string> | undefined;
+  await page.route(API + '/api/v1/pricing/lookup', route => {
+    asked = route.request().postDataJSON();
+    return route.fulfill({ json: {
+      set_id: null, set_name: setName, suggested_index: 0, method: 'exact', message: null,
+      candidates: [{ listing: { product_id: 9876, category_id: 3, group_id: 555, name: unique, clean_name: null,
+        image_url: null, url: null, subtypes: ['Holofoil'], number: '238/191' }, subtype: 'Holofoil', market: '187.50' }],
+    } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
+  await page.getByRole('button', { name: 'Add product', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add product', exact: true });
+  await dialog.getByRole('button', { name: setName, exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('pikachu');
+  await dialog.getByRole('button', { name: 'Find in price catalog', exact: true }).click();
+  await dialog.getByRole('button', { name: `Use ${unique} · #238/191 · Holofoil · $187.50`, exact: true }).click();
+  expect(asked).toMatchObject({ game_id: games[0].id, name: 'pikachu', set_name: setName });
+  expect(asked?.kind).toBeTruthy();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(unique);
+  await expect(dialog.getByText('Catalog match: ' + unique + ' · #238/191 · Holofoil', { exact: true })).toBeVisible();
+  await page.getByLabel('Total paid', { exact: true }).fill('5.00');
+  const mapped = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/pricing/mappings');
+  await page.getByRole('button', { name: 'Save product', exact: true }).click();
+  expect((await mapped).status()).toBe(201);
+  await expect(page).toHaveURL(/\/products\/[0-9a-f-]+$/);
+  const productId = new URL(page.url()).pathname.split('/').pop()!;
+  const product = await (await request.get(API + '/api/v1/products/' + productId)).json();
+  expect(product).toMatchObject({ name: unique, collector_number: '238/191', variant: 'Holofoil', set_name: setName });
+  expect(product.stats.remaining_cost).toBe('5.00');
+  const [mapping] = await (await request.get(API + '/api/v1/pricing/mappings?product_id=' + productId)).json();
+  expect(mapping).toMatchObject({ external_product_id: '9876', external_group_id: '555', external_category_id: '3', subtype_name: 'Holofoil' });
+});
+
 test('product, purchase, move and audited reversal preserve exact server totals', async ({ page, request }) => {
   await signIn(page);
   await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();

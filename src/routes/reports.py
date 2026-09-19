@@ -20,10 +20,23 @@ router = APIRouter()
 _CONFIG = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class ExpenseCategoryRead(BaseModel):
+    model_config = _CONFIG
+
+    category: str
+    amount: MoneyOut = Field(validation_alias="amount_cents")
+
+
 class DashboardRead(BaseModel):
     model_config = _CONFIG
 
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    #: Overhead dated inside the period.
+    expenses: MoneyOut = Field(validation_alias="expenses_cents")
+    expenses_by_category: list[ExpenseCategoryRead]
+    #: Realized trading profit less overhead - the headline figure.
+    net_profit: MoneyOut = Field(validation_alias="net_profit_cents")
+    #: Trading only: overhead is a period cost with no cost of sales to divide by.
     roi: float | None
     inventory_at_cost: MoneyOut = Field(validation_alias="inventory_at_cost_cents")
     total_invested: MoneyOut = Field(validation_alias="total_invested_cents")
@@ -38,6 +51,13 @@ class DashboardRead(BaseModel):
     sales_missing_cost: int
     undated_sales: int
     products_with_negative_stock: int
+    #: Stock as the market sees it today. Covers only `priced_units` of `units_in_stock`,
+    #: never the whole shelf by assumption. Display-only: never cost or realized profit.
+    market_value: MoneyOut = Field(validation_alias="market_value_cents")
+    priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
+    unrealized_gain: MoneyOut = Field(validation_alias="unrealized_gain_cents")
+    priced_units: int
+    stale_units: int
 
     #: Lifetime cash. These ignore `period` - see the note on the dataclass.
     net_proceeds: MoneyOut = Field(validation_alias="net_proceeds_cents")

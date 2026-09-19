@@ -1,6 +1,6 @@
 {
   "name": "tcg-investments-app",
-  "version": "0.1.4",
+  "version": "0.1.7",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -25,6 +25,7 @@
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-firebase/app": "^26.4.0",
     "@react-native-firebase/crashlytics": "^26.4.0",
     "@react-native-firebase/perf": "^26.4.0",

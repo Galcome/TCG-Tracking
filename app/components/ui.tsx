@@ -31,8 +31,8 @@ export function Signed({ value, children }: PropsWithChildren<{ value: string | 
 export function Heading({ children }: PropsWithChildren) { const fonts = useTypography(); return <Text accessibilityRole="header" style={[styles.heading, { fontFamily: fonts.display }]}>{children}</Text>; }
 export function Card({ children, accent = false, style }: PropsWithChildren<{ accent?: boolean; style?: StyleProp<ViewStyle> }>) { return <View style={[styles.card, accent && { overflow: 'hidden', borderTopColor: colors.accent }, style]}>{accent ? <CardBackdrop /> : null}{children}</View>; }
 export function Row({ children }: PropsWithChildren) { return <View style={styles.row}>{children}</View>; }
-export function Disclosure({ title, children }: PropsWithChildren<{ title: string }>) {
-  const [open, setOpen] = useState(false);
+export function Disclosure({ title, children, defaultOpen = false }: PropsWithChildren<{ title: string; defaultOpen?: boolean }>) {
+  const [open, setOpen] = useState(defaultOpen);
   const fonts = useTypography();
   return <View style={{ gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel={title} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(value => !value)} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderColor: colors.edge }}>
     <Text style={{ color: colors.text, fontFamily: fonts.strong, fontSize: 16, flexShrink: 1 }}>{title}</Text><Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{open ? '−' : '+'}</Text>

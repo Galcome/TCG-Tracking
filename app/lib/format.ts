@@ -13,7 +13,27 @@ export function tone(value: string | number | null | undefined): Tone {
   if (!match || !/[1-9]/.test(match[2] + (match[3] ?? ''))) return null
   return match[1] === '-' ? 'loss' : 'gain'
 }
-export function todayIso() {
-  const d = new Date();
+/** A local calendar day as YYYY-MM-DD. Never via toISOString, which shifts to UTC. */
+export function isoFromDate(d: Date) {
   return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-');
+}
+export function todayIso(now = new Date()) {
+  return isoFromDate(now);
+}
+export function yesterdayIso(now = new Date()) {
+  return isoFromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+}
+/** Local midnight for a YYYY-MM-DD string, or null when it is not a real calendar day. */
+export function dateFromIso(value: string): Date | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return isoFromDate(d) === value ? d : null
+}
+/** "Today", "Yesterday", or a short readable day such as "Sep 12, 2026". */
+export function describeDate(value: string, now = new Date()) {
+  if (value === todayIso(now)) return 'Today'
+  if (value === yesterdayIso(now)) return 'Yesterday'
+  const d = dateFromIso(value)
+  return d ? d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Choose a date'
 }

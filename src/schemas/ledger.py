@@ -144,6 +144,61 @@ class SaleCreate(BaseModel):
         return _strip_optional(value)
 
 
+#: DeckTradr's ceiling. A show table rarely needs more, and it bounds the work per request.
+MAX_ORDER_LINES = 200
+
+
+class SaleLine(BaseModel):
+    product_id: uuid.UUID
+    quantity: int = Field(gt=0, le=MAX_QUANTITY)
+    #: What this line sold for, before the order's shared fees and shipping.
+    amount: MoneyIn
+    bucket: str = BucketField
+
+
+class SaleOrderCreate(BaseModel):
+    """Several products sold in one transaction: a show sale, or one buyer's cart.
+
+    Fees and shipping are order totals. The server shares them across the lines by price, so
+    every line's profit carries its fair part and nobody splits a fee by hand.
+    """
+
+    lines: list[SaleLine] = Field(min_length=1, max_length=MAX_ORDER_LINES)
+    platform_fees: MoneyIn = 0
+    payment_fees: MoneyIn = 0
+    shipping_paid: MoneyIn = 0
+    sale_date: date = Field(default_factory=date.today)
+    sold_by_member_id: uuid.UUID | None = None
+    marketplace: str | None = Field(default=None, max_length=120)
+    notes: str | None = None
+    #: One destination for the whole payout, or none. A split across accounts is a transfer
+    #: afterwards: dividing each leg across every line would be arithmetic nobody can check.
+    proceeds: list[ProceedsLeg] | None = Field(default=None, max_length=1)
+    allow_oversell: bool = False
+
+    @field_validator("marketplace", "notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def one_line_per_product(self) -> "SaleOrderCreate":
+        products = [line.product_id for line in self.lines]
+        if len(set(products)) != len(products):
+            raise ValueError("list each product once; raise its quantity instead")
+        if self.proceeds and self.proceeds[0].amount is not None:
+            raise ValueError("an order's payout goes to one place; leave out its amount")
+        return self
+
+
+class SaleOrderPreviewRequest(BaseModel):
+    lines: list[SaleLine] = Field(min_length=1, max_length=MAX_ORDER_LINES)
+    platform_fees: MoneyIn = 0
+    payment_fees: MoneyIn = 0
+    shipping_paid: MoneyIn = 0
+    sale_date: date = Field(default_factory=date.today)
+
+
 class SaleUpdate(BaseModel):
     quantity: int | None = Field(default=None, gt=0, le=MAX_QUANTITY)
     amount: MoneyIn | None = None
@@ -211,6 +266,8 @@ class SaleRead(BaseModel):
     bucket: str
     notes: str | None
     status: str
+    #: Shared by the lines of one multi-item sale; null for a sale recorded on its own.
+    order_id: uuid.UUID | None
 
 
 # --------------------------------------------------------------------- adjustments
@@ -390,6 +447,29 @@ class SalePreview(BaseModel):
     remaining_cost: MoneyOut
     #: True when this would sell more than is recorded, which needs allow_oversell.
     exceeds_stock: bool
+
+
+class SaleLinePreview(SalePreview):
+    product_id: uuid.UUID
+
+
+class SaleOrderPreview(BaseModel):
+    """The order's totals, and each line with its share of the fees."""
+
+    lines: list[SaleLinePreview]
+    gross: MoneyOut
+    fees: MoneyOut
+    net_proceeds: MoneyOut
+    #: null when any line has unknown cost - a partial total would read as the whole.
+    cost_basis: MoneyOutOptional
+    realized_profit: MoneyOutOptional
+    has_unknown_cost: bool
+    exceeds_stock: bool
+
+
+class SaleOrderRead(BaseModel):
+    order_id: uuid.UUID
+    sales: list[SaleRead]
 
 
 class SaleListItem(SaleRead):

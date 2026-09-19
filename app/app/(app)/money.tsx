@@ -5,7 +5,7 @@ import { View } from 'react-native'
 import { BalanceAdjustmentDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
-import { MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
+import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
 import { money } from '../../lib/format'
 import { storeCreditMeaning } from '../../lib/money-drafts'
 
@@ -17,6 +17,7 @@ const MOVEMENT_KINDS: { value: MovementKind | ''; label: string }[] = [
   { value: 'proceeds', label: MOVEMENT_LABELS.proceeds },
   { value: 'transfer', label: MOVEMENT_LABELS.transfer },
   { value: 'adjustment', label: MOVEMENT_LABELS.adjustment },
+  { value: 'expense', label: MOVEMENT_LABELS.expense },
 ]
 
 function isZeroMoney(value: string): boolean {
@@ -103,6 +104,7 @@ function MovementCard({ movement, onVoid }: { movement: Movement; onVoid: () => 
             <Copy muted>
               {movement.occurred_on ?? 'No date'}
               {movement.product_name ? ` · ${movement.product_name}` : ''}
+              {movement.expense_category ? ` · ${EXPENSE_CATEGORY_LABELS[movement.expense_category]}` : ''}
             </Copy>
           </View>
           <Copy>{money(movement.amount)}</Copy>

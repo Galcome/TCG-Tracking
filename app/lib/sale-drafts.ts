@@ -1,4 +1,4 @@
-import type { Bucket, NewSale, SalePreview } from './api'
+import type { Bucket, NewSale, NewSaleOrder, ProceedsLeg, SaleLine, SaleOrderPreview, SaleOrderPreviewInput, SalePreview } from './api'
 import { isIsoDate } from './product-drafts'
 
 export interface SaleDraft {
@@ -150,11 +150,7 @@ export function buildSalePayload(draft: SaleDraft): NewSale | null {
   const quantity = saleInteger(draft.quantity)
   if (quantity === null || !draft.bucket) return null
 
-  const proceeds = draft.proceeds.kind === 'account'
-    ? (draft.proceeds.accountId ? [{ account_id: draft.proceeds.accountId }] : [])
-    : draft.proceeds.kind === 'store'
-      ? [{ store: draft.proceeds.store.trim() }]
-      : []
+  const proceeds = proceedsLegs(draft.proceeds)
 
   return {
     product_id: draft.productId,
@@ -176,4 +172,82 @@ export function buildSalePayload(draft: SaleDraft): NewSale | null {
 export interface SalePreviewEnvelope {
   input: SalePreviewInput
   result: SalePreview
+}
+
+function proceedsLegs(proceeds: SaleProceeds): ProceedsLeg[] {
+  if (proceeds.kind === 'account') return proceeds.accountId ? [{ account_id: proceeds.accountId }] : []
+  if (proceeds.kind === 'store') return [{ store: proceeds.store.trim() }]
+  return []
+}
+
+/** A further product in a multi-item sale. The first product stays in the main draft. */
+export interface ExtraSaleLine {
+  productId: string
+  name: string
+  quantity: string
+  amount: string
+  bucket: Bucket
+}
+
+export function validateExtraLines(lines: readonly ExtraSaleLine[]): SaleValidation {
+  const errors: SaleValidation = {}
+  lines.forEach((line, index) => {
+    if (saleInteger(line.quantity) === null) errors[`line${index}`] = `${line.name}: enter a whole quantity greater than zero.`
+    else if (!saleMoney(line.amount, true)) errors[`line${index}`] = `${line.name}: enter what it sold for.`
+  })
+  return errors
+}
+
+function orderLines(draft: Partial<SaleDraft>, extras: readonly ExtraSaleLine[]): SaleLine[] | null {
+  const quantity = saleInteger(draft.quantity ?? '')
+  if (!draft.productId || !draft.bucket || quantity === null || !saleMoney(draft.amount ?? '', true)) return null
+  if (Object.keys(validateExtraLines(extras)).length > 0) return null
+  return [
+    { product_id: draft.productId, quantity, amount: draft.amount ?? '', bucket: draft.bucket },
+    ...extras.map((line) => ({
+      product_id: line.productId,
+      quantity: saleInteger(line.quantity) ?? 0,
+      amount: line.amount,
+      bucket: line.bucket,
+    })),
+  ]
+}
+
+export function orderPreviewInput(draft: Partial<SaleDraft>, extras: readonly ExtraSaleLine[]): SaleOrderPreviewInput | null {
+  const lines = orderLines(draft, extras)
+  if (!lines || !saleDate(draft.saleDate ?? '')) return null
+  return {
+    lines,
+    platform_fees: draft.platformFees || '0',
+    payment_fees: draft.paymentFees || '0',
+    shipping_paid: draft.shippingPaid || '0',
+    sale_date: draft.saleDate ?? '',
+  }
+}
+
+export function orderPreviewKey(input: SaleOrderPreviewInput): string {
+  return JSON.stringify(input)
+}
+
+export function buildSaleOrderPayload(draft: SaleDraft, extras: readonly ExtraSaleLine[]): NewSaleOrder | null {
+  if (Object.keys(validateSaleDraft(draft)).length > 0) return null
+  const lines = orderLines(draft, extras)
+  if (!lines) return null
+  return {
+    lines,
+    platform_fees: draft.platformFees || undefined,
+    payment_fees: draft.paymentFees || undefined,
+    shipping_paid: draft.shippingPaid || undefined,
+    sale_date: draft.saleDate,
+    sold_by_member_id: draft.soldByMemberId || null,
+    marketplace: draft.marketplace.trim() || null,
+    notes: draft.notes.trim() || null,
+    proceeds: proceedsLegs(draft.proceeds),
+    allow_oversell: draft.allowOversell,
+  }
+}
+
+export interface SaleOrderPreviewEnvelope {
+  input: SaleOrderPreviewInput
+  result: SaleOrderPreview
 }

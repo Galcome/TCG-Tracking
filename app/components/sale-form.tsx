@@ -11,17 +11,25 @@ import {
   type Account,
   type Bucket,
   type NewSale,
+  type NewSaleOrder,
   type Product,
+  type SaleOrderPreview,
   type SalePreview,
 } from '../lib/api'
 import {
+  buildSaleOrderPayload,
   buildSalePayload,
   isPreviewCurrent,
+  orderPreviewInput,
+  orderPreviewKey,
   previewInput,
   resolveSaleProceeds,
   salePreviewKey,
+  validateExtraLines,
   validateSaleDraft,
+  type ExtraSaleLine,
   type SaleDraft,
+  type SaleOrderPreviewEnvelope,
   type SalePreviewEnvelope,
   type SaleProceeds,
   type SaleValidation,
@@ -30,6 +38,7 @@ import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet, Signed } from './ui'
 import { AllocationEditor } from './allocation-editor'
 import { allocationError, allocationPayload, type AllocationDraft } from '../lib/allocation-drafts'
+import { DateField } from './date-field'
 
 export interface RecordSaleDialogProps {
   /** Omit to open a product picker before showing the sale fields. */
@@ -186,6 +195,30 @@ function PreviewCard({ preview }: { preview: SalePreview }) {
   )
 }
 
+function OrderPreviewCard({ preview, names }: { preview: SaleOrderPreview; names: Record<string, string> }) {
+  return (
+    <Card>
+      <Copy muted>Server preview · fees and shipping shared by price</Copy>
+      <Row>
+        <ViewMetric label="Gross" value={money(preview.gross)} />
+        <ViewMetric label="Fees" value={money(preview.fees)} />
+        <ViewMetric label="Net proceeds" value={money(preview.net_proceeds)} />
+      </Row>
+      {preview.lines.map((line) => (
+        <Text key={line.product_id} style={{ color: colors.muted }}>
+          {names[line.product_id] ?? 'Item'} · {line.quantity} sold · fees {money(line.fees)} · profit{' '}
+          {line.realized_profit === null ? 'unknown' : <Signed value={line.realized_profit}>{money(line.realized_profit)}</Signed>}
+        </Text>
+      ))}
+      <ViewMetric
+        label="Realized profit (order)"
+        value={preview.realized_profit === null ? 'Unknown' : money(preview.realized_profit)}
+        signed={preview.realized_profit}
+      />
+    </Card>
+  )
+}
+
 function ViewMetric({ label, value, signed }: { label: string; value: string; signed?: string | null }) {
   return <Text style={{ color: colors.text, minWidth: 100 }}><Text style={{ color: colors.muted }}>{label}{'\n'}</Text><Signed value={signed}>{value}</Signed></Text>
 }
@@ -212,9 +245,18 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
   const [allowOversell, setAllowOversell] = useState(false)
   const [validation, setValidation] = useState<SaleValidation>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [extras, setExtras] = useState<ExtraSaleLine[]>([])
+  const [adding, setAdding] = useState(false)
+  const [lineSearch, setLineSearch] = useState('')
+  const ordered = extras.length > 0
+  const candidates = useQuery({
+    queryKey: ['products', 'sale-line-picker', lineSearch],
+    enabled: adding,
+    queryFn: () => api.products({ q: lineSearch || undefined, stock: 'in', limit: 20 }),
+  })
   const queryClient = useQueryClient()
   const create = useMutation({
-    mutationFn: (input: NewSale) => api.createSale(input),
+    mutationFn: (input: NewSale | NewSaleOrder) => ('lines' in input ? api.createSaleOrder(input) : api.createSale(input)),
     onSuccess: async () => {
       await queryClient.invalidateQueries()
       onClose()
@@ -243,7 +285,7 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
     allowOversell,
     proceeds: proceedsSplit ? { kind: 'none' } : effectiveProceeds,
   }), [product.id, quantity, amount, platformFees, paymentFees, shippingPaid, saleDateValue, soldFrom, soldByMemberId, marketplace, notes, allowOversell, effectiveProceeds, proceedsSplit])
-  const request = useMemo(() => previewInput(draft), [draft])
+  const request = useMemo(() => (ordered ? null : previewInput(draft)), [draft, ordered])
   const requestKey = request ? salePreviewKey(request) : 'invalid'
   const preview = useQuery<SalePreviewEnvelope>({
     queryKey: ['salePreview', requestKey],
@@ -257,6 +299,42 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
     ? preview.data.result
     : null
   const availableHere = product.stats.by_bucket[soldFrom] ?? 0
+  const orderRequest = useMemo(() => (ordered ? orderPreviewInput(draft, extras) : null), [draft, extras, ordered])
+  const orderKey = orderRequest ? orderPreviewKey(orderRequest) : 'invalid'
+  const orderPreview = useQuery<SaleOrderPreviewEnvelope>({
+    queryKey: ['saleOrderPreview', orderKey],
+    enabled: orderRequest !== null,
+    queryFn: async () => {
+      if (!orderRequest) throw new Error('Order preview input is incomplete.')
+      return { input: orderRequest, result: await api.previewSaleOrder(orderRequest) }
+    },
+  })
+  const currentOrderPreview = orderRequest && orderPreview.data && orderPreviewKey(orderPreview.data.input) === orderKey
+    ? orderPreview.data.result
+    : null
+  const exceedsStock = ordered ? currentOrderPreview?.exceeds_stock : currentPreview?.exceeds_stock
+  const lineNames = useMemo(
+    () => Object.fromEntries([[product.id, product.name], ...extras.map((line) => [line.productId, line.name])]),
+    [extras, product.id, product.name],
+  )
+  const pickable = (candidates.data?.items ?? []).filter(
+    (item) => item.id !== product.id && !extras.some((line) => line.productId === item.id),
+  )
+
+  function addLine(item: Product) {
+    // An order's payout goes to one place, so a split drawn for one item no longer applies.
+    setProceedsSplit(null)
+    setExtras((current) => [
+      ...current,
+      { productId: item.id, name: item.name, quantity: '1', amount: '', bucket: fullestBucket(item.stats.by_bucket) },
+    ])
+    setAdding(false)
+    setLineSearch('')
+  }
+
+  function updateLine(index: number, patch: Partial<ExtraSaleLine>) {
+    setExtras((current) => current.map((line, at) => (at === index ? { ...line, ...patch } : line)))
+  }
 
   function chooseProceeds(next: SaleProceeds) {
     setProceeds(next)
@@ -266,7 +344,24 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
   function submit() {
     if (create.isPending || submitting.current) return
     setSubmitError(null)
-    const errors = validateSaleDraft(draft)
+    const errors = { ...validateSaleDraft(draft), ...validateExtraLines(extras) }
+    if (ordered) {
+      if (exceedsStock && !allowOversell) {
+        errors.quantity = 'Some items exceed recorded stock. Allow oversell to continue.'
+      }
+      const waiting = orderRequest !== null && orderPreview.isFetching && !currentOrderPreview
+      if (waiting) setSubmitError('Wait for the latest server preview before recording this sale.')
+      setValidation(errors)
+      if (Object.keys(errors).length > 0 || waiting) return
+      const payload = buildSaleOrderPayload(draft, extras)
+      if (!payload) {
+        setSubmitError('Complete the sale fields before recording it.')
+        return
+      }
+      submitting.current = true
+      create.mutate(payload)
+      return
+    }
     if (proceedsSplit) {
       const splitError = currentPreview ? allocationError(proceedsSplit, [currentPreview.net_proceeds]) : 'Wait for the server net payout preview before splitting proceeds.'
       if (splitError) errors.proceeds = splitError
@@ -291,12 +386,12 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
 
   return (
     <SaleSheet
-      title={`Record sale — ${product.name}`}
+      title={ordered ? `Record sale — ${extras.length + 1} items` : `Record sale — ${product.name}`}
       onClose={onClose}
       onSubmit={submit}
-      submitLabel="Record sale"
+      submitLabel={ordered ? `Record ${extras.length + 1}-item sale` : 'Record sale'}
       busy={create.isPending}
-      error={create.error ?? accountError ?? members.error ?? (submitError ? new Error(submitError) : preview.error)}
+      error={create.error ?? accountError ?? members.error ?? candidates.error ?? (submitError ? new Error(submitError) : (ordered ? orderPreview.error : preview.error))}
       validation={validation}
     >
       <Card>
@@ -305,7 +400,7 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
       </Card>
       <Row>
         <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" autoFocus />
-        <Field label="Total received" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
+        <Field label={ordered ? 'Sold for' : 'Total received'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
       </Row>
       <Choice
         label="Sold from"
@@ -314,6 +409,29 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
         onChange={(next) => setBucketOverride(next as Bucket)}
       />
       <Copy muted>{availableHere} units are recorded in {BUCKET_LABELS[soldFrom]}.</Copy>
+      {extras.map((line, index) => (
+        <Card key={line.productId}>
+          <Copy>{line.name}</Copy>
+          <Row>
+            <Field label={`Quantity of ${line.name}`} value={line.quantity} onChangeText={(value) => updateLine(index, { quantity: value })} keyboardType="number-pad" />
+            <Field label={`${line.name} sold for`} value={line.amount} onChangeText={(value) => updateLine(index, { amount: value })} keyboardType="decimal-pad" placeholder="0.00" />
+          </Row>
+          <Button label={`Remove ${line.name}`} variant="secondary" onPress={() => setExtras((current) => current.filter((_, at) => at !== index))} />
+        </Card>
+      ))}
+      {adding ? (
+        <Card>
+          <Field label="Find another product" value={lineSearch} onChangeText={setLineSearch} autoFocus />
+          {candidates.isSuccess && pickable.length === 0 ? <Copy muted>Nothing else in stock matches.</Copy> : null}
+          {pickable.map((item) => (
+            <Button key={item.id} label={`${item.name} · ${item.stats.quantity_on_hand} in stock`} variant="secondary" onPress={() => addLine(item)} />
+          ))}
+          <Button label="Cancel" variant="secondary" onPress={() => { setAdding(false); setLineSearch('') }} />
+        </Card>
+      ) : (
+        <Button label="Add another item" variant="secondary" onPress={() => setAdding(true)} />
+      )}
+      {ordered ? <Copy muted>One buyer, one payout. Fees and shipping below are for the whole order and are shared by price.</Copy> : null}
       <Choice
         label="Sold on"
         value={customMarketplace ? '__custom__' : marketplace}
@@ -335,7 +453,9 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
       {customMarketplace ? <Field label="Channel name" value={marketplace} onChangeText={setMarketplace} autoFocus placeholder="Card shop, show, trade" /> : null}
       {selectedMarketplace ? <Copy muted>{selectedMarketplace.name} usually lists a {selectedMarketplace.feePercent}% all-in cut; enter what was actually charged.</Copy> : null}
       {!proceedsSplit ? <ProceedsChoice accounts={accounts} value={effectiveProceeds} onChange={chooseProceeds} /> : null}
-      <AllocationEditor rows={proceedsSplit} onChange={setProceedsSplit} accounts={accounts} defaultAccount={effectiveProceeds.kind === 'account' ? effectiveProceeds.accountId : ''} disabled={create.isPending} />
+      {!ordered ? (
+        <AllocationEditor rows={proceedsSplit} onChange={setProceedsSplit} accounts={accounts} defaultAccount={effectiveProceeds.kind === 'account' ? effectiveProceeds.accountId : ''} disabled={create.isPending} />
+      ) : null}
       <Row>
         <Choice
           label="Sold by"
@@ -343,15 +463,16 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
           options={[option('', 'Me'), ...(members.data ?? []).map((member) => option(member.id, member.display_name))]}
           onChange={setSoldByMemberId}
         />
-        <Field label="Sale date" value={saleDateValue} onChangeText={setSaleDateValue} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+        <DateField label="Sale date" value={saleDateValue} onChange={setSaleDateValue} />
       </Row>
       <Row>
         <Field label="Platform fees" value={platformFees} onChangeText={setPlatformFees} keyboardType="decimal-pad" placeholder="0.00" />
         <Field label="Payment fees" value={paymentFees} onChangeText={setPaymentFees} keyboardType="decimal-pad" placeholder="0.00" />
         <Field label="Shipping paid" value={shippingPaid} onChangeText={setShippingPaid} keyboardType="decimal-pad" placeholder="0.00" />
       </Row>
-      {currentPreview ? <PreviewCard preview={currentPreview} /> : null}
-      {currentPreview?.exceeds_stock ? (
+      {!ordered && currentPreview ? <PreviewCard preview={currentPreview} /> : null}
+      {currentOrderPreview ? <OrderPreviewCard preview={currentOrderPreview} names={lineNames} /> : null}
+      {exceedsStock ? (
         <Card>
           <Copy muted>This sale exceeds the available quantity and would leave the extra units with unknown cost.</Copy>
           <Button label={allowOversell ? 'Oversell allowed' : 'Allow oversell'} onPress={() => setAllowOversell((current) => !current)} />

@@ -1,3 +1,4 @@
+import type { ExpenseCategory, FundingLeg } from './api'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
 export type MoneyAdjustmentDirection = 'up' | 'down'
@@ -16,6 +17,25 @@ export interface BalanceAdjustmentDraft {
   amount: string
   occurredOn: string
   notes: string
+}
+
+export interface ExpenseDraft {
+  category: ExpenseCategory
+  amount: string
+  occurredOn: string
+  /** One account that paid it all. Ignored when `split` is given. */
+  paidFrom: string
+  /** Legs already built from the split editor, validated by `allocationError`. */
+  split: FundingLeg[] | null
+  notes: string
+}
+
+export interface ExpensePayload {
+  category: ExpenseCategory
+  amount: string
+  occurred_on: string
+  paid_from: FundingLeg[]
+  notes: string | null
 }
 
 export interface VoidMovementDraft {
@@ -108,6 +128,32 @@ export function validateBalanceAdjustmentDraft(draft: Partial<BalanceAdjustmentD
   validateAmount(errors, draft.amount)
   validateDate(errors, draft.occurredOn)
   return errors
+}
+
+export function validateExpenseDraft(draft: Partial<ExpenseDraft>, today: string): MoneyValidation {
+  const errors: MoneyValidation = {}
+  if (!draft.category) errors.category = 'Choose what the expense was for.'
+  validateAmount(errors, draft.amount)
+  validateDate(errors, draft.occurredOn)
+  if (!errors.occurredOn && draft.occurredOn && draft.occurredOn > today) {
+    errors.occurredOn = 'An expense cannot be dated in the future.'
+  }
+  if (!draft.split && !draft.paidFrom) errors.accountId = 'Choose who paid.'
+  if (draft.category === 'other' && !draft.notes?.trim()) {
+    errors.notes = "Say what an 'Other' expense was in the note."
+  }
+  return errors
+}
+
+export function buildExpensePayload(draft: ExpenseDraft, today: string): ExpensePayload | null {
+  if (Object.keys(validateExpenseDraft(draft, today)).length > 0) return null
+  return {
+    category: draft.category,
+    amount: draft.amount,
+    occurred_on: draft.occurredOn,
+    paid_from: draft.split ?? [{ account_id: draft.paidFrom }],
+    notes: draft.notes.trim() || null,
+  }
 }
 
 export function validateVoidMovementDraft(draft: Partial<VoidMovementDraft>): MoneyValidation {

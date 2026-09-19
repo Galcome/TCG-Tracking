@@ -117,6 +117,8 @@ export interface CardLookupInput {
   set_name?: string
   collector_number?: string
   variant?: string
+  /** The product type name, e.g. "Booster Box". Defaults to a single. */
+  kind?: string
 }
 
 export interface TCGCSVCategory {
@@ -247,6 +249,21 @@ export interface ProductPage {
 
 export interface Dashboard {
   realized_profit: string
+  /** Overhead dated inside the period. */
+  expenses: string
+  /** Largest first; only categories with spending. */
+  expenses_by_category: { category: ExpenseCategory; amount: string }[]
+  /** Realized trading profit less overhead — the headline figure. */
+  net_profit: string
+  /** Market value of priced stock only, as of now. Display-only, never cost or profit. */
+  market_value: string
+  /** FIFO cost of those same priced units. */
+  priced_cost: string
+  unrealized_gain: string
+  /** How much of `units_in_stock` the market value covers. */
+  priced_units: number
+  stale_units: number
+  /** Trading only: overhead has no cost of sales to divide by. */
   roi: number | null
   inventory_at_cost: string
   total_invested: string
@@ -422,6 +439,48 @@ export interface SalePreview {
   quantity_available: number
   quantity_remaining: number
   remaining_cost: string
+  exceeds_stock: boolean
+}
+
+/** One line of a multi-item sale: its own product, quantity, price and bucket. */
+export interface SaleLine {
+  product_id: string
+  quantity: number
+  amount: string
+  bucket?: Bucket
+}
+
+/** Several products to one buyer. Fees and shipping are order totals the server shares by price. */
+export interface NewSaleOrder {
+  lines: SaleLine[]
+  platform_fees?: string
+  payment_fees?: string
+  shipping_paid?: string
+  sale_date?: string
+  sold_by_member_id?: string | null
+  marketplace?: string | null
+  notes?: string | null
+  /** One destination, with no amount. Omitted, it follows the seller. `[]` records none. */
+  proceeds?: ProceedsLeg[]
+  allow_oversell?: boolean
+}
+
+export interface SaleOrderPreviewInput {
+  lines: SaleLine[]
+  platform_fees: string
+  payment_fees: string
+  shipping_paid: string
+  sale_date: string
+}
+
+export interface SaleOrderPreview {
+  lines: (SalePreview & { product_id: string })[]
+  gross: string
+  fees: string
+  net_proceeds: string
+  cost_basis: string | null
+  realized_profit: string | null
+  has_unknown_cost: boolean
   exceeds_stock: boolean
 }
 
@@ -778,7 +837,29 @@ export interface AccountsPage {
   credit_stores: number
 }
 
-export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment'
+export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense'
+
+export const EXPENSE_CATEGORIES = [
+  'supplies',
+  'shipping_supplies',
+  'show_fees',
+  'subscriptions',
+  'travel',
+  'grading_fees',
+  'other',
+] as const
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  supplies: 'Supplies',
+  shipping_supplies: 'Shipping supplies',
+  show_fees: 'Show & event fees',
+  subscriptions: 'Subscriptions',
+  travel: 'Travel',
+  grading_fees: 'Grading fees',
+  other: 'Other',
+}
 
 export interface MovementLeg {
   account_id: string
@@ -798,6 +879,8 @@ export interface Movement {
   purchase_id: string | null
   sale_id: string | null
   product_name: string | null
+  /** Set on expenses only. */
+  expense_category: ExpenseCategory | null
   notes: string | null
   status: string
 }
@@ -830,6 +913,7 @@ export const MOVEMENT_LABELS: Record<MovementKind, string> = {
   proceeds: 'Sold stock',
   transfer: 'Transfer',
   adjustment: 'Adjustment',
+  expense: 'Expense',
 }
 
 export interface NewProduct {
@@ -1090,6 +1174,15 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(input),
     }),
 
+  createSaleOrder: (order: NewSaleOrder) =>
+    request<unknown>('/api/v1/sales/orders', { method: 'POST', body: JSON.stringify(order) }),
+
+  previewSaleOrder: (input: SaleOrderPreviewInput) =>
+    request<SaleOrderPreview>('/api/v1/sales/orders/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   dashboard: (period: Period) => request<Dashboard>(`/api/v1/dashboard${query({ period })}`),
 
   group: (by: GroupBy, period: Period, filters: ReportFilters = {}) =>
@@ -1238,6 +1331,19 @@ export function createApi(request: ApiRequest) { return {
 
   movements: (params: { account_id?: string; kind?: MovementKind; limit?: number; offset?: number }) =>
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
+
+  /** Overhead. `paid_from` omitted means the joint account paid. */
+  createExpense: (expense: {
+    category: ExpenseCategory
+    amount: string
+    occurred_on?: string
+    paid_from?: FundingLeg[]
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    }),
 
   /** Paying a partner back, putting cash in, and settling up are all this one call. */
   createTransfer: (transfer: {
