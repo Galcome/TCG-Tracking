@@ -31,15 +31,20 @@ try {
         Write-Output 'Local Java/Android SDK available. Release remains subject to auth, signing, exact-commit and tester acceptance.'
         return
     }
+    # Use the already authenticated local CLI directly. On Windows, repeatedly launching
+    # firebase-tools through `npx -y` can crash after a successful config download with a
+    # libuv handle assertion, leaving a valid file but a false nonzero exit code.
+    $taskFirebase = (Get-Command firebase -ErrorAction SilentlyContinue).Source
+    if ([string]::IsNullOrWhiteSpace($taskFirebase)) { throw 'Authenticated Firebase CLI unavailable' }
     if ($Command -in @('build', 'release')) {
         $taskSourceFingerprint = Get-SourceFingerprint
         New-Item -ItemType Directory -Path .native-release -Force | Out-Null
         $taskServiceSnapshot = [IO.Path]::GetFullPath((Join-Path $taskAppRoot ".native-release/google-services-$([guid]::NewGuid()).json"))
-        & npx -y firebase-tools@latest apps:sdkconfig ANDROID $target.androidAppId --project $target.firebaseProjectId --out $taskServiceSnapshot
+        & $taskFirebase apps:sdkconfig ANDROID $target.androidAppId --project $target.firebaseProjectId --out $taskServiceSnapshot
         if ($LASTEXITCODE -ne 0) { throw 'Android service config fetch failed' }
         $env:GOOGLE_SERVICES_JSON = $taskServiceSnapshot
         if (-not (Test-Path -LiteralPath .firebase-web-config.json)) {
-            & npx -y firebase-tools@latest apps:sdkconfig WEB '1:304233430839:web:2573fce7cf46858d3b64b2' --project $target.firebaseProjectId --out .firebase-web-config.json
+            & $taskFirebase apps:sdkconfig WEB '1:304233430839:web:2573fce7cf46858d3b64b2' --project $target.firebaseProjectId --out .firebase-web-config.json
             if ($LASTEXITCODE -ne 0) { throw 'Firebase web config fetch failed' }
         }
         $web = Get-Content -LiteralPath .firebase-web-config.json -Raw | ConvertFrom-Json
@@ -97,7 +102,7 @@ try {
         $taskIdentity = [regex]::Escape("package: name='$($target.androidPackage)' versionCode='$($taskConfig.expo.android.versionCode)' versionName='$($taskConfig.expo.version)'")
         if ($LASTEXITCODE -ne 0 -or $taskBadging -notmatch $taskIdentity) { throw 'APK identity/version verification failed' }
         if ([string]::IsNullOrWhiteSpace($TesterGroups) -or $TesterGroups -notmatch '^[a-zA-Z0-9_,\-]+$') { throw 'Explicit valid Firebase tester group aliases required' }
-        & npx -y firebase-tools@latest appdistribution:distribute $taskApk --app $target.androidAppId --project $target.firebaseProjectId --groups $TesterGroups --release-notes 'TCG universal Android internal beta; live Vite website unchanged. Device acceptance pending.'
+        & $taskFirebase appdistribution:distribute $taskApk --app $target.androidAppId --project $target.firebaseProjectId --groups $TesterGroups --release-notes 'TCG universal Android internal beta; live Vite website unchanged. Device acceptance pending.'
         if ($LASTEXITCODE -ne 0) { throw 'Firebase distribution failed; local APK retained' }
     }
 } finally { Pop-Location }
