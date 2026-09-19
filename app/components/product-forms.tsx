@@ -40,6 +40,8 @@ export interface ProductFormsProps {
   /** A transaction is required for `transaction` and `void` modes. */
   transaction?: Transaction
   mode: ProductFormMode
+  /** Prefills the name in `add` mode, e.g. from an empty stock search. */
+  initialName?: string
   onClose: () => void
 }
 
@@ -212,12 +214,12 @@ function AccountChoice({
   return <Choice label={label} value={value} options={accountOptions} onChange={onChange} />
 }
 
-function AddProductForm({ onClose }: { onClose: () => void }) {
+function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; initialName?: string }) {
   const api = useApi()
   const { games, productTypes } = useGamesAndTypes()
   const { accounts, mine, error: accountError } = useAccounts()
-  const [name, setName] = useState('')
-  const [nameTouched, setNameTouched] = useState(false)
+  const [name, setName] = useState(initialName)
+  const [nameTouched, setNameTouched] = useState(Boolean(initialName))
   const [gameId, setGameId] = useState('')
   const [productTypeId, setProductTypeId] = useState('')
   const [setLabel, setSetLabel] = useState('')
@@ -856,10 +858,10 @@ function VoidForm({ transaction, onClose }: { transaction: Transaction; onClose:
 }
 
 /** Unified entry point used by domain screens; only implemented modes are exposed. */
-export function ProductForms({ mode, product, transaction, onClose }: ProductFormsProps) {
+export function ProductForms({ mode, product, transaction, initialName, onClose }: ProductFormsProps) {
   switch (mode) {
     case 'add':
-      return <AddProductForm onClose={onClose} />
+      return <AddProductForm onClose={onClose} initialName={initialName} />
     case 'edit':
       return product ? <EditProductForm product={product} onClose={onClose} /> : <MissingProduct mode={mode} onClose={onClose} />
     case 'purchase':

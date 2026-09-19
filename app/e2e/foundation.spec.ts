@@ -1187,6 +1187,35 @@ test('an expense takes two fields from Add, pays from joint and lowers net profi
   expect((await board()).net_profit).toBe(before.net_profit);
 });
 
+test('common actions sit one tap from where they are needed', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const name = 'Tap trim box ' + Date.now();
+  const box = await (await request.post(API + '/api/v1/products', { data: {
+    name, game_id: games[0].id, product_type_id: types.find((t: { slug: string }) => t.slug === 'booster-box').id,
+    initial_purchase: { quantity: 1, amount: '50.00', purchase_date: '2025-01-01', funding: [] },
+  } })).json();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: 'Rip a box', exact: true }).click();
+  await page.getByLabel('Find a box or pack', { exact: true }).fill(name);
+  await page.getByRole('button', { name: `Rip ${name} · 1 in stock`, exact: true }).click();
+  const rip = page.getByRole('dialog', { name: 'Rip open — ' + name, exact: true });
+  await expect(rip).toBeVisible();
+  await rip.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await page.goto('/products/' + box.id);
+  await expect(page.getByRole('button', { name: 'Add purchase', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rip open', exact: true })).toBeVisible();
+
+  const missing = 'Nothing like this ' + Date.now();
+  await page.goto('/inventory');
+  await page.getByLabel('Search products', { exact: true }).fill(missing);
+  await page.getByRole('button', { name: `Add "${missing}"`, exact: true }).click();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(missing);
+});
+
 test('sale preview, store-credit proceeds and void preserve server money and stock', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
