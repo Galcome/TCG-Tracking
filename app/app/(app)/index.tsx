@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
-import { Button, Card, Copy, Disclosure, ErrorNotice, Heading, Loading, Page, Row } from '../../components/ui';
+import { Button, Card, Copy, Disclosure, ErrorNotice, Heading, Loading, Page, Row, Signed, toneColor } from '../../components/ui';
 import { router } from 'expo-router';
 import { PeriodSelector } from '../../components/period-selector';
 import { MonthlyTrend } from '../../components/monthly-trend';
@@ -30,16 +30,18 @@ function MetricTile({
   value,
   detail,
   slot,
+  signed,
 }: {
   label: string;
   value: string;
   detail: string;
   slot: MetricSlotProps;
+  signed?: string | null;
 }) {
   const fonts = useTypography();
   return <View style={slotStyle(slot)}><Card style={{ flex: 1 }}>
     <Text style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 12 }} allowFontScaling>{label}</Text>
-    <Text style={{ color: colors.text, fontFamily: fonts.display, fontSize: 22, lineHeight: 28, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1 }} allowFontScaling>{value}</Text>
+    <Text style={{ color: toneColor(signed) ?? colors.text, fontFamily: fonts.display, fontSize: 22, lineHeight: 28, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1 }} allowFontScaling>{value}</Text>
     <Copy muted>{detail}</Copy>
   </Card></View>;
 }
@@ -88,8 +90,8 @@ function HeroProfit({
   const heroSize = Math.max(20, Math.min(baseSize, Math.floor(availableWidth / Math.max(displayValue.length * 0.58, 1))));
   return <Card accent>
     <Copy muted>Realized profit</Copy>
-    <Text style={{ color: colors.text, fontFamily: fonts.display, fontSize: heroSize, lineHeight: heroSize + 8, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1, maxWidth: '100%' }} allowFontScaling>{displayValue}</Text>
-    <Row><Copy>ROI {percent(roi)}</Copy><Copy muted>{saleCount} sale{saleCount === 1 ? '' : 's'} · {money(costOfSales)} sold cost</Copy></Row>
+    <Text style={{ color: toneColor(realizedProfit) ?? colors.text, fontFamily: fonts.display, fontSize: heroSize, lineHeight: heroSize + 8, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1, maxWidth: '100%' }} allowFontScaling>{displayValue}</Text>
+    <Row><Copy>ROI <Signed value={roi}>{percent(roi)}</Signed></Copy><Copy muted>{saleCount} sale{saleCount === 1 ? '' : 's'} · {money(costOfSales)} sold cost</Copy></Row>
   </Card>;
 }
 
@@ -114,7 +116,7 @@ export default function Dashboard() {
     <MetricGrid>
       <MetricTile label="Stock at cost" value={money(data.inventory_at_cost)} detail={`${data.units_in_stock} unit${data.units_in_stock === 1 ? '' : 's'} · all time`} slot={slot} />
       <MetricTile label="Sales" value={money(data.total_sales)} detail={`${data.sale_count} recorded · selected period`} slot={slot} />
-      <MetricTile label="Cash" value={money(data.cash_balance)} detail="all time" slot={slot} />
+      <MetricTile label="Cash" value={money(data.cash_balance)} signed={data.cash_balance} detail="all time" slot={slot} />
       <MetricTile label="Invested" value={money(data.total_invested)} detail="all time" slot={slot} />
     </MetricGrid>
     <Card><Disclosure title="Period cost and trading"><MetricGrid>
@@ -146,7 +148,7 @@ export default function Dashboard() {
       {games.isPending ? <Loading /> : null}
       {games.data?.length === 0 ? <Copy muted>No game activity in this period.</Copy> : null}
       {games.data?.map(game => <Card key={game.key}><Copy>{game.label}</Copy><Row>
-        <Copy>Profit {money(game.realized_profit)}</Copy><Copy>ROI {percent(game.roi)}</Copy>
+        <Copy>Profit <Signed value={game.realized_profit}>{money(game.realized_profit)}</Signed></Copy><Copy>ROI <Signed value={game.roi}>{percent(game.roi)}</Signed></Copy>
         <Copy>{game.sale_count} sales</Copy></Row></Card>)}
     </Disclosure></Card>
     <Card><Disclosure title="Recent sales">
@@ -155,7 +157,7 @@ export default function Dashboard() {
       {recent.data?.items.length === 0 ? <Copy muted>No sales in this period.</Copy> : null}
       {recent.data?.items.map(sale => <Card key={sale.id}><Copy>{sale.product.name}</Copy><Row>
         <Copy>{sale.sale_date ?? 'Undated'} · {sale.quantity} units</Copy><Copy>Gross {money(sale.amount)}</Copy>
-        <Copy>Profit {money(sale.realized_profit)}</Copy></Row>
+        <Copy>Profit <Signed value={sale.has_unknown_cost ? null : sale.realized_profit}>{money(sale.realized_profit)}</Signed></Copy></Row>
         {sale.has_unknown_cost ? <Copy muted>Unknown cost: profit may be incomplete.</Copy> : null}
         <Button label={`View ${sale.product.name}`} onPress={() => router.push({ pathname: '/products/[productId]', params: { productId: sale.product_id } })} />
         <Button label={`Edit sale: ${sale.product.name}`} disabled={sale.status === 'voided'} onPress={() => setEditing(sale)} />

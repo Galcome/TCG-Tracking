@@ -3,7 +3,7 @@ import { router } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
 import { View } from 'react-native'
 
-import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
+import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row, Signed } from '../../components/ui'
 import { PeriodSelector } from '../../components/period-selector'
 import { CsvButton } from '../../components/csv-button'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
@@ -73,7 +73,7 @@ function SaleRowCard({
       </Row>
       <Row>
         <Copy>
-          Profit {row.has_unknown_cost ? 'Unknown' : money(row.realized_profit)}
+          Profit {row.has_unknown_cost ? 'Unknown' : <Signed value={row.realized_profit}>{money(row.realized_profit)}</Signed>}
         </Copy>
         <Copy muted>Sold by {memberName || 'Unassigned'}</Copy>
         <Copy muted>{statusLabel(row)}</Copy>

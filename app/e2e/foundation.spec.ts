@@ -394,6 +394,9 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   await expect(trend.getByText('Spent $90,071,992,547,409.92', { exact: true })).toBeVisible();
   await expect(trend.getByText('Revenue $0.00', { exact: true })).toBeVisible();
   await expect(trend.getByText('Realized profit -$0.01', { exact: true })).toBeVisible();
+  // Signed figures carry the theme's gain/loss tones; costs stay neutral.
+  await expect(trend.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
+  await expect(page.getByText('$90,071,992,547,409.91', { exact: true }).first()).toHaveCSS('color', 'rgb(116, 228, 179)');
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();

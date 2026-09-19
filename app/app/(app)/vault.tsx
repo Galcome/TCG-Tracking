@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { Text, View } from 'react-native'
 
 import { RecordValuationDialog } from '../../components/valuation-form'
-import { Button, Card, Copy, Disclosure, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui'
+import { Button, Card, Copy, Disclosure, ErrorNotice, Field, Loading, Page, Row, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors, useResponsiveLayout } from '../../context/ThemeContext'
 import { useTypography } from '../../context/TypographyContext'
@@ -120,11 +120,13 @@ function SummaryMetric({
   value,
   detail,
   slot,
+  signed,
 }: {
   label: string
   value: string
   detail?: string
   slot: MetricSlotProps
+  signed?: string | null
 }) {
   const fonts = useTypography()
   return (
@@ -134,7 +136,7 @@ function SummaryMetric({
       </Text>
       <Text
         style={{
-          color: colors.text,
+          color: toneColor(signed) ?? colors.text,
           fontFamily: fonts.display,
           fontSize: 21,
           lineHeight: 27,
@@ -176,7 +178,7 @@ function HoldingCard({
           <SummaryMetric label="Cost" value={money(holding.cost)} detail="total holding cost" slot={slot} />
           <SummaryMetric label="Units" value={String(holding.units)} detail="in Vault" slot={slot} />
           <SummaryMetric label="Manual value · per unit" value={holding.value === null ? 'Unknown' : money(holding.value)} detail={holding.value === null ? 'Record a valuation when ready' : 'estimate, not cost'} slot={slot} />
-          <SummaryMetric label="Appreciation · unrealized" value={holding.appreciation === null ? 'Unknown' : signedMoney(holding.appreciation)} detail={holding.appreciation_pct === null ? undefined : percent(holding.appreciation_pct)} slot={slot} />
+          <SummaryMetric label="Appreciation · unrealized" value={holding.appreciation === null ? 'Unknown' : signedMoney(holding.appreciation)} signed={holding.appreciation} detail={holding.appreciation_pct === null ? undefined : percent(holding.appreciation_pct)} slot={slot} />
         </View>
 
         <Disclosure title="Valuation details">

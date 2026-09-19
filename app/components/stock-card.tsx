@@ -4,7 +4,7 @@ import { useTypography } from '../context/TypographyContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product } from '../lib/api';
 import { money } from '../lib/format';
 import { GameIdentity } from './game-identity';
-import { Button, Card, Copy, Row } from './ui';
+import { Button, Card, Copy, Row, Signed } from './ui';
 
 export function StockCard({ product: p, bucket, dense, onDetails, onSell, onMove, onEdit, onRip }: {
   product: Product; bucket: Bucket | ''; dense: boolean;
@@ -27,7 +27,7 @@ export function StockCard({ product: p, bucket, dense, onDetails, onSell, onMove
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}
     </View>
     <View style={{ flexGrow: 1, flexBasis: dense ? 250 : undefined, gap: 6 }}>
-      <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit {money(p.stats.realized_profit)}</Copy></Row>
+      <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
       {p.market_estimate?.value ? <Copy muted>Estimate {money(p.market_estimate.value)} / unit · {p.market_estimate.status}</Copy> : null}
     </View>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />
