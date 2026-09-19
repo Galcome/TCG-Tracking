@@ -89,6 +89,7 @@ test('a priced card takes the catalog price, set and listing', () => {
   assert.equal(done.price, '12.50')
   assert.equal(done.setName, 'Surging Sparks')
   assert.equal(done.collectorNumber, '057/191')
+  assert.equal(done.variant, 'Holofoil')
   assert.deepEqual(done.listing, { productId: 7, groupId: 900001, categoryId: 3, subtype: 'Holofoil' })
 })
 
@@ -229,16 +230,18 @@ function candidate(overrides: Partial<ProductCandidate> = {}): ProductCandidate 
 }
 
 test('an existing raw single is reused only when it is plainly the same card', () => {
-  const item = { name: 'Pikachu ex', setName: 'Surging Sparks', collectorNumber: '057/191', variant: 'Holo' }
+  const item = { name: 'Pikachu ex', setName: 'Surging Sparks', collectorNumber: '057/191', variant: 'Holofoil' }
 
   assert.equal(matchingProduct([candidate()], item)?.id, 'p1')
   assert.equal(matchingProduct([candidate({ collector_number: '238/191' })], item), null)
+  assert.equal(matchingProduct([candidate({ variant: 'Reverse Holofoil' })], item), null)
+  assert.equal(matchingProduct([candidate({ variant: null })], { ...item, variant: '' })?.id, 'p1')
   assert.equal(matchingProduct([candidate({ grade: '10' })], item), null)
   assert.equal(matchingProduct([candidate({ product_type: { ...candidate().product_type, slug: 'booster-box' } })], item), null)
   // Two that fit is a choice for a person, not a guess.
   assert.equal(matchingProduct([candidate(), candidate({ id: 'p2' })], item), null)
 
-  const unnumbered = { ...item, collectorNumber: '' }
+  const unnumbered = { ...item, collectorNumber: '', variant: 'Holo' }
   assert.equal(matchingProduct([candidate({ collector_number: null })], unnumbered), null)
   assert.equal(matchingProduct([candidate({ collector_number: null, variant: 'holo' })], unnumbered)?.id, 'p1')
 })

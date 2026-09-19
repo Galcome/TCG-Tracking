@@ -89,6 +89,7 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
     ...item,
     setName: lookup.set_name ?? item.setName,
     collectorNumber: item.collectorNumber || chosen.listing.number || '',
+    variant: chosen.subtype,
     // A price the person already typed wins over one that arrived after it.
     price: item.price || chosen.market || '',
     status: chosen.market ? 'priced' : 'unpriced',
@@ -235,12 +236,13 @@ export function matchingProduct(
   candidates: readonly ProductCandidate[],
   item: Pick<ScanItem, 'name' | 'setName' | 'collectorNumber' | 'variant'>,
 ): ProductCandidate | null {
+  const numberedWithoutPrinting = Boolean(cardNumber(item.collectorNumber)) && !normal(item.variant)
   const fits = candidates.filter((candidate) =>
     SINGLE_TYPES.includes(candidate.product_type.slug) &&
     !candidate.grading_company && !candidate.grade && !candidate.cert_number &&
     normal(candidate.name) === normal(item.name) &&
     normal(candidate.set_name) === normal(item.setName) &&
     cardNumber(candidate.collector_number) === cardNumber(item.collectorNumber) &&
-    (Boolean(cardNumber(item.collectorNumber)) || normal(candidate.variant) === normal(item.variant)))
+    (numberedWithoutPrinting || normal(candidate.variant) === normal(item.variant)))
   return fits.length === 1 ? fits[0] : null
 }
