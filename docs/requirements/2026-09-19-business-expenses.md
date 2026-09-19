@@ -27,9 +27,11 @@ overstated by all overhead, and there's no yearly total for taxes.
 - **Home** shows **Net profit = realized profit − expenses** for the selected period as
   the headline. Realized (trading) profit and the expenses total sit beside it, so both
   numbers stay visible. ROI stays on trading only, and is labelled that way.
-- **Money** gets an Expenses filter on the movements list. **Reports** gets expenses by
-  category and month, and includes them in the CSV export.
-- An expense can be edited or voided like other money movements (void, never delete).
+- **Money** gets an Expenses filter on the movements list. **Home** breaks the period's
+  expenses down by category. **Reports** exports an expenses CSV. A by-month expense rollup
+  is a follow-up.
+- An expense is corrected by voiding it and entering it again (void, never delete). There is
+  no edit, so the audit trail stays a plain sequence of entries.
 
 ## Out of scope (deliberately)
 
@@ -61,6 +63,7 @@ overstated by all overhead, and there's no yearly total for taxes.
 - An expense posts legs only against its paying accounts. The counterparty is the P&L, not an
   account, so balances stay consistent with how funding legs already post.
 - `reporting.dashboard` adds `expenses_cents` and `net_profit_cents` for the period. The API
-  and both clients (Expo and web) show them with the money-tone rule.
+  and the Expo app show them with the money-tone rule. The legacy web client gets them at
+  the Expo cutover, not before.
 - 100% backend coverage. App unit tests cover the form and Playwright covers "add expense →
   Home net profit drops".
