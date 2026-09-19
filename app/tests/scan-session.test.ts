@@ -8,6 +8,7 @@ import {
   newCards,
   scanKey,
   scanReadyError,
+  scanReviewError,
   scanReducer,
   scanTotal,
   type ScanItem,
@@ -161,14 +162,50 @@ test('adding needs every row priced and nothing still pricing', () => {
   let items = seen(card())
   assert.equal(scanReadyError(items), 'Still pricing a card.')
   items = scanReducer(items, { type: 'failed', key: items[0].key, message: 'x' })
-  assert.equal(scanReadyError(items), 'Enter a price for Pikachu ex.')
-  items = scanReducer(items, { type: 'price', key: items[0].key, price: '3' })
+  assert.equal(scanReadyError(items), 'Review Pikachu ex before saving.')
+  items = scanReducer(items, { type: 'reviewed', key: items[0].key })
+  assert.equal(scanReadyError(items), 'Enter what you paid for Pikachu ex.')
+  items = scanReducer(items, { type: 'paid', key: items[0].key, paidEach: '3' })
   assert.equal(scanReadyError(items), null)
 })
 
-test('a line costs price times copies', () => {
-  assert.equal(lineTotal({ price: '12.50', quantity: 3 }), '37.50')
-  assert.equal(lineTotal({ price: '', quantity: 1 }), null)
+test('a purchase line uses paid cost, never the market estimate', () => {
+  assert.equal(lineTotal({ paidEach: '12.50', quantity: 3 }), '37.50')
+  assert.equal(lineTotal({ paidEach: '', quantity: 1 }), null)
+})
+
+test('rip review requires confirmation but not a paid cost', () => {
+  let items = seen(card())
+  items = scanReducer(items, { type: 'failed', key: items[0].key, message: 'x' })
+  assert.equal(scanReviewError(items), 'Review Pikachu ex before saving.')
+  items = scanReducer(items, { type: 'reviewed', key: items[0].key })
+  assert.equal(scanReviewError(items), null)
+})
+
+test('the person can choose an ambiguous catalog listing and edit identity before confirming', () => {
+  const ambiguous = lookup({
+    suggested_index: null,
+    candidates: [lookup().candidates[0], {
+      ...lookup().candidates[0],
+      listing: { ...lookup().candidates[0].listing, product_id: 8, number: '238/191' },
+      subtype: 'Reverse Holofoil',
+      market: '20.00',
+    }],
+  })
+  let items = seen(card())
+  items = scanReducer(items, { type: 'priced', key: items[0].key, lookup: ambiguous })
+  assert.equal(scanReviewError(items), 'Choose the catalog match for Pikachu ex.')
+  items = scanReducer(items, { type: 'listing', key: items[0].key, index: 1 })
+  assert.equal(items[0].collectorNumber, '238/191')
+  assert.equal(items[0].variant, 'Reverse Holofoil')
+  assert.equal(items[0].price, '20.00')
+  assert.equal(items[0].listing?.productId, 8)
+  items = scanReducer(items, { type: 'reviewed', key: items[0].key })
+  items = scanReducer(items, { type: 'identity', key: items[0].key, field: 'language', value: 'Japanese' })
+  assert.equal(items[0].language, 'Japanese')
+  assert.equal(items[0].reviewed, false)
+  assert.equal(items[0].listing, null)
+  assert.equal(items[0].price, '')
 })
 
 function candidate(overrides: Partial<ProductCandidate> = {}): ProductCandidate {

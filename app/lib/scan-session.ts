@@ -1,4 +1,4 @@
-import type { CardLookup, ProductCandidate, ReadCard } from './api'
+import type { CardLookup, PricedListing, ProductCandidate, ReadCard } from './api'
 import { decimalCents } from './money-drafts'
 
 /**
@@ -16,8 +16,14 @@ export interface ScanItem {
   quantity: number
   /** CAD per copy, as a decimal string. Empty when there is no price yet. */
   price: string
+  /** What the owner actually paid per copy. Never populated from a market quote. */
+  paidEach: string
   status: 'pricing' | 'priced' | 'unpriced'
   message: string | null
+  /** Every card must be explicitly reviewed before it can be saved. */
+  reviewed: boolean
+  candidates: PricedListing[]
+  catalogSetName: string | null
   /** The catalog listing the price came from, so an added product can be mapped to it. */
   listing: { productId: number; groupId: number; categoryId: number; subtype: string } | null
 }
@@ -28,6 +34,10 @@ export type ScanAction =
   | { type: 'failed'; key: string; message: string }
   | { type: 'quantity'; key: string; delta: number }
   | { type: 'price'; key: string; price: string }
+  | { type: 'paid'; key: string; paidEach: string }
+  | { type: 'identity'; key: string; field: 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'; value: string }
+  | { type: 'listing'; key: string; index: number }
+  | { type: 'reviewed'; key: string }
   | { type: 'remove'; key: string }
   | { type: 'clear' }
 
@@ -68,8 +78,10 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
     return {
       ...item,
       status: 'unpriced',
+      candidates: lookup.candidates,
+      catalogSetName: lookup.set_name,
       message: lookup.message ?? (lookup.candidates.length
-        ? 'Several listings fit. Enter the price.'
+        ? 'Several listings fit. Choose the right one.'
         : 'No catalog listing found. Enter the price.'),
     }
   }
@@ -80,6 +92,8 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
     // A price the person already typed wins over one that arrived after it.
     price: item.price || chosen.market || '',
     status: chosen.market ? 'priced' : 'unpriced',
+    candidates: lookup.candidates,
+    catalogSetName: lookup.set_name,
     message: chosen.market ? null : (lookup.message ?? 'The catalog has no price for this printing.'),
     listing: {
       productId: chosen.listing.product_id,
@@ -103,8 +117,12 @@ export function scanReducer(items: ScanItem[], action: ScanAction): ScanItem[] {
           language: card.language.trim(),
           quantity: 1,
           price: '',
+          paidEach: '',
           status: 'pricing',
           message: null,
+          reviewed: false,
+          candidates: [],
+          catalogSetName: null,
           listing: null,
         })),
         ...items,
@@ -123,6 +141,45 @@ export function scanReducer(items: ScanItem[], action: ScanAction): ScanItem[] {
       })
     case 'price':
       return items.map((item) => item.key === action.key ? { ...item, price: action.price } : item)
+    case 'paid':
+      return items.map((item) => item.key === action.key ? { ...item, paidEach: action.paidEach } : item)
+    case 'identity':
+      return items.map((item) => item.key === action.key
+        ? {
+          ...item,
+          [action.field]: action.value,
+          price: '',
+          status: 'unpriced',
+          message: 'Identity changed. Choose a catalog match or enter a market estimate.',
+          listing: null,
+          reviewed: false,
+        }
+        : item)
+    case 'listing':
+      return items.map((item) => {
+        if (item.key !== action.key) return item
+        const chosen = item.candidates[action.index]
+        if (!chosen) return item
+        return {
+          ...item,
+          name: chosen.listing.name,
+          setName: item.catalogSetName ?? item.setName,
+          collectorNumber: chosen.listing.number ?? item.collectorNumber,
+          variant: chosen.subtype,
+          price: chosen.market ?? '',
+          status: chosen.market ? 'priced' : 'unpriced',
+          message: chosen.market ? null : 'The catalog has no price for this printing.',
+          listing: {
+            productId: chosen.listing.product_id,
+            groupId: chosen.listing.group_id,
+            categoryId: chosen.listing.category_id,
+            subtype: chosen.subtype,
+          },
+          reviewed: false,
+        }
+      })
+    case 'reviewed':
+      return items.map((item) => item.key === action.key ? { ...item, reviewed: true } : item)
     case 'remove':
       return items.filter((item) => item.key !== action.key)
     case 'clear':
@@ -144,17 +201,27 @@ export function scanTotal(items: readonly ScanItem[]): string {
   return centsText(total)
 }
 
-/** Every row needs a price before it becomes inventory: a purchase has to cost something. */
+/** Direct inventory adds need an explicit paid cost; a catalog quote is never a purchase cost. */
 export function scanReadyError(items: readonly ScanItem[]): string | null {
-  if (!items.length) return 'Scan at least one card.'
-  if (items.some((item) => item.status === 'pricing')) return 'Still pricing a card.'
-  const missing = items.find((item) => decimalCents(item.price.trim()) === null)
-  return missing ? `Enter a price for ${missing.name}.` : null
+  const reviewError = scanReviewError(items)
+  if (reviewError) return reviewError
+  const missing = items.find((item) => decimalCents(item.paidEach.trim()) === null)
+  return missing ? `Enter what you paid for ${missing.name}.` : null
 }
 
-/** What a row costs as one purchase: price per copy times copies, in exact cents. */
-export function lineTotal(item: Pick<ScanItem, 'price' | 'quantity'>): string | null {
-  const cents = decimalCents(item.price.trim())
+/** Scanned identity and any suggested catalog printing require a human confirmation. */
+export function scanReviewError(items: readonly ScanItem[]): string | null {
+  if (!items.length) return 'Scan at least one card.'
+  if (items.some((item) => item.status === 'pricing')) return 'Still pricing a card.'
+  const ambiguous = items.find((item) => item.candidates.length > 0 && !item.listing)
+  if (ambiguous) return `Choose the catalog match for ${ambiguous.name}.`
+  const unreviewed = items.find((item) => !item.reviewed)
+  return unreviewed ? `Review ${unreviewed.name} before saving.` : null
+}
+
+/** What a row costs as one purchase: user-entered paid price times copies, in exact cents. */
+export function lineTotal(item: Pick<ScanItem, 'paidEach' | 'quantity'>): string | null {
+  const cents = decimalCents(item.paidEach.trim())
   return cents === null ? null : centsText(cents * BigInt(item.quantity))
 }
 

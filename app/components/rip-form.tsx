@@ -37,7 +37,7 @@ import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
 import { PhotoReader } from './photo-reader'
 import { CardScanner, canLiveScan } from './card-scanner'
-import type { ScanItem } from '../lib/scan-session'
+import { scanReviewError, type ScanItem } from '../lib/scan-session'
 
 export interface RipDialogProps {
   product: Product
@@ -637,7 +637,7 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
         gameId={product.game.id}
         title="Scan the hits"
         doneLabel="Add to hits"
-        validate={(items) => items.some((item) => item.status === 'pricing') ? 'Still pricing a card.' : null}
+        validate={scanReviewError}
         onDone={appendScannedCards}
         onClose={() => setScanning(false)}
       />
