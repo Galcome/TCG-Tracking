@@ -45,6 +45,12 @@ os.environ["SENTRY_DSN"] = ""
 os.environ["GEMINI_API_KEY"] = ""
 # Pinned so an assertion about the request URL does not change when the default does.
 os.environ["GEMINI_MODEL"] = "gemini-flash-lite-latest"
+os.environ["GROQ_API_KEY"] = ""
+os.environ["GROQ_MODEL"] = "meta-llama/llama-4-scout-17b-16e-instruct"
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["ANTHROPIC_MODEL"] = "claude-haiku-4-5-20251001"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_MODEL"] = "gpt-5.6-luna"
 
 from src.auth import get_current_user  # noqa: E402
 from src.database import engine  # noqa: E402

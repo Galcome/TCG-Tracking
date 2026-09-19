@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     # Sentry.
     sentry_dsn: str = ""
 
-    #: Reads card names off a photo on the rip screen. Optional: with no key the
+    #: First in the model chain (`src/services/ai.py`) that reads card photos and settles
+    #: catalog matches code cannot. Optional: with no key in the whole chain the camera
     #: button is simply absent and every screen works exactly as it does now.
     gemini_api_key: str = ""
 
@@ -58,6 +59,15 @@ class Settings(BaseSettings):
     #: The `-latest` aliases track the current generation, so they do not rot; a
     #: specific version can still be set here when a rollout misbehaves.
     gemini_model: str = "gemini-flash-lite-latest"
+
+    #: Fallbacks, tried in this order when the one before fails or answers nonsense. Each
+    #: is skipped while its key is blank, so any one key switches the feature on.
+    groq_api_key: str = ""
+    groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5.6-luna"
 
     @field_validator("database_url", "direct_database_url")
     @classmethod
