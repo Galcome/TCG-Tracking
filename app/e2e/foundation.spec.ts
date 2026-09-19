@@ -199,6 +199,35 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
   expect(proceeds.legs.some((leg: { account_kind: string }) => leg.account_kind === 'store_credit')).toBe(true);
 });
 
+test('one sale form records several products to one buyer with shared fees', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const single = types.find((item: { slug: string }) => item.slug === 'single').id;
+  const make = async (name: string) => (await (await request.post(API + '/api/v1/products', { data: { name, game_id: games[0].id,
+    product_type_id: single, initial_purchase: { quantity: 1, amount: '5.00', funding: [] } } })).json());
+  const first = await make('Order line Pikachu');
+  const second = await make('Order line Eevee');
+  await signIn(page);
+  await page.goto('/products/' + first.id);
+  await page.getByRole('button', { name: 'Record sale', exact: true }).click();
+  await page.getByLabel('Total received', { exact: true }).fill('20.00');
+  await page.getByRole('button', { name: 'Add another item', exact: true }).click();
+  await page.getByLabel('Find another product', { exact: true }).fill('Order line Eevee');
+  await page.getByRole('button', { name: 'Order line Eevee · 1 in stock', exact: true }).click();
+  await expect(page.getByLabel('Sold for', { exact: true })).toHaveValue('20.00');
+  await page.getByLabel('Order line Eevee sold for', { exact: true }).fill('30.00');
+  await page.getByLabel('Platform fees', { exact: true }).fill('5.00');
+  await expect(page.getByText('Realized profit (order)')).toBeVisible();
+  await expect(page.getByText(/Order line Eevee · 1 sold · fees \$3\.00/)).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Record 2-item sale', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const sales = (await (await request.get(API + '/api/v1/sales?limit=200')).json()).items
+    .filter((sale: { product_id: string }) => sale.product_id === first.id || sale.product_id === second.id);
+  expect(sales).toHaveLength(2);
+  expect(new Set(sales.map((sale: { order_id: string }) => sale.order_id)).size).toBe(1);
+  expect(sales.map((sale: { platform_fees: string }) => sale.platform_fees).sort()).toEqual(['2.00', '3.00']);
+});
+
 test('optional grading valuations retry separately from committed grading and preserve zero', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();

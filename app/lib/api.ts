@@ -440,6 +440,48 @@ export interface SalePreview {
   exceeds_stock: boolean
 }
 
+/** One line of a multi-item sale: its own product, quantity, price and bucket. */
+export interface SaleLine {
+  product_id: string
+  quantity: number
+  amount: string
+  bucket?: Bucket
+}
+
+/** Several products to one buyer. Fees and shipping are order totals the server shares by price. */
+export interface NewSaleOrder {
+  lines: SaleLine[]
+  platform_fees?: string
+  payment_fees?: string
+  shipping_paid?: string
+  sale_date?: string
+  sold_by_member_id?: string | null
+  marketplace?: string | null
+  notes?: string | null
+  /** One destination, with no amount. Omitted, it follows the seller. `[]` records none. */
+  proceeds?: ProceedsLeg[]
+  allow_oversell?: boolean
+}
+
+export interface SaleOrderPreviewInput {
+  lines: SaleLine[]
+  platform_fees: string
+  payment_fees: string
+  shipping_paid: string
+  sale_date: string
+}
+
+export interface SaleOrderPreview {
+  lines: (SalePreview & { product_id: string })[]
+  gross: string
+  fees: string
+  net_proceeds: string
+  cost_basis: string | null
+  realized_profit: string | null
+  has_unknown_cost: boolean
+  exceeds_stock: boolean
+}
+
 /**
  * The channels worth a one-tap chip, each with the cut it usually takes.
  *
@@ -1126,6 +1168,15 @@ export function createApi(request: ApiRequest) { return {
     sale_date?: string
   }) =>
     request<SalePreview>('/api/v1/sales/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  createSaleOrder: (order: NewSaleOrder) =>
+    request<unknown>('/api/v1/sales/orders', { method: 'POST', body: JSON.stringify(order) }),
+
+  previewSaleOrder: (input: SaleOrderPreviewInput) =>
+    request<SaleOrderPreview>('/api/v1/sales/orders/preview', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
