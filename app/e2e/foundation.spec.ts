@@ -1261,6 +1261,45 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   const accountsAfterVoid = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterVoid.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('0.00');
 });
+test('adding a product can start from the price catalog and saves its mapping', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const knownSets = await (await request.get(API + '/api/v1/sets?game=' + games[0].slug)).json();
+  const setName = knownSets.items[0].name;
+  const unique = 'Catalog Pikachu ' + Date.now();
+  let asked: Record<string, string> | undefined;
+  await page.route(API + '/api/v1/pricing/lookup', route => {
+    asked = route.request().postDataJSON();
+    return route.fulfill({ json: {
+      set_id: null, set_name: setName, suggested_index: 0, method: 'exact', message: null,
+      candidates: [{ listing: { product_id: 9876, category_id: 3, group_id: 555, name: unique, clean_name: null,
+        image_url: null, url: null, subtypes: ['Holofoil'], number: '238/191' }, subtype: 'Holofoil', market: '187.50' }],
+    } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
+  await page.getByRole('button', { name: 'Add product', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add product', exact: true });
+  await dialog.getByRole('button', { name: setName, exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('pikachu');
+  await dialog.getByRole('button', { name: 'Find in price catalog', exact: true }).click();
+  await dialog.getByRole('button', { name: `Use ${unique} · #238/191 · Holofoil · $187.50`, exact: true }).click();
+  expect(asked).toMatchObject({ game_id: games[0].id, name: 'pikachu', set_name: setName });
+  expect(asked?.kind).toBeTruthy();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(unique);
+  await expect(dialog.getByText('Catalog match: ' + unique + ' · #238/191 · Holofoil', { exact: true })).toBeVisible();
+  await page.getByLabel('Total paid', { exact: true }).fill('5.00');
+  const mapped = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/pricing/mappings');
+  await page.getByRole('button', { name: 'Save product', exact: true }).click();
+  expect((await mapped).status()).toBe(201);
+  await expect(page).toHaveURL(/\/products\/[0-9a-f-]+$/);
+  const productId = new URL(page.url()).pathname.split('/').pop()!;
+  const product = await (await request.get(API + '/api/v1/products/' + productId)).json();
+  expect(product).toMatchObject({ name: unique, collector_number: '238/191', variant: 'Holofoil', set_name: setName });
+  expect(product.stats.remaining_cost).toBe('5.00');
+  const [mapping] = await (await request.get(API + '/api/v1/pricing/mappings?product_id=' + productId)).json();
+  expect(mapping).toMatchObject({ external_product_id: '9876', external_group_id: '555', external_category_id: '3', subtype_name: 'Holofoil' });
+});
+
 test('product, purchase, move and audited reversal preserve exact server totals', async ({ page, request }) => {
   await signIn(page);
   await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) >= 1000 ? 'Inventory' : 'Stock', exact: true }).click();
