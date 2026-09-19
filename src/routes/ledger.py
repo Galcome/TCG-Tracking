@@ -32,8 +32,14 @@ from src.schemas.ledger import (
     PurchaseRead,
     PurchaseUpdate,
     SaleCreate,
+    SaleLine,
+    SaleLinePreview,
     SaleList,
     SaleListItem,
+    SaleOrderCreate,
+    SaleOrderPreview,
+    SaleOrderPreviewRequest,
+    SaleOrderRead,
     SalePreview,
     SalePreviewRequest,
     SaleRead,
@@ -376,13 +382,25 @@ def preview_sale(
     in JavaScript.
     """
     _require_product(db, payload.product_id)
+    return _preview(
+        db,
+        payload.product_id,
+        payload.quantity,
+        payload.sale_date,
+        gross=payload.amount,
+        fees=payload.platform_fees + payload.payment_fees + payload.shipping_paid,
+    )
 
-    events, _sources = ledger.load_events(db, payload.product_id)
+
+def _preview(
+    db: Session, product_id: uuid.UUID, quantity: int, sale_date, *, gross: int, fees: int
+) -> SalePreview:
+    events, _sources = ledger.load_events(db, product_id)
     hypothetical = Event(
         id=uuid.uuid4(),
-        quantity=payload.quantity,
+        quantity=quantity,
         is_supply=False,
-        occurred_on=payload.sale_date,
+        occurred_on=sale_date,
         # Sorts last among events sharing its date: it is the newest thing entered, so it
         # draws on whatever earlier sales left behind.
         created_at=datetime.max.replace(tzinfo=UTC),
@@ -390,8 +408,7 @@ def preview_sale(
     result = allocate([*events, hypothetical])
     outcome = result.consumers[hypothetical.id]
 
-    fees = payload.platform_fees + payload.payment_fees + payload.shipping_paid
-    net = payload.amount - fees
+    net = gross - fees
     profit = None if outcome.cost_basis_cents is None else net - outcome.cost_basis_cents
     roi = (
         profit / outcome.cost_basis_cents
@@ -399,10 +416,10 @@ def preview_sale(
         else None
     )
 
-    available = inventory.quantity_on_hand(db, payload.product_id)
+    available = inventory.quantity_on_hand(db, product_id)
     return SalePreview(
-        quantity=payload.quantity,
-        gross=payload.amount,
+        quantity=quantity,
+        gross=gross,
         fees=fees,
         net_proceeds=net,
         cost_basis=outcome.cost_basis_cents,
@@ -410,9 +427,155 @@ def preview_sale(
         roi=roi,
         has_unknown_cost=outcome.has_unknown_cost,
         quantity_available=available,
-        quantity_remaining=available - payload.quantity,
+        quantity_remaining=available - quantity,
         remaining_cost=result.remaining_cost_cents,
-        exceeds_stock=payload.quantity > available,
+        exceeds_stock=quantity > available,
+    )
+
+
+def _order_shares(lines: list[SaleLine], total: int) -> list[int]:
+    """One order-level fee, shared across the lines by what each sold for.
+
+    A $2 line and a $98 line split a $10 fee 0.20 / 9.80, so each line's profit carries its
+    own part. When every line went for nothing (a giveaway bundle), quantity is the fairest
+    weight left.
+    """
+    if total == 0:
+        return [0] * len(lines)
+    weights = [line.amount for line in lines]
+    if sum(weights) == 0:
+        weights = [line.quantity for line in lines]
+    return money_service.proportional_split(weights, total)
+
+
+def _order_fees(
+    payload: SaleOrderCreate | SaleOrderPreviewRequest,
+) -> list[tuple[int, int, int]]:
+    """(platform, payment, shipping) for each line, each summing back to the order's total."""
+    return list(
+        zip(
+            _order_shares(payload.lines, payload.platform_fees),
+            _order_shares(payload.lines, payload.payment_fees),
+            _order_shares(payload.lines, payload.shipping_paid),
+            strict=True,
+        )
+    )
+
+
+@router.post("/sales/orders/preview", response_model=SaleOrderPreview)
+def preview_sale_order(
+    payload: SaleOrderPreviewRequest,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> SaleOrderPreview:
+    """The multi-item version of the sale preview: every line's FIFO cost and fee share."""
+    for line in payload.lines:
+        _require_product(db, line.product_id)
+
+    lines = [
+        SaleLinePreview(
+            product_id=line.product_id,
+            # dict() keeps the raw cents; model_dump() would give back formatted strings.
+            **dict(
+                _preview(
+                    db,
+                    line.product_id,
+                    line.quantity,
+                    payload.sale_date,
+                    gross=line.amount,
+                    fees=sum(fees),
+                )
+            ),
+        )
+        for line, fees in zip(payload.lines, _order_fees(payload), strict=True)
+    ]
+    unknown = any(line.cost_basis is None for line in lines)
+    gross = sum(line.gross for line in lines)
+    fees = sum(line.fees for line in lines)
+    cost = None if unknown else sum(line.cost_basis for line in lines)
+    return SaleOrderPreview(
+        lines=lines,
+        gross=gross,
+        fees=fees,
+        net_proceeds=gross - fees,
+        cost_basis=cost,
+        realized_profit=None if cost is None else gross - fees - cost,
+        has_unknown_cost=any(line.has_unknown_cost for line in lines),
+        exceeds_stock=any(line.exceeds_stock for line in lines),
+    )
+
+
+@router.post(
+    "/sales/orders", response_model=SaleOrderRead, status_code=status.HTTP_201_CREATED
+)
+def create_sale_order(
+    payload: SaleOrderCreate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> SaleOrderRead:
+    """Several products to one buyer, as one transaction.
+
+    Each line is an ordinary sale - FIFO, edits, voids and reports all work per line - that
+    shares an `order_id`. Every line is written or none is: the request is one database
+    transaction, and the oversell guard runs for every product before anything is added.
+    """
+    product_ids = [line.product_id for line in payload.lines]
+    for product_id in product_ids:
+        _require_product(db, product_id)
+    ledger.lock_products(db, product_ids)
+    for line in payload.lines:
+        _guard_oversell(db, line.product_id, line.quantity, payload.allow_oversell)
+
+    order_id = uuid.uuid4()
+    sold_by = payload.sold_by_member_id or member.id
+    sales = [
+        Sale(
+            order_id=order_id,
+            product_id=line.product_id,
+            quantity=line.quantity,
+            gross_amount_cents=line.amount,
+            platform_fees_cents=platform,
+            payment_fees_cents=payment,
+            shipping_paid_cents=shipping,
+            sale_date=payload.sale_date,
+            sold_by_member_id=sold_by,
+            marketplace=payload.marketplace,
+            bucket=line.bucket,
+            notes=payload.notes,
+            created_by_member_id=member.id,
+        )
+        for line, (platform, payment, shipping) in zip(
+            payload.lines, _order_fees(payload), strict=True
+        )
+    ]
+    db.add_all(sales)
+    db.flush()
+    for sale in sales:
+        ledger.recompute_product(db, sale.product_id)
+        money_service.sync_proceeds(
+            db,
+            sale,
+            proceeds=resolve_proceeds(
+                db,
+                legs=payload.proceeds,
+                net_proceeds=sale.net_proceeds_cents,
+                default_member_id=sold_by,
+            ),
+            member_id=member.id,
+        )
+        ledger.record_audit(
+            db,
+            entity_type="sale",
+            entity_id=sale.id,
+            action="create",
+            member_id=member.id,
+            after=ledger.snapshot(sale, ["quantity", "gross_amount_cents", "sale_date"]),
+        )
+    for sale in sales:
+        db.refresh(sale)
+    return SaleOrderRead(
+        order_id=order_id,
+        sales=[SaleRead.model_validate(sale, from_attributes=True) for sale in sales],
     )
 
 

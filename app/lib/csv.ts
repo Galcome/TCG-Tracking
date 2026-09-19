@@ -1,4 +1,4 @@
-import type { GroupRow, Product, SaleRow } from './api'
+import { EXPENSE_CATEGORY_LABELS, type GroupRow, type Movement, type Product, type SaleRow } from './api'
 
 export type CsvCell = string | number | null | undefined
 export interface CsvDocument { name: string; header: string[]; rows: CsvCell[][] }
@@ -58,6 +58,13 @@ export function inventoryCsv(rows: Product[]): CsvDocument {
   rows: rows.map(row => [row.name, row.set_name, row.game.name, row.product_type.name, row.language,
     row.stats.quantity_on_hand, row.stats.by_bucket.inventory, row.stats.by_bucket.store, row.stats.by_bucket.vault,
     row.stats.average_unit_cost, row.stats.remaining_cost, row.stats.realized_profit]) }
+}
+
+/** Voided expenses stay in the export, flagged, so the file reconciles with the ledger. */
+export function expensesCsv(rows: Movement[]): CsvDocument {
+  return { name: 'tcg-expenses', header: ['date', 'category', 'amount', 'paid_from', 'note', 'status'],
+  rows: rows.map(row => [row.occurred_on, row.expense_category ? EXPENSE_CATEGORY_LABELS[row.expense_category] : '',
+    row.amount, row.legs.map(leg => leg.account_name).join(' + '), row.notes, row.status]) }
 }
 
 function cents(value: string): bigint {

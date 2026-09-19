@@ -1,12 +1,15 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type ReactNode } from 'react'
+import { View } from 'react-native'
 
 import { useApi } from '../context/AppContext'
 import {
   buildBalanceAdjustmentPayload,
+  buildExpensePayload,
   buildTransferPayload,
   firstMoneyValidationError,
   validateBalanceAdjustmentDraft,
+  validateExpenseDraft,
   validateTransferDraft,
   validateVoidMovementDraft,
   type BalanceAdjustmentDraft,
@@ -16,7 +19,9 @@ import {
   positiveMoney,
 } from '../lib/money-drafts'
 import { money, todayIso } from '../lib/format'
-import type { Account } from '../lib/api'
+import { allocationError, fundingPayload, type AllocationDraft } from '../lib/allocation-drafts'
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory } from '../lib/api'
+import { AllocationEditor } from './allocation-editor'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { DateField } from './date-field'
 
@@ -244,6 +249,75 @@ export function VoidMovementDialog({ id, onClose }: VoidMovementDialogProps) {
         <Copy muted>This row stays on the ledger as an audit trail, but stops counting toward balances.</Copy>
       </Card>
       <Field label="Reason" value={reason} onChangeText={setReason} autoFocus placeholder="Entered twice" />
+    </MoneySheet>
+  )
+}
+
+export function ExpenseDialog({ onClose }: { onClose: () => void }) {
+  const api = useApi()
+  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const accounts = useMemo(
+    () => (accountsQuery.data?.items ?? []).filter((account) => account.is_active),
+    [accountsQuery.data],
+  )
+  const joint = accounts.find((account) => account.kind === 'joint')
+  const [category, setCategory] = useState<ExpenseCategory>('supplies')
+  const [amount, setAmount] = useState('')
+  const [chosenAccount, setPaidFrom] = useState<string | null>(null)
+  const [split, setSplit] = useState<AllocationDraft[] | null>(null)
+  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const [notes, setNotes] = useState('')
+  const [validation, setValidation] = useState<MoneyValidation>({})
+  const mutation = useMoneyMutation(api.createExpense, onClose)
+  // The shared pot pays for shared costs unless someone says otherwise.
+  const paidFrom = chosenAccount ?? joint?.id ?? ''
+
+  function submit() {
+    const today = todayIso()
+    const splitError = split ? allocationError(split, [amount], true) : null
+    const draft = { category, amount, occurredOn, notes, paidFrom, split: split && !splitError ? fundingPayload(split) : null }
+    const errors = validateExpenseDraft(draft, today)
+    if (splitError) errors.split = splitError
+    setValidation(errors)
+    const payload = splitError ? null : buildExpensePayload(draft, today)
+    if (payload) mutation.mutate(payload)
+  }
+
+  return (
+    <MoneySheet
+      title="Add expense"
+      onClose={onClose}
+      onSubmit={submit}
+      busy={mutation.isPending}
+      submitLabel="Save expense"
+      error={mutation.error ?? accountsQuery.error}
+      validation={validation}
+    >
+      <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
+      <View accessibilityLabel="Category" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {EXPENSE_CATEGORIES.map((value) => (
+          <Button
+            key={value}
+            label={EXPENSE_CATEGORY_LABELS[value]}
+            variant={value === category ? 'primary' : 'secondary'}
+            onPress={() => setCategory(value)}
+          />
+        ))}
+      </View>
+      {!split ? (
+        <Choice label="Paid from" value={paidFrom} options={accounts.map(accountOption)} onChange={setPaidFrom} />
+      ) : null}
+      <AllocationEditor funding rows={split} onChange={setSplit} accounts={accounts} defaultAccount={paidFrom} disabled={mutation.isPending} />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} disabled={mutation.isPending} />
+      <Field
+        label={category === 'other' ? 'Note (required)' : 'Note'}
+        value={notes}
+        onChangeText={setNotes}
+        placeholder={category === 'supplies' ? 'Sleeves, toploaders…' : undefined}
+      />
+      <Copy muted>
+        Shipping, tax and fees on a specific purchase, sale or grading submission belong on that record, not here.
+      </Copy>
     </MoneySheet>
   )
 }

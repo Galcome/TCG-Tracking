@@ -20,9 +20,11 @@ from sqlalchemy.orm import Session
 
 from src.models.card_set import CardSet
 from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
+from src.models.market_price import QUOTE_FRESH, QUOTE_UNAVAILABLE
 from src.models.member import Member
 from src.models.money import (
     ACCOUNT_STORE_CREDIT,
+    MOVEMENT_EXPENSE,
     MOVEMENT_PROCEEDS,
     MoneyAccount,
     MoneyMovement,
@@ -32,6 +34,7 @@ from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.services import vault
 from src.services.inventory import product_stats
+from src.services.pricing import current_estimates
 
 PERIOD_ALL = "all"
 PERIOD_YTD = "ytd"
@@ -64,6 +67,12 @@ def period_start(period: str, today: date | None = None) -> date | None:
     return None
 
 
+@dataclass(frozen=True)
+class ExpenseTotal:
+    category: str
+    amount_cents: int
+
+
 @dataclass
 class Dashboard:
     realized_profit_cents: int = 0
@@ -92,6 +101,34 @@ class Dashboard:
     #: figure is the same class of lie as valuing unpriced stock at zero.
     store_credit_cents: int = 0
 
+    #: Overhead dated inside the period: sleeves, show tables, subscriptions. A period
+    #: cost, never folded into a lot's cost basis, so FIFO and ROI stay trading-only.
+    expenses_cents: int = 0
+    #: The same, per category, largest first. Only categories with spending appear.
+    expenses_by_category: list[ExpenseTotal] = field(default_factory=list)
+    #: Lifetime overhead paid in money (any account but store credit), for the cash balance.
+    expenses_paid_cents: int = 0
+
+    #: Market value of the stock that has a usable quote, as of now. Only priced units
+    #: count: valuing an unpriced box at zero would read as a loss, and at cost would
+    #: pass a guess off as a quote. `priced_units` of `units_in_stock` says how much of the
+    #: shelf this covers.
+    market_value_cents: int = 0
+    #: FIFO remaining cost of those same priced units, so the gain compares like with like.
+    priced_cost_cents: int = 0
+    priced_units: int = 0
+    #: How many of the priced units carry a quote older than the freshness window.
+    stale_units: int = 0
+
+    @property
+    def unrealized_gain_cents(self) -> int:
+        return self.market_value_cents - self.priced_cost_cents
+
+    @property
+    def net_profit_cents(self) -> int:
+        """What the business actually made in the period: trading profit less overhead."""
+        return self.realized_profit_cents - self.expenses_cents
+
     @property
     def cash_received_cents(self) -> int:
         """Of everything sales brought in, the part that was actually money."""
@@ -107,7 +144,9 @@ class Dashboard:
         Store credit is excluded: it is value received, but it cannot pay for anything
         outside the shop that issued it.
         """
-        return self.cash_received_cents - self.total_invested_cents
+        return (
+            self.cash_received_cents - self.total_invested_cents - self.expenses_paid_cents
+        )
 
     @property
     def roi(self) -> float | None:
@@ -268,6 +307,42 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
         or 0
     )
 
+    # Overhead. Expense legs are all negative, so the spend is the negated sum. Undated
+    # expenses cannot exist (the form defaults to today), but a null date would still only
+    # count toward all-time, the same as an undated sale.
+    expense_legs = (
+        select(MoneyMovement.expense_category, func.sum(-MoneyPosting.delta_cents))
+        .select_from(MoneyPosting)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.kind == MOVEMENT_EXPENSE)
+    )
+    in_period = expense_legs
+    if start is not None:
+        in_period = in_period.where(
+            MoneyMovement.occurred_on.is_not(None), MoneyMovement.occurred_on >= start
+        )
+    rows = db.execute(
+        in_period.group_by(MoneyMovement.expense_category).order_by(
+            func.sum(-MoneyPosting.delta_cents).desc(), MoneyMovement.expense_category
+        )
+    ).all()
+    result.expenses_by_category = [ExpenseTotal(category, int(cents)) for category, cents in rows]
+    result.expenses_cents = sum(total.amount_cents for total in result.expenses_by_category)
+    result.expenses_paid_cents = int(
+        db.scalar(
+            select(func.coalesce(func.sum(-MoneyPosting.delta_cents), 0))
+            .select_from(MoneyPosting)
+            .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+            .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+            .where(
+                MoneyMovement.status == STATUS_ACTIVE,
+                MoneyMovement.kind == MOVEMENT_EXPENSE,
+                MoneyAccount.kind != ACCOUNT_STORE_CREDIT,
+            )
+        )
+        or 0
+    )
+
     # Purchases made during the period - deliberately distinct from cost of sales.
     #
     # Derived purchases are excluded: they are cost carried across a transformation, not
@@ -295,12 +370,25 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
 
     # Stock and remaining cost are always as-of-now; a period cannot change what is on the
     # shelf today.
-    for stats in product_stats(db).values():
+    estimates = current_estimates(db, today=today)
+    for product_id, stats in product_stats(db).items():
         result.units_in_stock += max(stats.quantity_on_hand, 0)
         result.inventory_at_cost_cents += stats.remaining_cost_cents
         result.cost_written_off_cents += stats.cost_written_off_cents
         if stats.quantity_on_hand < 0:
             result.products_with_negative_stock += 1
+        estimate = estimates.get(product_id)
+        if (
+            stats.quantity_on_hand > 0
+            and estimate is not None
+            and estimate.value_cents is not None
+            and estimate.status != QUOTE_UNAVAILABLE
+        ):
+            result.market_value_cents += estimate.value_cents * stats.quantity_on_hand
+            result.priced_cost_cents += stats.remaining_cost_cents
+            result.priced_units += stats.quantity_on_hand
+            if estimate.status != QUOTE_FRESH:
+                result.stale_units += stats.quantity_on_hand
 
     return result
 

@@ -184,6 +184,7 @@ def record_movement(
     notes: str | None = None,
     purchase_id: uuid.UUID | None = None,
     sale_id: uuid.UUID | None = None,
+    expense_category: str | None = None,
 ) -> MoneyMovement:
     """Write one movement and its legs. `legs` are (account_id, signed cents)."""
     movement = MoneyMovement(
@@ -191,6 +192,7 @@ def record_movement(
         occurred_on=occurred_on,
         purchase_id=purchase_id,
         sale_id=sale_id,
+        expense_category=expense_category,
         notes=notes,
         created_by_member_id=member_id,
     )

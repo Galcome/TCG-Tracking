@@ -333,6 +333,23 @@ def test_the_route_prices_a_read_card(client, game, providers, monkeypatch):
     assert body["candidates"][0]["listing"]["number"] == "238/191"
 
 
+def test_the_route_describes_sealed_product_by_its_type(client, game, providers, monkeypatch):
+    chooser = Chooser(monkeypatch)
+
+    response = client.post(
+        "/api/v1/pricing/lookup",
+        json={
+            "game_id": str(game.id),
+            "name": "Pikachu",
+            "set_name": "Surging Sparks",
+            "kind": "Booster Box",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert chooser.asked[-1][0].startswith("Booster Box - Pikachu")
+
+
 def test_the_route_reports_a_catalog_outage(client, game, providers, monkeypatch):
     Chooser(monkeypatch)
     providers.error = PricingError("feed down")

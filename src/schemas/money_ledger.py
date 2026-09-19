@@ -12,7 +12,12 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.models.money import ACCOUNT_KINDS, MOVEMENT_KINDS
+from src.models.money import (
+    ACCOUNT_KINDS,
+    EXPENSE_CATEGORIES,
+    EXPENSE_CATEGORY_OTHER,
+    MOVEMENT_KINDS,
+)
 from src.schemas.money import MoneyIn, MoneyOut
 
 _READ_CONFIG = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -120,6 +125,39 @@ class AdjustmentCreate(BaseModel):
         return value
 
 
+class ExpenseCreate(BaseModel):
+    """Overhead with no stock behind it: sleeves, a show table, a subscription.
+
+    `paid_from` works exactly like a purchase's funding, split included. Omitted, the joint
+    account paid - the usual case for a shared business cost, and the one that has to stay a
+    two-field entry.
+    """
+
+    category: str = Field(pattern=f"^({'|'.join(EXPENSE_CATEGORIES)})$")
+    amount: MoneyIn = Field(gt=0)
+    occurred_on: date = Field(default_factory=date.today)
+    paid_from: list["FundingLeg"] | None = Field(default=None, min_length=1)
+    notes: str | None = Field(default=None, max_length=500)
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @field_validator("occurred_on")
+    @classmethod
+    def not_in_future(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("an expense cannot be dated in the future")
+        return value
+
+    @model_validator(mode="after")
+    def other_says_what(self) -> "ExpenseCreate":
+        if self.category == EXPENSE_CATEGORY_OTHER and self.notes is None:
+            raise ValueError("say what an 'other' expense was in the note")
+        return self
+
+
 class PostingRead(BaseModel):
     model_config = _READ_CONFIG
 
@@ -144,6 +182,8 @@ class MovementRead(BaseModel):
     sale_id: uuid.UUID | None
     #: Filled for funding and proceeds so the ledger can say what it was for.
     product_name: str | None = None
+    #: Set on expenses only.
+    expense_category: str | None = None
     notes: str | None
     status: str
 
@@ -192,3 +232,6 @@ class ProceedsLeg(BaseModel):
         if (self.account_id is None) == (self.store is None):
             raise ValueError("give either an account or a store name, not both")
         return self
+
+
+ExpenseCreate.model_rebuild()

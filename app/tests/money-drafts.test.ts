@@ -4,11 +4,13 @@ import test from 'node:test'
 import {
   MAX_ADJUSTMENT_CENTS,
   buildBalanceAdjustmentPayload,
+  buildExpensePayload,
   buildTransferPayload,
   parseAdjustmentCents,
   positiveMoney,
   storeCreditMeaning,
   validateBalanceAdjustmentDraft,
+  validateExpenseDraft,
   validateTransferDraft,
   validateVoidMovementDraft,
 } from '../lib/money-drafts'
@@ -90,4 +92,23 @@ test('store credit wording distinguishes positive, zero, and negative balances',
   assert.equal(storeCreditMeaning('25.00', 'Card Shop'), 'Credit to spend at Card Shop; not cash')
   assert.equal(storeCreditMeaning('0.00', 'Card Shop'), 'Nothing left here')
   assert.equal(storeCreditMeaning('-5.00', 'Card Shop'), 'Store credit is below zero at Card Shop')
+})
+
+test('an expense defaults to one payer and trims its note', () => {
+  const draft = { category: 'supplies' as const, amount: '25.00', occurredOn: date, paidFrom: 'joint', split: null, notes: '  sleeves  ' }
+  assert.deepEqual(buildExpensePayload(draft, date), {
+    category: 'supplies', amount: '25.00', occurred_on: date, paid_from: [{ account_id: 'joint' }], notes: 'sleeves',
+  })
+  const split = [{ account_id: 'a', amount: '10.00' }, { account_id: 'b', amount: '15.00' }]
+  assert.deepEqual(buildExpensePayload({ ...draft, paidFrom: '', split, notes: '' }, date)?.paid_from, split)
+})
+
+test('expense validation refuses future dates, no payer, and an unexplained other', () => {
+  const errors = validateExpenseDraft({ category: 'other', amount: '0', occurredOn: '2026-09-10', paidFrom: '', split: null, notes: ' ' }, date)
+  assert.ok(errors.amount)
+  assert.match(errors.occurredOn ?? '', /future/)
+  assert.ok(errors.accountId)
+  assert.ok(errors.notes)
+  assert.ok(validateExpenseDraft({}, date).category)
+  assert.equal(buildExpensePayload({ category: 'other', amount: '5.00', occurredOn: date, paidFrom: 'joint', split: null, notes: '' }, date), null)
 })

@@ -151,6 +151,7 @@ def lookup_card(
             set_name=payload.set_name,
             number=payload.collector_number,
             variant=payload.variant,
+            kind=payload.kind,
             provider=catalog_provider,
             fx=fx_provider,
         )

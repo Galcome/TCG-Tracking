@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildSaleOrderPayload,
   buildSalePayload,
+  orderPreviewInput,
+  orderPreviewKey,
+  validateExtraLines,
+  type ExtraSaleLine,
   isPreviewCurrent,
   previewInput,
   resolveSaleProceeds,
@@ -125,4 +130,38 @@ test('sale payload preserves exact money strings and encodes store credit separa
     proceeds: [{ store: 'Card Shop' }],
     allow_oversell: false,
   })
+})
+
+const extra: ExtraSaleLine = { productId: 'product-2', name: 'Charizard', quantity: '1', amount: '48.50', bucket: 'vault' }
+
+test('an order keeps the first product as line one and each extra line verbatim', () => {
+  const payload = buildSaleOrderPayload(draft({ notes: '  table 12 ', proceeds: { kind: 'store', store: ' Shop ' } }), [extra])
+  assert.deepEqual(payload?.lines, [
+    { product_id: 'product-1', quantity: 2, amount: '150.00', bucket: 'inventory' },
+    { product_id: 'product-2', quantity: 1, amount: '48.50', bucket: 'vault' },
+  ])
+  assert.equal(payload?.platform_fees, '19.88')
+  assert.equal(payload?.payment_fees, undefined)
+  assert.equal(payload?.notes, 'table 12')
+  assert.deepEqual(payload?.proceeds, [{ store: 'Shop' }])
+  assert.deepEqual(buildSaleOrderPayload(draft({ proceeds: { kind: 'none' } }), [extra])?.proceeds, [])
+})
+
+test('an order with a bad line builds nothing and names the line', () => {
+  const bad = { ...extra, amount: '' }
+  assert.equal(buildSaleOrderPayload(draft(), [bad]), null)
+  assert.equal(buildSaleOrderPayload(draft({ amount: '' }), [extra]), null)
+  assert.match(validateExtraLines([bad]).line0 ?? '', /Charizard: enter what it sold for/)
+  assert.match(validateExtraLines([{ ...extra, quantity: '0' }]).line0 ?? '', /whole quantity/)
+  assert.deepEqual(validateExtraLines([extra]), {})
+})
+
+test('order preview input sends zero fee defaults and changes identity with any line', () => {
+  const input = orderPreviewInput(draft({ platformFees: '' }), [extra])
+  assert.equal(input?.platform_fees, '0')
+  assert.equal(input?.lines.length, 2)
+  assert.equal(orderPreviewInput(draft({ saleDate: 'soon' }), [extra]), null)
+  assert.equal(orderPreviewInput(draft(), [{ ...extra, quantity: 'x' }]), null)
+  const changed = orderPreviewInput(draft({ platformFees: '' }), [{ ...extra, amount: '48.51' }])
+  assert.notEqual(orderPreviewKey(input!), orderPreviewKey(changed!))
 })
