@@ -67,8 +67,19 @@ PRICING_REFRESH_LOCK_KEY = 1951704321
 
 # A generic `single` is allowed because older records use it for raw cards. Graded cards
 # still fail the independent grading-field check below, even if someone misclassified them.
+# Every factory-sealed product has one catalog listing and market price; lots, binders and
+# "other" have none, because each one is a different pile of cards.
 ELIGIBLE_PRODUCT_TYPE_SLUGS = frozenset(
-    {"single", "raw-single", "booster-box", "sealed-case"}
+    {
+        "single",
+        "raw-single",
+        "booster-pack",
+        "booster-box",
+        "sealed-case",
+        "box-set",
+        "collection",
+        "deck",
+    }
 )
 
 
@@ -219,6 +230,8 @@ class CatalogProduct:
     image_url: str | None
     url: str | None
     subtypes: tuple[str, ...]
+    #: The printed card number ("025/165"), for telling reprints of one name apart.
+    number: str | None = None
 
 
 def _catalog_id(item: object, field: str) -> int | None:
@@ -242,6 +255,16 @@ def _catalog_text(item: object, field: str, *, max_length: int = 500) -> str | N
         return None
     text = value.strip()
     return text[:max_length] if text else None
+
+
+def _catalog_number(item: dict[str, Any]) -> str | None:
+    extended = item.get("extendedData")
+    if not isinstance(extended, list):
+        return None
+    for entry in extended:
+        if isinstance(entry, dict) and entry.get("name") == "Number":
+            return _catalog_text(entry, "value", max_length=40)
+    return None
 
 
 def _catalog_results(body: bytes) -> list[dict[str, Any]]:
@@ -427,12 +450,28 @@ class TCGCSVProvider:
         self, category_id: int, group_id: int, *, search: str | None = None, limit: int = 50
     ) -> list[CatalogProduct]:
         """Find products and their available printing/subtype names in one group."""
-        category = self._validate_catalog_id(category_id, "category ID")
-        group = self._validate_catalog_id(group_id, "group ID")
         if limit < 1 or limit > MAX_CATALOG_PRODUCTS:
             raise PricingError(
                 f"TCGCSV product discovery is limited to {MAX_CATALOG_PRODUCTS} results"
             )
+        catalog = self.group_products(category_id, group_id)
+        needle = " ".join((search or "").split()).casefold()
+        found: list[CatalogProduct] = []
+        for item in catalog:
+            searchable = " ".join(
+                value for value in (item.name, item.clean_name or "") if value
+            ).casefold()
+            if needle and needle not in searchable:
+                continue
+            found.append(item)
+            if len(found) >= limit:
+                break
+        return found
+
+    def group_products(self, category_id: int, group_id: int) -> list[CatalogProduct]:
+        """Every product in one group, cached for a day like the rest of discovery."""
+        category = self._validate_catalog_id(category_id, "category ID")
+        group = self._validate_catalog_id(group_id, "group ID")
 
         def load() -> list[CatalogProduct]:
             product_rows = self._get_catalog(
@@ -482,25 +521,14 @@ class TCGCSVProvider:
                                     subtypes.get(product_id, {"Normal"}), key=str.casefold
                                 )[:MAX_CATALOG_SUBTYPES]
                             ),
+                            number=_catalog_number(item),
                         )
                     )
                 return found
             finally:
                 self.release_group(category, group)
 
-        catalog = self._cached_catalog(("products", category_id, group_id), load)
-        needle = " ".join((search or "").split()).casefold()
-        found: list[CatalogProduct] = []
-        for item in catalog:
-            searchable = " ".join(
-                value for value in (item.name, item.clean_name or "") if value
-            ).casefold()
-            if needle and needle not in searchable:
-                continue
-            found.append(item)
-            if len(found) >= limit:
-                break
-        return found
+        return self._cached_catalog(("products", category_id, group_id), load)
 
     def _prices(self, category_id: str, group_id: str) -> list[dict[str, Any]]:
         if not category_id.isdigit() or not group_id.isdigit():
@@ -688,7 +716,7 @@ def eligibility_error(product: Product) -> str:
         )
     ):
         return "Market pricing is manual for graded products."
-    return "Market pricing supports raw cards, booster boxes, and sealed cases only."
+    return "Market pricing supports raw cards and sealed products only."
 
 
 def current_estimates(

@@ -196,12 +196,24 @@ def test_tcgcsv_catalog_discovery_filters_products_and_joins_subtypes():
                         "name": "Lugia V",
                         "cleanName": "Lugia V",
                         "imageUrl": "https://example.test/lugia.jpg",
+                        "extendedData": [
+                            "junk",
+                            {"name": "Rarity", "value": "Ultra Rare"},
+                            {"name": "Number", "value": "138/195"},
+                        ],
                     },
                     {
                         "productId": 2,
                         "categoryId": 3,
                         "groupId": 3170,
                         "name": "Lugia VSTAR",
+                        "extendedData": [{"name": "Rarity", "value": "Ultra Rare"}],
+                    },
+                    {
+                        "productId": 3,
+                        "categoryId": 3,
+                        "groupId": 3170,
+                        "name": "Lugia V Box",
                     },
                 ],
             }
@@ -238,8 +250,9 @@ def test_tcgcsv_catalog_discovery_filters_products_and_joins_subtypes():
         "https://example.test/lugia.jpg",
         None,
         ("Holofoil", "Normal"),
+        "138/195",
     )
-    assert products[1].product_id == 2
+    assert [(item.product_id, item.number) for item in products[1:]] == [(2, None), (3, None)]
     assert calls == [
         pricing.TCGCSV_CATEGORIES_URL,
         f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/groups",
@@ -620,9 +633,11 @@ def test_pricing_eligibility_is_strict_about_slabs_and_product_types():
         "Market pricing is manual for graded products."
     )
 
-    unsupported = mapping(
-        product=SimpleNamespace(product_type=SimpleNamespace(slug="booster-pack"))
-    )
+    for sealed in ("booster-pack", "box-set", "collection", "deck"):
+        product = SimpleNamespace(product_type=SimpleNamespace(slug=sealed))
+        assert pricing.is_pricing_eligible(mapping(product=product).product), sealed
+
+    unsupported = mapping(product=SimpleNamespace(product_type=SimpleNamespace(slug="lot")))
     assert not pricing.is_pricing_eligible(unsupported.product)
     assert "raw cards" in pricing.eligibility_error(unsupported.product)
 

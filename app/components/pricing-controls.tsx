@@ -18,6 +18,7 @@ import {
   canUseFreeMarketPricing,
   catalogId,
   pricingEligibilityMessage,
+  preferredSubtype,
   pricingMappingDraft,
   pricingRefreshSummary,
   validatePricingMappingDraft,
@@ -222,6 +223,104 @@ function CatalogDiscovery({
   )
 }
 
+function listingLabel(listing: TCGCSVProduct) {
+  return listing.number ? `${listing.name} · #${listing.number}` : listing.name
+}
+
+/**
+ * The catalog listing this product most likely is, one tap from a market value. Shown only
+ * while the product has no mapping: asking may cost a cheap model call, so it is asked once.
+ * Tapping a listing is the human confirmation; nothing is mapped before that.
+ */
+export function PriceSuggestion({ product }: { product: ProductDetail }) {
+  const api = useApi()
+  const queryClient = useQueryClient()
+  const eligible = canUseFreeMarketPricing(product)
+  const mappings = useQuery({
+    queryKey: ['pricingMappings', product.id],
+    queryFn: () => api.pricingMappings(product.id),
+    enabled: eligible,
+  })
+  const unmapped = mappings.data?.length === 0
+  const suggestion = useQuery({
+    queryKey: ['pricingSuggestion', product.id],
+    queryFn: () => api.pricingSuggestion(product.id),
+    enabled: eligible && unmapped,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const confirm = useMutation({
+    mutationFn: async (listing: TCGCSVProduct) => {
+      await api.createPricingMapping({
+        product_id: product.id,
+        external_product_id: String(listing.product_id),
+        external_category_id: String(listing.category_id),
+        external_group_id: String(listing.group_id),
+        subtype_name: preferredSubtype(listing.subtypes, product.variant),
+      })
+      // The value shows now rather than tomorrow. If a refresh is already running, the
+      // mapping is saved regardless and the nightly job prices it.
+      try {
+        await api.refreshPricing()
+        return true
+      } catch {
+        return false
+      }
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pricingMappings', product.id] }),
+        queryClient.invalidateQueries({ queryKey: ['product', product.id] }),
+        queryClient.invalidateQueries({ queryKey: ['products'] }),
+      ])
+    },
+  })
+
+  if (confirm.data === false) {
+    return <Card><Copy>Price listing saved. Its value appears after the nightly refresh.</Copy></Card>
+  }
+  if (!eligible || !unmapped) return null
+
+  const data = suggestion.data
+  const suggested = data?.suggested_index == null ? null : data.candidates[data.suggested_index] ?? null
+  const others = data?.candidates.filter((listing) => listing !== suggested) ?? []
+
+  return (
+    <Card accent>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Give this a market value</Text>
+      {suggestion.isPending ? <><Loading /><Copy muted>Finding it in the price catalog…</Copy></> : null}
+      <ErrorNotice error={suggestion.error} retry={() => { void suggestion.refetch() }} />
+      {data?.message ? <Copy muted>{data.message} You can still find it by hand under Market pricing.</Copy> : null}
+      {suggested ? (
+        <View style={styles.identity}>
+          <Copy>{listingLabel(suggested)}</Copy>
+          <Copy muted>
+            {data?.method === 'exact' ? 'Exact catalog match' : 'Picked by AI from close listings. Check it.'}
+          </Copy>
+          <Button
+            variant="primary"
+            label={confirm.isPending ? 'Saving…' : 'Confirm match'}
+            disabled={confirm.isPending}
+            onPress={() => confirm.mutate(suggested)}
+          />
+        </View>
+      ) : null}
+      {others.length > 0 ? (
+        <View style={styles.discoveryResults}>
+          <Copy muted>{suggested ? 'Not it? Other close listings:' : 'Which of these is it?'}</Copy>
+          {others.map((listing) => (
+            <View key={listing.product_id} style={styles.discoveryResult}>
+              <View style={styles.primary}><Copy>{listingLabel(listing)}</Copy></View>
+              <Button label="This one" disabled={confirm.isPending} onPress={() => confirm.mutate(listing)} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {confirm.error ? <Text accessibilityRole="alert" style={styles.error}>{confirm.error.message}</Text> : null}
+    </Card>
+  )
+}
+
 export function PricingControls({ product }: { product: ProductDetail }) {
   const api = useApi()
   const queryClient = useQueryClient()
@@ -342,7 +441,7 @@ export function PricingControls({ product }: { product: ProductDetail }) {
       external_product_id: String(catalogProduct.product_id),
       external_category_id: String(catalogProduct.category_id),
       external_group_id: String(catalogProduct.group_id),
-      subtype_name: catalogProduct.subtypes[0] ?? 'Normal',
+      subtype_name: preferredSubtype(catalogProduct.subtypes, product.variant),
     }))
   }
   const runMutation = (run: () => void) => {

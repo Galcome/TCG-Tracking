@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { router } from 'expo-router'
 import { useMemo, useRef, useState } from 'react'
 
 import { useApi } from '../context/AppContext'
@@ -26,6 +27,7 @@ import {
 } from '../lib/product-drafts'
 import { todayIso } from '../lib/format'
 import { namedByItsSet } from '../lib/product-types'
+import { canUseFreeMarketPricing } from '../lib/pricing-drafts'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { SetField } from './set-field'
 import { AllocationEditor } from './allocation-editor'
@@ -54,14 +56,14 @@ type FormChildrenProps = {
 }
 
 /** All ledger mutations invalidate the complete query cache after the server commits. */
-function useLedgerMutation<T>(run: (input: T) => Promise<unknown>, onDone: () => void) {
+function useLedgerMutation<T, R = unknown>(run: (input: T) => Promise<R>, onDone: (result: R) => void) {
   const queryClient = useQueryClient()
   const running = useRef(false)
   const mutation = useMutation({
     mutationFn: run,
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries()
-      onDone()
+      onDone(result)
     },
     onSettled: () => { running.current = false },
   })
@@ -241,7 +243,12 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
   const [showOptional, setShowOptional] = useState(false)
-  const create = useLedgerMutation<NewProduct>(api.createProduct, onClose)
+  // A product that can have a market price lands on its page, where the catalog listing
+  // is already suggested and one tap away from giving it a value.
+  const create = useLedgerMutation(api.createProduct, (created) => {
+    onClose()
+    if (canUseFreeMarketPricing(created)) router.push(`/products/${created.id}`)
+  })
 
   const effectiveGameId = gameId || games.data?.[0]?.id || ''
   const effectiveProductTypeId = productTypeId || productTypes.data?.[0]?.id || ''

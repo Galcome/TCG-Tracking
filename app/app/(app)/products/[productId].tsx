@@ -8,7 +8,7 @@ import { ProductForms, type ProductFormsProps } from '../../../components/produc
 import { RecordSaleDialog } from '../../../components/sale-form';
 import { ProductOperations } from '../../../components/product-operations';
 import { LineageReport } from '../../../components/lineage-report';
-import { PricingControls } from '../../../components/pricing-controls';
+import { PriceSuggestion, PricingControls } from '../../../components/pricing-controls';
 import { ProductLifecycle } from '../../../components/product-lifecycle';
 import { RecordValuationDialog } from '../../../components/valuation-form';
 import { GameIdentity } from '../../../components/game-identity';
@@ -41,6 +41,7 @@ export default function ProductDetail() {
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
       <Card><Copy muted>Market estimate · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No market estimate' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}</Card>
+      <PriceSuggestion product={p} />
       <Disclosure title="Market pricing"><PricingControls product={p} /></Disclosure>
       <Disclosure title="Rip, crack and grading"><ProductOperations key={p.id} product={p} /></Disclosure>
       <Disclosure title="Cost lineage"><LineageReport productId={p.id} /></Disclosure>
