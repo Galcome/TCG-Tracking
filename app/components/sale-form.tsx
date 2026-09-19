@@ -27,7 +27,7 @@ import {
   type SaleValidation,
 } from '../lib/sale-drafts'
 import { money, todayIso } from '../lib/format'
-import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet, Signed } from './ui'
 import { AllocationEditor } from './allocation-editor'
 import { allocationError, allocationPayload, type AllocationDraft } from '../lib/allocation-drafts'
 
@@ -177,7 +177,7 @@ function PreviewCard({ preview }: { preview: SalePreview }) {
       </Row>
       <Row>
         <ViewMetric label="Cost basis (FIFO)" value={preview.has_unknown_cost ? 'Unknown' : money(preview.cost_basis)} />
-        <ViewMetric label="Realized profit" value={preview.has_unknown_cost ? 'Unknown' : money(preview.realized_profit)} />
+        <ViewMetric label="Realized profit" value={preview.has_unknown_cost ? 'Unknown' : money(preview.realized_profit)} signed={preview.has_unknown_cost ? null : preview.realized_profit} />
       </Row>
       <Copy muted>
         Leaves {preview.quantity_remaining} unit{preview.quantity_remaining === 1 ? '' : 's'} on hand · {money(preview.remaining_cost)} at cost
@@ -186,8 +186,8 @@ function PreviewCard({ preview }: { preview: SalePreview }) {
   )
 }
 
-function ViewMetric({ label, value }: { label: string; value: string }) {
-  return <Text style={{ color: colors.text, minWidth: 100 }}><Text style={{ color: colors.muted }}>{label}{'\n'}</Text>{value}</Text>
+function ViewMetric({ label, value, signed }: { label: string; value: string; signed?: string | null }) {
+  return <Text style={{ color: colors.text, minWidth: 100 }}><Text style={{ color: colors.muted }}>{label}{'\n'}</Text><Signed value={signed}>{value}</Signed></Text>
 }
 
 function SaleForm({ product, onClose }: { product: Product; onClose: () => void }) {

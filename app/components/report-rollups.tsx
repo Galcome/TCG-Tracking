@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { useMemo } from 'react'
 import { Text, View } from 'react-native'
 
-import { Button, Card, Copy, ErrorNotice, Loading, Row } from './ui'
+import { Button, Card, Copy, ErrorNotice, Loading, Row, Signed } from './ui'
 import { useApi } from '../context/AppContext'
 import { colors } from '../context/ThemeContext'
 import type { AgingLot, Attention, SetRollupRow, TierRow } from '../lib/api'
@@ -74,8 +74,8 @@ function TierRowCard({ row }: { row: TierRow }) {
             <Copy>{row.label}</Copy>
             <Copy muted>{plural(row.products_traded, 'product')} · {plural(row.units_sold, 'unit')} sold</Copy>
           </View>
-          <Metric label="Realized profit" value={reportMoney(row.realized_profit)} />
-          <Metric label="ROI" value={percent(row.roi)} />
+          <Metric label="Realized profit" value={<Signed value={row.realized_profit}>{reportMoney(row.realized_profit)}</Signed>} />
+          <Metric label="ROI" value={<Signed value={row.roi}>{percent(row.roi)}</Signed>} />
         </Row>
         <Row>
           <Metric label="Cost of sales" value={reportMoney(row.cost_of_sales)} />
@@ -120,9 +120,9 @@ function SetRowCard({ row }: { row: SetRollupRow }) {
         <View style={styles.setColumns}>
           <View style={styles.setColumn}>
             <Text style={styles.columnTitle}>Sold</Text>
-            <Metric label="Realized profit" value={reportMoney(row.realized_profit)} />
+            <Metric label="Realized profit" value={<Signed value={row.realized_profit}>{reportMoney(row.realized_profit)}</Signed>} />
             <Metric label="Cost of sales" value={reportMoney(row.cost_of_sales)} />
-            <Metric label="ROI" value={percent(row.sold_roi)} />
+            <Metric label="ROI" value={<Signed value={row.sold_roi}>{percent(row.sold_roi)}</Signed>} />
             <Metric label="Units sold" value={row.units_sold} />
           </View>
           <View style={styles.setColumn}>
