@@ -159,6 +159,46 @@ class PricingSuggestionRead(BaseModel):
     message: str | None = None
 
 
+class CardLookupRequest(BaseModel):
+    """A card as the camera (or a person) read it. Only the name is required."""
+
+    game_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=200)
+    set_name: str = Field(default="", max_length=200)
+    collector_number: str | None = Field(default=None, max_length=40)
+    variant: str | None = Field(default=None, max_length=80)
+
+    @field_validator("name", "set_name")
+    @classmethod
+    def strip_required(cls, value: str) -> str:
+        return value.strip()
+
+
+class PricedListingRead(BaseModel):
+    """A catalog listing, the printing picked for it, and its market value in CAD."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    listing: TCGCSVProductRead
+    subtype: str
+    market: MoneyOutOptional = Field(validation_alias="market_cents")
+
+
+class CardLookupRead(BaseModel):
+    """What the card is in the catalog and what it is worth. A suggestion, never a write.
+
+    `suggested_index` points into `candidates` and `method` says who picked it, as for
+    `PricingSuggestionRead`. `set_id` is the local set the read set name resolved to.
+    """
+
+    set_id: uuid.UUID | None = None
+    set_name: str | None = None
+    candidates: list[PricedListingRead]
+    suggested_index: int | None = None
+    method: Literal["exact", "ai"] | None = None
+    message: str | None = None
+
+
 class PricingRefreshRead(BaseModel):
     attempted: int
     refreshed: int

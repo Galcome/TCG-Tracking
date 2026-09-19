@@ -530,6 +530,40 @@ class TCGCSVProvider:
 
         return self._cached_catalog(("products", category_id, group_id), load)
 
+
+    def market_prices(self, category_id: int, group_id: int) -> dict[tuple[int, str], Decimal]:
+        """USD market price per (listing, printing) in one group, cached for a day.
+
+        For pricing something before it is a product - a card under the camera. Uses the
+        discovery cache and daily request allowance, not a refresh run's per-run cache.
+        """
+        category = self._validate_catalog_id(category_id, "category ID")
+        group = self._validate_catalog_id(group_id, "group ID")
+
+        def load() -> list[tuple[int, str, Decimal]]:
+            rows = self._get_catalog(f"{TCGCSV_BASE_URL}/tcgplayer/{category}/{group}/prices")
+            prices: list[tuple[int, str, Decimal]] = []
+            for item in rows[:MAX_CATALOG_INDEX_PRODUCTS]:
+                product_id = _catalog_id(item, "productId")
+                raw_price = item.get("marketPrice")
+                if product_id is None or raw_price is None:
+                    continue
+                try:
+                    price = _bounded_positive_decimal(
+                        raw_price, maximum=MAX_PROVIDER_MARKET_PRICE, message="bad price"
+                    )
+                except PricingError:
+                    continue
+                prices.append((product_id, _normalise_subtype(item.get("subTypeName")), price))
+            return prices
+
+        return {
+            (product_id, subtype): price
+            for product_id, subtype, price in self._cached_catalog(
+                ("prices", category_id, group_id), load
+            )
+        }
+
     def _prices(self, category_id: str, group_id: str) -> list[dict[str, Any]]:
         if not category_id.isdigit() or not group_id.isdigit():
             raise PricingError("TCGCSV mapping has invalid category or group")

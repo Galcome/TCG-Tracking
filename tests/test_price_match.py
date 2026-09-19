@@ -173,7 +173,7 @@ def test_a_loosely_named_product_gets_a_short_list_best_first(monkeypatch):
 
     assert found.candidates == []
     assert chooser.asked == []
-    assert found.message == "No listing in Surging Sparks looks like this product."
+    assert found.message == "No listing in Surging Sparks looks like this."
 
     found = price_match.suggest(
         product("Elite Trainer Box", type_name="Box Set", number="5"), FakeProvider()

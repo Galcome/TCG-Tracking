@@ -51,6 +51,7 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ANTHROPIC_MODEL"] = "claude-haiku-4-5-20251001"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["OPENAI_MODEL"] = "gpt-5.6-luna"
+os.environ["VISION_DAILY_FRAME_LIMIT"] = "400"
 
 from src.auth import get_current_user  # noqa: E402
 from src.database import engine  # noqa: E402

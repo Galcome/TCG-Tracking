@@ -47,6 +47,7 @@ jobs:
       ANTHROPIC_MODEL: claude-haiku-4-5-20251001
       OPENAI_API_KEY: ""
       OPENAI_MODEL: gpt-5.6-luna
+      VISION_DAILY_FRAME_LIMIT: "400"
 
     steps:
       - name: Checkout code
@@ -148,6 +149,7 @@ jobs:
       ANTHROPIC_MODEL: claude-haiku-4-5-20251001
       OPENAI_API_KEY: ""
       OPENAI_MODEL: gpt-5.6-luna
+      VISION_DAILY_FRAME_LIMIT: "400"
 
     steps:
       - name: Checkout code

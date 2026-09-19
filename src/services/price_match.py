@@ -58,9 +58,30 @@ def _card_number(text: str | None) -> str | None:
     return (head.lstrip("0") or "0") if head.isdigit() else head
 
 
-def _exact(product: Product, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
-    names = {_normalise(product.name), _normalise(f"{product.card_set.name} {product.name}")}
-    number = _card_number(product.collector_number)
+@dataclass(frozen=True)
+class Identity:
+    """What a card or product is, from a stored product or from a camera read."""
+
+    name: str
+    set_name: str
+    kind: str
+    number: str | None = None
+    variant: str | None = None
+
+
+def identity(product: Product) -> Identity:
+    return Identity(
+        name=product.name,
+        set_name=product.card_set.name,
+        kind=product.product_type.name,
+        number=product.collector_number,
+        variant=product.variant,
+    )
+
+
+def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
+    names = {_normalise(wanted.name), _normalise(f"{wanted.set_name} {wanted.name}")}
+    number = _card_number(wanted.number)
     return [
         item
         for item in catalog
@@ -69,16 +90,20 @@ def _exact(product: Product, catalog: list[CatalogProduct]) -> list[CatalogProdu
     ]
 
 
-def _ranked(product: Product, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
+def overlap(wanted: str, offered: str, ignore: set[str] | frozenset[str] = frozenset()) -> float:
+    """Shared words over all words: 1.0 for the same words, 0.0 for none in common."""
+    left, right = _words(wanted) - ignore, _words(offered) - ignore
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
+
+
+def _ranked(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
     """The closest listings by shared words, ignoring the set name every listing carries."""
-    set_words = _words(product.card_set.name)
-    wanted = _words(product.name) - set_words
-    number = _card_number(product.collector_number)
+    set_words = _words(wanted.set_name)
+    number = _card_number(wanted.number)
     scored: list[tuple[float, str, CatalogProduct]] = []
     for item in catalog:
-        words = _words(item.name) - set_words
-        union = wanted | words
-        score = len(wanted & words) / len(union) if union else 0.0
+        score = overlap(wanted.name, item.name, set_words)
         if number is not None and _card_number(item.number) == number:
             score += 1.0
         if score > 0:
@@ -87,17 +112,36 @@ def _ranked(product: Product, catalog: list[CatalogProduct]) -> list[CatalogProd
     return [item for _, _, item in scored[:MAX_CANDIDATES]]
 
 
-def _subject(product: Product) -> str:
-    details = [f"set: {product.card_set.name}"]
-    if product.collector_number:
-        details.append(f"number: {product.collector_number}")
-    if product.variant:
-        details.append(f"variant: {product.variant}")
-    return f"{product.product_type.name} - {product.name} ({', '.join(details)})"
+def _subject(wanted: Identity) -> str:
+    details = [f"set: {wanted.set_name}"]
+    if wanted.number:
+        details.append(f"number: {wanted.number}")
+    if wanted.variant:
+        details.append(f"variant: {wanted.variant}")
+    return f"{wanted.kind} - {wanted.name} ({', '.join(details)})"
 
 
 def _option(item: CatalogProduct) -> str:
     return f"{item.name} (number {item.number})" if item.number else item.name
+
+
+def match(wanted: Identity, catalog: list[CatalogProduct]) -> Suggestion:
+    """The listing in one catalog group that `wanted` most likely is."""
+    exact = _exact(wanted, catalog)
+    if len(exact) == 1:
+        return Suggestion(exact, suggested=0, method="exact")
+
+    candidates = _ranked(wanted, catalog)
+    if not candidates:
+        return Suggestion([], message=f"No listing in {wanted.set_name} looks like this.")
+    try:
+        chosen = ai.choose(_subject(wanted), [_option(item) for item in candidates])
+    except ai.AIUnavailable:
+        # No model reachable: the ranked list is still a much shorter search than the group.
+        chosen = None
+    if chosen is None:
+        return Suggestion(candidates)
+    return Suggestion(candidates, suggested=chosen, method="ai")
 
 
 def suggest(product: Product, provider: TCGCSVProvider) -> Suggestion:
@@ -105,25 +149,5 @@ def suggest(product: Product, provider: TCGCSVProvider) -> Suggestion:
     category_id = product.game.tcgcsv_category_id
     card_set = product.card_set
     if category_id is None or card_set is None or card_set.tcgcsv_group_id is None:
-        return Suggestion(
-            [], message="This product's set is not linked to the price catalog yet."
-        )
-
-    catalog = provider.group_products(category_id, card_set.tcgcsv_group_id)
-    exact = _exact(product, catalog)
-    if len(exact) == 1:
-        return Suggestion(exact, suggested=0, method="exact")
-
-    candidates = _ranked(product, catalog)
-    if not candidates:
-        return Suggestion(
-            [], message=f"No listing in {card_set.name} looks like this product."
-        )
-    try:
-        chosen = ai.choose(_subject(product), [_option(item) for item in candidates])
-    except ai.AIUnavailable:
-        # No model reachable: the ranked list is still a much shorter search than the group.
-        chosen = None
-    if chosen is None:
-        return Suggestion(candidates)
-    return Suggestion(candidates, suggested=chosen, method="ai")
+        return Suggestion([], message="This product's set is not linked to the price catalog yet.")
+    return match(identity(product), provider.group_products(category_id, card_set.tcgcsv_group_id))

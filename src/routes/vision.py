@@ -63,7 +63,7 @@ def vision_status(_: Member = Depends(get_current_member)) -> ReadResult:
 @router.post("/cards", response_model=ReadResult)
 async def read_cards(
     photo: UploadFile = File(...),
-    _: Member = Depends(get_current_member),
+    member: Member = Depends(get_current_member),
 ) -> ReadResult:
     """What cards are in this photo.
 
@@ -84,7 +84,7 @@ async def read_cards(
     image = await _read_within_limit(photo)
 
     try:
-        found = vision.read_cards(image, photo.content_type)
+        found = vision.read_cards(image, photo.content_type, member.id)
     except vision.VisionUnavailable as unavailable:
         # 503 rather than 500: nothing is broken, the accelerator is just not there, and
         # the client falls back to typing.

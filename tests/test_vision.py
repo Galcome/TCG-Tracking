@@ -14,6 +14,9 @@ screen still works, it just has nothing to prefill.
 **No value, ever.** Not in the prompt, not in the response, not in the model.
 """
 
+import uuid
+from datetime import date
+
 import httpx
 import pytest
 
@@ -27,9 +30,9 @@ PIXEL = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 @pytest.fixture(autouse=True)
 def _reset_rate_limit():
     """Each test starts with the throttle clear, so ordering cannot make one flake."""
-    vision._last_call_at = 0.0
+    vision._usage.clear()
     yield
-    vision._last_call_at = 0.0
+    vision._usage.clear()
 
 
 @pytest.fixture
@@ -263,7 +266,40 @@ def test_photos_are_throttled(client, keyed, monkeypatch):
     assert post_photo(client).status_code == 200
     second = post_photo(client)
     assert second.status_code == 503
-    assert "few seconds" in second.json()["detail"]
+    assert "a second" in second.json()["detail"]
+
+
+def test_one_member_scanning_does_not_throttle_another(keyed, monkeypatch):
+    monkeypatch.setattr(vision.ai, "ask", lambda *args, **kwargs: [])
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    assert vision.read_cards(PIXEL, "image/png", first) == []
+    assert vision.read_cards(PIXEL, "image/png", second) == []
+    with pytest.raises(vision.VisionUnavailable, match="a second"):
+        vision.read_cards(PIXEL, "image/png", first)
+
+
+def test_a_day_of_frames_is_capped_per_member(keyed, monkeypatch):
+    """Live scan is a frame a second; the daily cap is what bounds the bill."""
+    monkeypatch.setattr(vision.ai, "ask", lambda *args, **kwargs: [])
+    monkeypatch.setattr(settings, "vision_daily_frame_limit", 2)
+    monkeypatch.setattr(vision, "MIN_SECONDS_BETWEEN_CALLS", 0.0)
+    member = uuid.uuid4()
+
+    vision.read_cards(PIXEL, "image/png", member)
+    vision.read_cards(PIXEL, "image/png", member)
+    with pytest.raises(vision.VisionUnavailable, match="limit"):
+        vision.read_cards(PIXEL, "image/png", member)
+    assert vision.read_cards(PIXEL, "image/png", uuid.uuid4()) == []
+
+
+def test_the_count_starts_again_the_next_day(keyed, monkeypatch):
+    monkeypatch.setattr(vision.ai, "ask", lambda *args, **kwargs: [])
+    monkeypatch.setattr(settings, "vision_daily_frame_limit", 1)
+    member = uuid.uuid4()
+    vision._usage[member] = vision._Usage(day=date(2000, 1, 1), count=1)
+
+    assert vision.read_cards(PIXEL, "image/png", member) == []
 
 
 def test_something_that_is_not_an_image_is_refused(client, keyed):
@@ -286,7 +322,7 @@ def test_an_enormous_photo_is_refused_before_it_is_buffered(client, keyed):
 
 def test_a_photo_exactly_at_the_ceiling_is_still_read(client, keyed, monkeypatch):
     """The limit is inclusive: MAX_IMAGE_BYTES is fine, one more is not."""
-    monkeypatch.setattr(vision, "read_cards", lambda image, content_type: [])
+    monkeypatch.setattr(vision, "read_cards", lambda image, content_type, member_id: [])
     response = client.post(
         "/api/v1/vision/cards",
         files={"photo": ("big.jpg", b"0" * vision.MAX_IMAGE_BYTES, "image/jpeg")},
@@ -304,7 +340,7 @@ def test_an_oversized_upload_is_refused_before_the_route_reads_it(client, keyed,
     """
     reached = False
 
-    def should_not_run(image, content_type):  # pragma: no cover - the point is it does not
+    def should_not_run(image, content_type, member_id):  # pragma: no cover - it must not run
         nonlocal reached
         reached = True
         return []
@@ -327,7 +363,7 @@ def test_a_photo_within_the_multipart_slack_still_reaches_the_route(client, keye
     Without slack, an honest 6 MiB photo would be refused at the door for boundary
     bytes it did not choose to send.
     """
-    monkeypatch.setattr(vision, "read_cards", lambda image, content_type: [])
+    monkeypatch.setattr(vision, "read_cards", lambda image, content_type, member_id: [])
     response = client.post(
         "/api/v1/vision/cards",
         files={"photo": ("big.jpg", b"0" * vision.MAX_IMAGE_BYTES, "image/jpeg")},
