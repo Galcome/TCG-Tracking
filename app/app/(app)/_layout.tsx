@@ -16,6 +16,7 @@ export default function ProtectedLayout() {
   const [actionError, setActionError] = useState<unknown>(null);
   const [adding, setAdding] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [quickActions, setQuickActions] = useState(false);
   const [more, setMore] = useState(false);
   const [account, setAccount] = useState(false);
   const member = useQuery({ queryKey: ['me'], queryFn: () => session!.api.me(), enabled: Boolean(session) });
@@ -32,14 +33,17 @@ export default function ProtectedLayout() {
     { href: '/money', label: 'Money', short: 'Money', icon: '$', bucket: undefined },
     { href: '/reports', label: 'Reports', short: 'Reports', icon: '▥', bucket: undefined },
   ] as const);
-  const mobileLinks = [links[0], { ...links[1], label: 'Stock', short: 'Stock', bucket: undefined }, links[3], links[4], { href: '/more', label: 'More', short: 'More', icon: '•••', bucket: undefined }] as const;
+  const mobileLinks = [links[0], { ...links[1], label: 'Stock', short: 'Stock', bucket: undefined },
+    { href: '/quick-actions', label: 'Add', short: 'Add', icon: '+', bucket: undefined }, links[4],
+    { href: '/more', label: 'More', short: 'More', icon: '•••', bucket: undefined }] as const;
   const navigation = (isDesktop ? links : mobileLinks).map(link => {
-    const selected = link.href === '/more' ? path === '/money' || path === '/reports' : path === link.href && (!link.bucket || params.bucket === link.bucket);
+    const isAdd = link.href === '/quick-actions';
+    const selected = link.href === '/more' ? path === '/vault' || path === '/money' || path === '/reports' : !isAdd && path === link.href && (!link.bucket || params.bucket === link.bucket);
     const tint = link.label === 'Inventory' ? colors.inventory : link.label === 'Store' ? colors.store : link.label === 'Vault' ? colors.vault : colors.accent;
     return <Pressable key={link.label} accessibilityRole="button" accessibilityLabel={link.label} accessibilityState={{ selected, disabled: !member.data }} disabled={!member.data}
-      onPress={() => { if (link.href === '/more') setMore(true); else router.push(link.bucket ? { pathname: '/inventory', params: { bucket: link.bucket } } : link.href); }}
+      onPress={() => { if (isAdd) setQuickActions(true); else if (link.href === '/more') setMore(true); else router.push(link.bucket ? { pathname: '/inventory', params: { bucket: link.bucket } } : link.href); }}
       style={({ pressed }) => ({ flex: isDesktop || wrapNavigation ? undefined : 1, width: wrapNavigation ? '25%' : undefined, minWidth: 0, minHeight: 48, paddingVertical: 8, paddingHorizontal: isDesktop ? 12 : 0, alignItems: isDesktop ? 'flex-start' : 'center', justifyContent: 'center', gap: 3, borderRadius: 8, backgroundColor: selected ? colors.raised : 'transparent', opacity: pressed ? 0.7 : !member.data ? 0.45 : 1 })}>
-      {!isDesktop ? <NavigationIcon name={link.label} color={selected ? tint : colors.muted} /> : null}
+      {!isDesktop ? <View style={isAdd ? { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: -14 } : undefined}><NavigationIcon name={link.label} color={isAdd ? colors.background : selected ? tint : colors.muted} /></View> : null}
       <Text style={{ maxWidth: '100%', textAlign: isDesktop ? 'left' : 'center', color: selected ? tint : colors.muted, fontSize: isDesktop ? 14 : 12, fontWeight: selected ? '700' : '500', fontFamily: selected ? fonts.bold : fonts.medium }}>{isDesktop ? link.label : link.short}</Text>
     </Pressable>;
   });
@@ -63,11 +67,14 @@ export default function ProtectedLayout() {
       {!isDesktop ? <View style={{ borderTopWidth: 1, borderColor: colors.edge, backgroundColor: colors.background }}>
         <View accessibilityLabel="Main navigation" style={{ flexDirection: 'row', flexWrap: wrapNavigation ? 'wrap' : 'nowrap', paddingHorizontal: 4 }}>{navigation}</View>
       </View> : null}
-      <Sheet title="More" open={more} onClose={() => setMore(false)}>
-        {links.slice(5).map(link => <Button key={link.label} label={link.label} onPress={() => { setMore(false); router.push(link.href); }} />)}
-        <Button label="New product" onPress={() => { setMore(false); setAdding(true); }} /><Button label="New sale" onPress={() => { setMore(false); setSelling(true); }} />
+      <Sheet title="Quick actions" open={quickActions} compact onClose={() => setQuickActions(false)}>
+        <Button variant="primary" label="Add product" onPress={() => { setQuickActions(false); setAdding(true); }} />
+        <Button label="Record sale" onPress={() => { setQuickActions(false); setSelling(true); }} />
       </Sheet>
-      <Sheet title="Account" open={account} onClose={() => setAccount(false)}><Copy>{member.data?.display_name}</Copy><Button label="Sign out" onPress={() => { setAccount(false); setAdding(false); setSelling(false); void signOut().catch(setActionError); }} /></Sheet>
+      <Sheet title="More" open={more} compact onClose={() => setMore(false)}>
+        {links.slice(3).filter(link => ['Vault', 'Money', 'Reports'].includes(link.label)).map(link => <Button key={link.label} label={link.label} onPress={() => { setMore(false); router.push(link.href); }} />)}
+      </Sheet>
+      <Sheet title="Account" open={account} compact onClose={() => setAccount(false)}><Copy>{member.data?.display_name}</Copy><Button label="Sign out" onPress={() => { setAccount(false); setAdding(false); setSelling(false); void signOut().catch(setActionError); }} /></Sheet>
     </View>
   </SafeAreaView>;
 }

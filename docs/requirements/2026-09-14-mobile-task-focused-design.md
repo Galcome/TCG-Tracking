@@ -50,3 +50,19 @@ session thread limit; root integration review is not a substitute for that gate.
 Status: first implementation ready for draft PR / CI; no new APK or deployment.
 Broader add/scan/rip guided-flow redesign and installed-device acceptance remain separate
 follow-up work. This checkpoint changes hierarchy, not every user journey end to end.
+
+## Installed-device follow-up: action-first stock
+
+The next Android alpha replaces the centre Vault destination with a prominent Add action.
+It opens Add product and Record sale directly; Vault remains available under the compact
+More destination sheet and as a colored Stock location. Stock now keeps all four location
+segments on one row, puts Filters beside search, hides default filter prose, suppresses
+duplicate set names and unavailable market-price copy, and exposes Rip directly on eligible
+sealed stock cards. The existing server preview, FIFO allocation and confirmation workflow
+remain authoritative; this is new access to the same mutation, not new client accounting.
+
+Dashboard primary cards use shorter labels and move detailed accounting context into the
+existing disclosures. This pass also introduces a text-free 1024px card-stack app icon and
+Android adaptive foreground matching the in-app brand. Android 0.1.3 / versionCode 4 is the
+planned signed build. Website production remains the Vite app; no hosting cutover is part of
+this release.

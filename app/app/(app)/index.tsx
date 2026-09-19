@@ -89,10 +89,7 @@ function HeroProfit({
   return <Card accent>
     <Copy muted>Realized profit</Copy>
     <Text style={{ color: colors.text, fontFamily: fonts.display, fontSize: heroSize, lineHeight: heroSize + 8, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1, maxWidth: '100%' }} allowFontScaling>{displayValue}</Text>
-    <Row>
-      <Copy>ROI {percent(roi)}</Copy>
-      <Copy muted>{money(costOfSales)} cost of sold stock · {saleCount} sale{saleCount === 1 ? '' : 's'}</Copy>
-    </Row>
+    <Row><Copy>ROI {percent(roi)}</Copy><Copy muted>{saleCount} sale{saleCount === 1 ? '' : 's'} · {money(costOfSales)} sold cost</Copy></Row>
   </Card>;
 }
 
@@ -111,15 +108,14 @@ export default function Dashboard() {
   return <Page title="Dashboard">
     {editing ? <EditTransactionDialog transaction={saleAsTransaction(editing)} onClose={() => setEditing(null)} /> : null}
     <PeriodSelector compact value={period} onChange={setPeriod} />
-    <Copy muted>Trading follows this period; holdings and cash are lifetime.</Copy>
     <ErrorNotice error={dashboard.error} retry={() => { void dashboard.refetch(); }} />
     {dashboard.isPending && <Loading />}
     {data && <><HeroProfit realizedProfit={data.realized_profit} roi={data.roi} costOfSales={data.cost_of_sales} saleCount={data.sale_count} width={width} />
     <MetricGrid>
-      <MetricTile label="Inventory at cost · all time" value={money(data.inventory_at_cost)} detail={`${data.units_in_stock} unit${data.units_in_stock === 1 ? '' : 's'} in stock`} slot={slot} />
-      <MetricTile label="Sales in period" value={money(data.total_sales)} detail={`${data.sale_count} sale${data.sale_count === 1 ? '' : 's'} recorded`} slot={slot} />
-      <MetricTile label="Cash balance · all time" value={money(data.cash_balance)} detail={`${money(data.cash_received)} cash received`} slot={slot} />
-      <MetricTile label="Total invested · all time" value={money(data.total_invested)} detail="paid into stock and its landed costs" slot={slot} />
+      <MetricTile label="Stock at cost" value={money(data.inventory_at_cost)} detail={`${data.units_in_stock} unit${data.units_in_stock === 1 ? '' : 's'} · all time`} slot={slot} />
+      <MetricTile label="Sales" value={money(data.total_sales)} detail={`${data.sale_count} recorded · selected period`} slot={slot} />
+      <MetricTile label="Cash" value={money(data.cash_balance)} detail="all time" slot={slot} />
+      <MetricTile label="Invested" value={money(data.total_invested)} detail="all time" slot={slot} />
     </MetricGrid>
     <Card><Disclosure title="Period cost and trading"><MetricGrid>
       <DetailMetric label="Purchases in period" value={money(data.purchases_in_period)} slot={slot} />
@@ -139,30 +135,33 @@ export default function Dashboard() {
     </Card> : null}</>}
     <ErrorNotice error={attention.error} retry={() => { void attention.refetch(); }} />
     {attention.data?.negative_stock_products.slice(0, 3).map(product => <Button key={product.id} variant="link" label={`Correct negative stock: ${product.name}`} onPress={() => router.push({ pathname: '/products/[productId]', params: { productId: product.id } })} />)}
-    <Heading>Where it sold · gross sales by channel</Heading>
-    <ErrorNotice error={channels.error} retry={() => { void channels.refetch(); }} />
-    {channels.isPending ? <Loading /> : null}
-    {channels.data?.length === 0 ? <Copy muted>No sales in this period.</Copy> : null}
-    {channels.data?.map(channel => <Card key={channel.key}><Copy>{channel.label}</Copy><Copy>{money(channel.revenue)}</Copy></Card>)}
-    <Heading>Game performance · selected period</Heading>
-    <ErrorNotice error={games.error} retry={() => { void games.refetch(); }} />
-    {games.isPending ? <Loading /> : null}
-    {games.data?.length === 0 ? <Copy muted>No game activity in this period.</Copy> : null}
-    {games.data?.map(game => <Card key={game.key}><Copy>{game.label}</Copy><Row>
-      <Copy>Realized profit {money(game.realized_profit)}</Copy><Copy>ROI {percent(game.roi)}</Copy>
-      <Copy>{game.sale_count} sales</Copy></Row></Card>)}
-    <Heading>Recent sales · selected period</Heading>
-    <ErrorNotice error={recent.error} retry={() => { void recent.refetch(); }} />
-    {recent.isPending ? <Loading /> : null}
-    {recent.data?.items.length === 0 ? <Copy muted>No sales in this period.</Copy> : null}
-    {recent.data?.items.map(sale => <Card key={sale.id}><Copy>{sale.product.name}</Copy><Row>
-      <Copy>{sale.sale_date ?? 'Undated'} · {sale.quantity} units</Copy><Copy>Gross {money(sale.amount)}</Copy>
-      <Copy>Realized profit {money(sale.realized_profit)}</Copy></Row>
-      {sale.has_unknown_cost ? <Copy muted>Unknown cost: profit may be incomplete.</Copy> : null}
-      <Button label={`View ${sale.product.name}`} onPress={() => router.push({ pathname: '/products/[productId]', params: { productId: sale.product_id } })} />
-      <Button label={`Edit sale: ${sale.product.name}`} disabled={sale.status === 'voided'} onPress={() => setEditing(sale)} />
-    </Card>)}
-    <Button label="Open sales ledger" onPress={() => router.push('/sales')} />
-    <MonthlyTrend />
+    <Card><Disclosure title="Sales insights">
+      <Heading>Where it sold</Heading>
+      <ErrorNotice error={channels.error} retry={() => { void channels.refetch(); }} />
+      {channels.isPending ? <Loading /> : null}
+      {channels.data?.length === 0 ? <Copy muted>No sales in this period.</Copy> : null}
+      {channels.data?.map(channel => <Card key={channel.key}><Copy>{channel.label}</Copy><Copy>{money(channel.revenue)} gross</Copy></Card>)}
+      <Heading>Game performance</Heading>
+      <ErrorNotice error={games.error} retry={() => { void games.refetch(); }} />
+      {games.isPending ? <Loading /> : null}
+      {games.data?.length === 0 ? <Copy muted>No game activity in this period.</Copy> : null}
+      {games.data?.map(game => <Card key={game.key}><Copy>{game.label}</Copy><Row>
+        <Copy>Profit {money(game.realized_profit)}</Copy><Copy>ROI {percent(game.roi)}</Copy>
+        <Copy>{game.sale_count} sales</Copy></Row></Card>)}
+    </Disclosure></Card>
+    <Card><Disclosure title="Recent sales">
+      <ErrorNotice error={recent.error} retry={() => { void recent.refetch(); }} />
+      {recent.isPending ? <Loading /> : null}
+      {recent.data?.items.length === 0 ? <Copy muted>No sales in this period.</Copy> : null}
+      {recent.data?.items.map(sale => <Card key={sale.id}><Copy>{sale.product.name}</Copy><Row>
+        <Copy>{sale.sale_date ?? 'Undated'} · {sale.quantity} units</Copy><Copy>Gross {money(sale.amount)}</Copy>
+        <Copy>Profit {money(sale.realized_profit)}</Copy></Row>
+        {sale.has_unknown_cost ? <Copy muted>Unknown cost: profit may be incomplete.</Copy> : null}
+        <Button label={`View ${sale.product.name}`} onPress={() => router.push({ pathname: '/products/[productId]', params: { productId: sale.product_id } })} />
+        <Button label={`Edit sale: ${sale.product.name}`} disabled={sale.status === 'voided'} onPress={() => setEditing(sale)} />
+      </Card>)}
+      <Button label="Open sales ledger" onPress={() => router.push('/sales')} />
+    </Disclosure></Card>
+    <Card><Disclosure title="Monthly trend"><MonthlyTrend /></Disclosure></Card>
   </Page>;
 }
