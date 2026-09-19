@@ -18,35 +18,17 @@ variant and language explicitly and is told to leave them empty rather than gues
 
 **It degrades to typing.** No key, a failed call, a rate limit, a malformed answer - every
 screen still works exactly as it did, the same way the app behaves with no price feed.
+Before that, a failed or garbled answer moves on to the next provider in `ai.PROVIDERS`
+(Gemini, Groq, Haiku, OpenAI), so one provider's outage is not the feature's.
 """
 
 from __future__ import annotations
 
-import base64
 import json
-import logging
 import time
 from dataclasses import dataclass
 
-import httpx
-
-from src.config import settings
-
-logger = logging.getLogger(__name__)
-
-#: Gemini's REST endpoint. The model is the cheapest one that reads images, because this is
-#: an accelerator on a form somebody can always fill in by hand.
-#:
-#: Built per call rather than at import, because the model name is configuration and a
-#: pinned one expires. This shipped hardcoded to `gemini-2.0-flash`; Google retired that
-#: entire generation, and the live API answers `404 NOT_FOUND - no longer available`. Every
-#: photo would have degraded to typing, silently and forever, with the tests all passing -
-#: they mock the call, so no suite on earth would have caught it.
-_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-
-
-def _endpoint() -> str:
-    return _ENDPOINT.format(model=settings.gemini_model)
+from src.services import ai
 
 #: Deliberately blunt. A retry loop against a free tier is how the free tier stops being
 #: free, and nothing here is worth that - the fallback is typing, which always works.
@@ -92,7 +74,7 @@ _last_call_at = 0.0
 
 def is_configured() -> bool:
     """Whether a key exists at all. The UI hides the button when it does not."""
-    return bool(settings.gemini_api_key)
+    return ai.is_configured()
 
 
 def _rate_limit() -> None:
@@ -103,28 +85,18 @@ def _rate_limit() -> None:
     _last_call_at = now
 
 
-def _parse(payload: dict) -> list[ReadCard]:
-    """Pull the card list out of the response, tolerating anything malformed.
+def _parse(text: str) -> list[ReadCard] | None:
+    """The card list out of the model's text, or None when it is not the promised shape.
 
-    A model that returns prose instead of JSON, or JSON of the wrong shape, produces an
-    empty list rather than an exception. The screen it feeds still works; it just has
-    nothing to prefill.
+    None moves on to the next provider. An empty list is a real answer - no card it could
+    name - and is returned as is rather than paying three more providers to agree.
     """
     try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError):
-        return []
-
-    # Models wrap JSON in code fences often enough to be worth handling.
-    cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
-
-    try:
-        parsed = json.loads(cleaned)
-        rows = parsed["cards"]
+        rows = json.loads(ai.clean_json(text))["cards"]
     except (json.JSONDecodeError, KeyError, TypeError):
-        return []
+        return None
     if not isinstance(rows, list):
-        return []
+        return None
 
     cards: list[ReadCard] = []
     for row in rows:
@@ -158,37 +130,9 @@ def read_cards(image: bytes, content_type: str) -> list[ReadCard]:
 
     _rate_limit()
 
-    body = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": _PROMPT},
-                    {
-                        "inline_data": {
-                            "mime_type": content_type,
-                            "data": base64.b64encode(image).decode(),
-                        }
-                    },
-                ]
-            }
-        ],
-        "generationConfig": {"responseMimeType": "application/json"},
-    }
-
     try:
-        response = httpx.post(
-            _endpoint(),
-            json=body,
-            # The key goes in a header rather than the query string, so it cannot end up
-            # in anybody's access log.
-            headers={"x-goog-api-key": settings.gemini_api_key},
-            timeout=30.0,
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as error:
-        # Deliberately not logging the exception body: it can echo the request, and the
-        # request carries the key.
-        logger.warning("vision call failed: %s", type(error).__name__)
+        cards = ai.ask(_PROMPT, _parse, image=ai.Image(image, content_type))
+    except ai.AIUnavailable as error:
         raise VisionUnavailable("Could not read that photo. Type them in instead.") from error
-
-    return _parse(response.json())
+    # Every provider answered with something unreadable: nothing to prefill, same as typing.
+    return cards or []
