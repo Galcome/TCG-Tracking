@@ -183,6 +183,21 @@ def test_a_loosely_named_product_gets_a_short_list_best_first(monkeypatch):
     assert "number: 5" in chooser.asked[-1][0]
 
 
+def test_a_matching_number_boosts_a_ranked_candidate(monkeypatch):
+    Chooser(monkeypatch, answer=None)
+    catalog = [
+        listing(10, "Pikachu promo card", "001"),
+        listing(11, "Pikachu alternate card", "002"),
+    ]
+
+    found = price_match.suggest(
+        product("Pikachu card", type_name="Raw Single", number="2"),
+        FakeProvider(catalog),
+    )
+
+    assert ids(found) == [11, 10]
+
+
 def test_the_short_list_is_bounded(monkeypatch):
     Chooser(monkeypatch)
     catalog = [listing(n, f"Booster Bundle {n}") for n in range(1, 30)]

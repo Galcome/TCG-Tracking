@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     #: Fallbacks, tried in this order when the one before fails or answers nonsense. Each
     #: is skipped while its key is blank, so any one key switches the feature on.
     groq_api_key: str = ""
-    groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    groq_model: str = "qwen/qwen3.6-27b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
     openai_api_key: str = ""
@@ -121,6 +121,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_prod_cors(self) -> "Settings":
+        # The pricing worker serves no HTTP, so CORS means nothing there. Requiring it made
+        # the nightly refresh die at import on a service nobody set ALLOWED_ORIGINS for.
+        if self.app_role == "worker":
+            return self
         origins = {origin.strip() for origin in self.allowed_origins.split(",")}
         if self.is_production and "*" in origins:
             raise ValueError("ALLOWED_ORIGINS cannot include '*' in production.")
