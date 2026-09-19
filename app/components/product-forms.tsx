@@ -32,6 +32,7 @@ import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui
 import { SetField } from './set-field'
 import { AllocationEditor } from './allocation-editor'
 import { allocationError, fundingPayload, type AllocationDraft } from '../lib/allocation-drafts'
+import { DateField } from './date-field'
 
 export interface ProductFormsProps {
   /** The product being edited or the product receiving a ledger operation. */
@@ -355,7 +356,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
         <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" />
         <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
       </Row>
-      <Field label="Purchase date" value={purchaseDate} onChangeText={setPurchaseDate} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+      <DateField label="Purchase date" value={purchaseDate} onChange={setPurchaseDate} />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
       <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
@@ -456,7 +457,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
         <Field label="Quantity" value={quantity} onChangeText={setQuantity} autoFocus keyboardType="number-pad" />
         <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
       </Row>
-      <Field label="Purchase date" value={purchaseDate} onChangeText={setPurchaseDate} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+      <DateField label="Purchase date" value={purchaseDate} onChange={setPurchaseDate} />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
       <AllocationEditor funding rows={fundingSplit} onChange={setFundingSplit} accounts={accounts} defaultAccount={fundedBy} disabled={create.isPending} />
@@ -637,7 +638,7 @@ function MoveForm({ product, onClose }: { product: Product; onClose: () => void 
       </Row>
       <Field label="How many" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" autoFocus />
       <Copy muted>{available} units in {BUCKET_LABELS[from]}.</Copy>
-      <Field label="Date" value={movedOn} onChangeText={setMovedOn} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+      <DateField label="Date" value={movedOn} onChange={setMovedOn} />
       <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
     </FormSheet>
   )
@@ -797,7 +798,7 @@ function TransactionForm({ transaction, onClose }: { transaction: Transaction; o
         )}
       </Row>
       <Row>
-        <Field label="Date" value={occurredOn} onChangeText={setOccurredOn} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+        <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
         <Choice label={transaction.kind === 'sale' ? 'Sold by' : 'Member'} value={member} options={[option('', 'Unassigned'), ...(members.data ?? []).map((item) => option(item.id, item.display_name))]} onChange={setMember} />
       </Row>
       {isPurchase ? <Field label="Bought from" value={label} onChangeText={setLabel} /> : null}

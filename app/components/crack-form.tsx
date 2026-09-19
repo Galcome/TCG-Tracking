@@ -28,6 +28,7 @@ import {
 import { bySlug, opensInto, suggestedProductName } from '../lib/product-types'
 import { todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
+import { DateField } from './date-field'
 
 export interface CrackCaseDialogProps {
   product: ProductDetail
@@ -341,13 +342,7 @@ export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
       <Copy muted>
         The server will carry the source cost and original purchase date into these {words.children}; this screen never recalculates either value.
       </Copy>
-      <Field
-        label="Date opened"
-        value={occurredOn}
-        onChangeText={setOccurredOn}
-        keyboardType="numbers-and-punctuation"
-        placeholder="YYYY-MM-DD"
-      />
+      <DateField label="Date opened" value={occurredOn} onChange={setOccurredOn} />
     </CrackSheet>
   )
 }

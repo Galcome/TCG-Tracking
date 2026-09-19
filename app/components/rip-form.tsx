@@ -38,6 +38,7 @@ import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } f
 import { PhotoReader } from './photo-reader'
 import { CardScanner, canLiveScan } from './card-scanner'
 import { scanReviewError, type ScanItem } from '../lib/scan-session'
+import { DateField } from './date-field'
 
 export interface RipDialogProps {
   product: Product
@@ -595,14 +596,7 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
           keyboardType="number-pad"
           autoFocus
         />
-        <Field
-          label="Date"
-          value={occurredOn}
-          onChangeText={changeDate}
-          editable={!run.isPending}
-          placeholder="YYYY-MM-DD"
-          keyboardType="numbers-and-punctuation"
-        />
+        <DateField label="Date" value={occurredOn} onChange={changeDate} disabled={run.isPending} />
       </Row>
 
       <Choice

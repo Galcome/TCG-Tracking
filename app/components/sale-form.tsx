@@ -30,6 +30,7 @@ import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet, Signed } from './ui'
 import { AllocationEditor } from './allocation-editor'
 import { allocationError, allocationPayload, type AllocationDraft } from '../lib/allocation-drafts'
+import { DateField } from './date-field'
 
 export interface RecordSaleDialogProps {
   /** Omit to open a product picker before showing the sale fields. */
@@ -343,7 +344,7 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
           options={[option('', 'Me'), ...(members.data ?? []).map((member) => option(member.id, member.display_name))]}
           onChange={setSoldByMemberId}
         />
-        <Field label="Sale date" value={saleDateValue} onChangeText={setSaleDateValue} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+        <DateField label="Sale date" value={saleDateValue} onChange={setSaleDateValue} />
       </Row>
       <Row>
         <Field label="Platform fees" value={platformFees} onChangeText={setPlatformFees} keyboardType="decimal-pad" placeholder="0.00" />

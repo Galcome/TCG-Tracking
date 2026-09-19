@@ -12,6 +12,7 @@ import {
 } from '../lib/valuation-drafts'
 import { todayIso } from '../lib/format'
 import { Button, Card, Copy, ErrorNotice, Field, Sheet } from './ui'
+import { DateField } from './date-field'
 
 export interface RecordValuationDialogProps {
   product: {
@@ -96,14 +97,7 @@ export function RecordValuationDialog({
         autoFocus
         placeholder="0.00"
       />
-      <Field
-        label="As at"
-        value={capturedOn}
-        onChangeText={setCapturedOn}
-        editable={!busy}
-        keyboardType="numbers-and-punctuation"
-        placeholder="YYYY-MM-DD"
-      />
+      <DateField label="As at" value={capturedOn} onChange={setCapturedOn} disabled={busy} />
       <Field
         label="Note"
         value={notes}

@@ -18,6 +18,7 @@ import {
 import { money, todayIso } from '../lib/format'
 import type { Account } from '../lib/api'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { DateField } from './date-field'
 
 interface MoneySheetProps {
   title: string
@@ -131,7 +132,7 @@ export function TransferDialog({ accounts, from, onClose }: TransferDialogProps)
         </Copy>
       ) : null}
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
-      <Field label="Date" value={occurredOn} onChangeText={setOccurredOn} keyboardType="numbers-and-punctuation" placeholder="YYYY-MM-DD" />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
       <Field label="Note" value={notes} onChangeText={setNotes} multiline />
     </MoneySheet>
   )
@@ -205,7 +206,7 @@ export function BalanceAdjustmentDialog({ account, onClose }: BalanceAdjustmentD
         onChange={(value) => setDirection(value as MoneyAdjustmentDirection)}
       />
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
-      <Field label="Date" value={occurredOn} onChangeText={setOccurredOn} keyboardType="numbers-and-punctuation" placeholder="YYYY-MM-DD" />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
       <Field label="Audit note" value={notes} onChangeText={setNotes} multiline placeholder="Why this balance needs correcting" />
     </MoneySheet>
   )

@@ -177,6 +177,12 @@ test('split purchase funding and mixed sale proceeds create exact separate accou
   const funding = (await (await request.get(API + '/api/v1/money/movements?kind=funding&limit=200')).json()).items.find((m: { product_name: string }) => m.product_name === product.name);
   expect(funding.legs.map((leg: { amount: string }) => leg.amount).sort()).toEqual(['-5.10','-5.20']);
   await page.getByRole('button', { name: 'Record sale', exact: true }).click();
+  const now = new Date();
+  const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+  const saleDate = page.getByLabel('Sale date', { exact: true });
+  await expect(saleDate).toHaveAttribute('type', 'date');
+  await expect(saleDate).toHaveValue(today);
+  await expect(saleDate).toHaveAttribute('max', today);
   await page.getByLabel('Total received', { exact: true }).fill('20.00');
   await page.getByRole('button', { name: 'Split proceeds', exact: true }).click();
   await page.getByRole('button', { name: /^Proceeds 1 account:/ }).click();
