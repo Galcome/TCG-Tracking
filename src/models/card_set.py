@@ -17,7 +17,7 @@ has no date and is always offered, which is also what makes pre-orders work.
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Index, String, Uuid, text
+from sqlalchemy import Date, ForeignKey, Index, Integer, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database import Base
@@ -53,6 +53,12 @@ class CardSet(Base, TimestampMixin):
     #: A seeded set with a future date stays out of the suggestions until the day itself,
     #: so the calendar needs no maintenance and cannot confidently name the wrong latest set.
     released_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    #: The TCGCSV catalog group this set is, once the daily sync has seen it. It is what
+    #: lets pricing go straight to the right group instead of asking someone to find it.
+    tcgcsv_group_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, unique=True, index=True
+    )
 
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True

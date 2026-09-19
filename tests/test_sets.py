@@ -84,14 +84,33 @@ def test_a_set_somebody_typed_has_no_date_and_is_always_offered(client, make_pro
 # ------------------------------------------------------------------- suggestions
 
 
-def test_what_the_group_actually_buys_comes_first(client, make_product):
-    """The seeded calendar is a bonus. Unmaintained it goes stale, so it never leads.
+def suggested(db, game_id, today: date) -> list[str]:
+    return [record.name for record, _ in sets.suggestions(db, game_id=game_id, today=today)]
 
-    When it ages out nothing breaks - suggestions fall back to what really gets bought.
-    """
+
+def test_what_the_group_actually_buys_comes_first(db, game_id, make_product):
+    """Once launch week is over, the calendar never leads what really gets bought."""
     make_product("Something Real", set_name="Actually Bought")
 
-    assert names(client)[0] == "Actually Bought"
+    assert suggested(db, game_id, date(2030, 1, 1))[0] == "Actually Bought"
+
+
+def test_a_fresh_release_leads_even_over_used_sets(db, game_id, make_product):
+    """Launch week is when somebody enters boxes of a set nobody has bought yet."""
+    make_product("Something Real", set_name="Actually Bought")
+
+    assert suggested(db, game_id, date(2026, 9, 19))[:2] == [
+        "30th Celebration",
+        "Actually Bought",
+    ]
+
+
+def test_a_release_stops_leading_after_its_launch_window(db, game_id, make_product):
+    make_product("Something Real", set_name="Actually Bought")
+    after = date(2026, 9, 16) + timedelta(days=sets.NEW_RELEASE_DAYS + 1)
+
+    offered = suggested(db, game_id, after)
+    assert offered.index("Actually Bought") < offered.index("30th Celebration")
 
 
 def test_suggestions_are_scoped_to_one_game(client, db):
