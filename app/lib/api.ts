@@ -253,6 +253,14 @@ export interface Dashboard {
   expenses_by_category: { category: ExpenseCategory; amount: string }[]
   /** Realized trading profit less overhead — the headline figure. */
   net_profit: string
+  /** Market value of priced stock only, as of now. Display-only, never cost or profit. */
+  market_value: string
+  /** FIFO cost of those same priced units. */
+  priced_cost: string
+  unrealized_gain: string
+  /** How much of `units_in_stock` the market value covers. */
+  priced_units: number
+  stale_units: number
   /** Trading only: overhead has no cost of sales to divide by. */
   roi: number | null
   inventory_at_cost: string

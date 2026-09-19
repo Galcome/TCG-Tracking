@@ -26,7 +26,7 @@ export default function Inventory() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
-  const [operation, setOperation] = useState<{ product: Product; mode: 'move' | 'edit' } | null>(null);
+  const [operation, setOperation] = useState<{ product: Product; mode: 'move' } | null>(null);
   const [selling, setSelling] = useState<Product | null>(null);
   const [ripping, setRipping] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
@@ -63,8 +63,7 @@ export default function Inventory() {
     {products.data?.items.map(p => <StockCard key={p.id} product={p} bucket={bucket} dense={isDesktop}
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
-      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
-      onEdit={() => setOperation({ product: p, mode: 'edit' })} />)}
+      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined} />)}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}
   </Page>;

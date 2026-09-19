@@ -116,7 +116,7 @@ test('responsive stock cards preserve action guards and keep controls within the
     await page.setViewportSize({ width, height: 900 });
     for (const name of ['Stock action fixture', 'Empty stock fixture', 'Archived stock fixture']) {
       const card = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
-      await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeEnabled();
+      await expect(card.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
       for (const label of ['Sell', 'Move']) {
         const action = card.getByRole('button', { name: label, exact: true });
         if (name === product.name) await expect(action).toBeEnabled(); else await expect(action).toBeDisabled();
@@ -146,8 +146,6 @@ test('responsive stock cards preserve action guards and keep controls within the
   await active.getByRole('button', { name: 'Move', exact: true }).click();
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Move stock', exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  await active.getByRole('button', { name: 'Edit', exact: true }).click();
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(product.name);
 });
 
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
@@ -381,10 +379,15 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
     products_with_negative_stock: 0, net_proceeds: '5.00', fees_paid: '1.01', store_credit: '2.00',
     cash_received: '3.00', cash_balance: '-17.01',
     expenses: '1.00', expenses_by_category: [{ category: 'supplies', amount: '1.00' }], net_profit: '90071992547408.91',
+    market_value: '12.00', priced_cost: '10.01', unrealized_gain: '1.99', priced_units: 1, stale_units: 1,
   } }));
   await signIn(page);
   await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toBeVisible();
   await expect(page.getByText('Expenses $1.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Market value of stock', { exact: true })).toBeVisible();
+  await expect(page.getByText('$12.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('$1.99', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();

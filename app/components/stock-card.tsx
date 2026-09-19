@@ -7,9 +7,11 @@ import { canUseFreeMarketPricing, marketPosition } from '../lib/pricing-drafts';
 import { GameIdentity } from './game-identity';
 import { Button, Card, Copy, Row, Signed } from './ui';
 
-export function StockCard({ product: p, bucket, dense, onDetails, onSell, onMove, onEdit, onRip }: {
+// Edit lives on the product page: it is rare from a list, and a fourth equal-weight button
+// crowded the actions that are not.
+export function StockCard({ product: p, bucket, dense, onDetails, onSell, onMove, onRip }: {
   product: Product; bucket: Bucket | ''; dense: boolean;
-  onDetails: () => void; onSell: () => void; onMove: () => void; onEdit: () => void; onRip?: () => void;
+  onDetails: () => void; onSell: () => void; onMove: () => void; onRip?: () => void;
 }) {
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
@@ -34,9 +36,8 @@ export function StockCard({ product: p, bucket, dense, onDetails, onSell, onMove
       {position ? <Copy muted>{money(p.market_estimate?.value)} / unit{p.market_estimate?.status === 'stale' ? ' · stale' : ''}</Copy> : null}
       {!position && !noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}
     </View>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button variant="primary" style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />
       <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Move" disabled={noStock} onPress={onMove} />
-      {onRip ? <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Rip" disabled={noStock} onPress={onRip} /> : null}
-      <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Edit" onPress={onEdit} /></View>
+      {onRip ? <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Rip" disabled={noStock} onPress={onRip} /> : null}</View>
   </View></Card>;
 }
