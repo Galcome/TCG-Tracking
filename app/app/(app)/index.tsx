@@ -11,7 +11,7 @@ import { useTypography } from '../../context/TypographyContext';
 import { usePeriodPreference } from '../../lib/period-preference';
 import { money, percent } from '../../lib/format';
 import { EditTransactionDialog } from '../../components/product-forms';
-import { saleAsTransaction, type SaleRow } from '../../lib/api';
+import { EXPENSE_CATEGORY_LABELS, saleAsTransaction, type SaleRow } from '../../lib/api';
 
 type MetricSlotProps = {
   isDesktop: boolean;
@@ -69,29 +69,34 @@ function MetricGrid({ children }: { children: React.ReactNode }) {
 }
 
 function HeroProfit({
+  netProfit,
   realizedProfit,
+  expenses,
   roi,
   costOfSales,
   saleCount,
   width,
 }: {
+  netProfit: string;
   realizedProfit: string;
+  expenses: string;
   roi: number | null;
   costOfSales: string;
   saleCount: number;
   width: number;
 }) {
   const fonts = useTypography();
-  const displayValue = money(realizedProfit);
+  const displayValue = money(netProfit);
   // Keep unusually large exact-CAD values inside a phone card while preserving a
   // genuinely large headline for normal values. Text scaling remains enabled.
   const baseSize = width < 360 ? 32 : 40;
   const availableWidth = Math.max(220, width - 64);
   const heroSize = Math.max(20, Math.min(baseSize, Math.floor(availableWidth / Math.max(displayValue.length * 0.58, 1))));
   return <Card accent>
-    <Copy muted>Realized profit</Copy>
-    <Text style={{ color: toneColor(realizedProfit) ?? colors.text, fontFamily: fonts.display, fontSize: heroSize, lineHeight: heroSize + 8, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1, maxWidth: '100%' }} allowFontScaling>{displayValue}</Text>
-    <Row><Copy>ROI <Signed value={roi}>{percent(roi)}</Signed></Copy><Copy muted>{saleCount} sale{saleCount === 1 ? '' : 's'} · {money(costOfSales)} sold cost</Copy></Row>
+    <Copy muted>Net profit</Copy>
+    <Text style={{ color: toneColor(netProfit) ?? colors.text, fontFamily: fonts.display, fontSize: heroSize, lineHeight: heroSize + 8, fontWeight: '700', fontVariant: ['tabular-nums'], flexShrink: 1, maxWidth: '100%' }} allowFontScaling>{displayValue}</Text>
+    <Row><Copy>Trading <Signed value={realizedProfit}>{money(realizedProfit)}</Signed></Copy><Copy>Expenses {money(expenses)}</Copy></Row>
+    <Row><Copy>Trading ROI <Signed value={roi}>{percent(roi)}</Signed></Copy><Copy muted>{saleCount} sale{saleCount === 1 ? '' : 's'} · {money(costOfSales)} sold cost</Copy></Row>
   </Card>;
 }
 
@@ -112,7 +117,7 @@ export default function Dashboard() {
     <PeriodSelector compact value={period} onChange={setPeriod} />
     <ErrorNotice error={dashboard.error} retry={() => { void dashboard.refetch(); }} />
     {dashboard.isPending && <Loading />}
-    {data && <><HeroProfit realizedProfit={data.realized_profit} roi={data.roi} costOfSales={data.cost_of_sales} saleCount={data.sale_count} width={width} />
+    {data && <><HeroProfit netProfit={data.net_profit} realizedProfit={data.realized_profit} expenses={data.expenses} roi={data.roi} costOfSales={data.cost_of_sales} saleCount={data.sale_count} width={width} />
     <MetricGrid>
       <MetricTile label="Stock at cost" value={money(data.inventory_at_cost)} detail={`${data.units_in_stock} unit${data.units_in_stock === 1 ? '' : 's'} · all time`} slot={slot} />
       <MetricTile label="Sales" value={money(data.total_sales)} detail={`${data.sale_count} recorded · selected period`} slot={slot} />
@@ -123,6 +128,7 @@ export default function Dashboard() {
       <DetailMetric label="Purchases in period" value={money(data.purchases_in_period)} slot={slot} />
       <DetailMetric label="Cost of sold units" value={money(data.cost_of_sales)} slot={slot} />
       <DetailMetric label="Average sale" value={money(data.average_sale)} slot={slot} />
+      {data.expenses_by_category.map(total => <DetailMetric key={total.category} label={`Expenses · ${EXPENSE_CATEGORY_LABELS[total.category]}`} value={money(total.amount)} slot={slot} />)}
     </MetricGrid></Disclosure></Card>
     <Card><Disclosure title="Lifetime cash context"><MetricGrid>
       <DetailMetric label="Bulk cost written off · lifetime, not cash" value={money(data.cost_written_off)} slot={slot} />

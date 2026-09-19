@@ -380,9 +380,11 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
     average_sale: null, units_in_stock: 1, sale_count: 0, sales_missing_cost: 0, undated_sales: 1,
     products_with_negative_stock: 0, net_proceeds: '5.00', fees_paid: '1.01', store_credit: '2.00',
     cash_received: '3.00', cash_balance: '-17.01',
+    expenses: '1.00', expenses_by_category: [{ category: 'supplies', amount: '1.00' }], net_profit: '90071992547408.91',
   } }));
   await signIn(page);
-  await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('Expenses $1.00', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
   await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
@@ -402,7 +404,9 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
   await expect(trend.getByText('Realized profit -$0.01', { exact: true })).toBeVisible();
   // Signed figures carry the theme's gain/loss tones; costs stay neutral.
   await expect(trend.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
-  await expect(page.getByText('$90,071,992,547,409.91', { exact: true }).first()).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await page.getByRole('button', { name: 'Period cost and trading', exact: true }).click();
+  await expect(page.getByText('Expenses · Supplies', { exact: true })).toBeVisible();
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
@@ -1125,6 +1129,32 @@ test('money adjustments use exact cents and transfer void restores both balances
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect((await readAccounts()).joint_balance).toBe(before.joint_balance);
 });
+test('an expense takes two fields from Add, pays from joint and lowers net profit', async ({ page, request }) => {
+  await signIn(page);
+  const board = async () => (await request.get(API + '/api/v1/dashboard?period=all')).json();
+  const cents = (s: string) => BigInt(s.replace('.', ''));
+  const before = await board();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: (page.viewportSize()?.width ?? 1280) < 1000 ? 'Add expense' : 'New expense', exact: true }).click();
+  await page.getByLabel('How much', { exact: true }).fill('12.34');
+  await page.getByRole('button', { name: 'Shipping supplies', exact: true }).click();
+  const created = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/expenses');
+  await page.getByRole('button', { name: 'Save expense', exact: true }).click();
+  const response = await created;
+  const sent = response.request().postDataJSON();
+  expect(sent.category).toBe('shipping_supplies');
+  expect(sent.amount).toBe('12.34');
+  expect(sent.occurred_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(sent.paid_from).toHaveLength(1);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const after = await board();
+  expect(cents(after.net_profit)).toBe(cents(before.net_profit) - 1234n);
+  expect(after.realized_profit).toBe(before.realized_profit);
+  const { id } = await response.json();
+  expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
+  expect((await board()).net_profit).toBe(before.net_profit);
+});
+
 test('sale preview, store-credit proceeds and void preserve server money and stock', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();

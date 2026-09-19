@@ -247,6 +247,13 @@ export interface ProductPage {
 
 export interface Dashboard {
   realized_profit: string
+  /** Overhead dated inside the period. */
+  expenses: string
+  /** Largest first; only categories with spending. */
+  expenses_by_category: { category: ExpenseCategory; amount: string }[]
+  /** Realized trading profit less overhead — the headline figure. */
+  net_profit: string
+  /** Trading only: overhead has no cost of sales to divide by. */
   roi: number | null
   inventory_at_cost: string
   total_invested: string
@@ -778,7 +785,29 @@ export interface AccountsPage {
   credit_stores: number
 }
 
-export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment'
+export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense'
+
+export const EXPENSE_CATEGORIES = [
+  'supplies',
+  'shipping_supplies',
+  'show_fees',
+  'subscriptions',
+  'travel',
+  'grading_fees',
+  'other',
+] as const
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  supplies: 'Supplies',
+  shipping_supplies: 'Shipping supplies',
+  show_fees: 'Show & event fees',
+  subscriptions: 'Subscriptions',
+  travel: 'Travel',
+  grading_fees: 'Grading fees',
+  other: 'Other',
+}
 
 export interface MovementLeg {
   account_id: string
@@ -798,6 +827,8 @@ export interface Movement {
   purchase_id: string | null
   sale_id: string | null
   product_name: string | null
+  /** Set on expenses only. */
+  expense_category: ExpenseCategory | null
   notes: string | null
   status: string
 }
@@ -830,6 +861,7 @@ export const MOVEMENT_LABELS: Record<MovementKind, string> = {
   proceeds: 'Sold stock',
   transfer: 'Transfer',
   adjustment: 'Adjustment',
+  expense: 'Expense',
 }
 
 export interface NewProduct {
@@ -1238,6 +1270,19 @@ export function createApi(request: ApiRequest) { return {
 
   movements: (params: { account_id?: string; kind?: MovementKind; limit?: number; offset?: number }) =>
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
+
+  /** Overhead. `paid_from` omitted means the joint account paid. */
+  createExpense: (expense: {
+    category: ExpenseCategory
+    amount: string
+    occurred_on?: string
+    paid_from?: FundingLeg[]
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    }),
 
   /** Paying a partner back, putting cash in, and settling up are all this one call. */
   createTransfer: (transfer: {
