@@ -93,6 +93,32 @@ export interface PricingRefresh {
   errors: string[]
 }
 
+/** One printing a scanned card could be, with the catalog's market price in CAD. */
+export interface PricedListing {
+  listing: TCGCSVProduct
+  subtype: string
+  /** Null when the catalog has no price for this printing today. Never a model's guess. */
+  market: string | null
+}
+
+/** What a scanned card is in the catalog and what it is worth. Nothing is written. */
+export interface CardLookup {
+  set_id: string | null
+  set_name: string | null
+  candidates: PricedListing[]
+  suggested_index: number | null
+  method: 'exact' | 'ai' | null
+  message: string | null
+}
+
+export interface CardLookupInput {
+  game_id: string
+  name: string
+  set_name?: string
+  collector_number?: string
+  variant?: string
+}
+
 export interface TCGCSVCategory {
   category_id: number
   name: string
@@ -1082,6 +1108,13 @@ export function createApi(request: ApiRequest) { return {
    */
   readCards: (body: unknown): Promise<ReadResult> =>
     request<ReadResult>('/api/v1/vision/cards', { method: 'POST', body, multipart: true }),
+
+  /** Price a card the camera read. Set and listing are matched server-side; prices are TCGCSV's. */
+  lookupCard: (input: CardLookupInput) =>
+    request<CardLookup>('/api/v1/pricing/lookup', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 
   /** What is in the Vault, measured on appreciation rather than velocity. */
   vaultHoldings: () => request<VaultHolding[]>('/api/v1/reports/vault'),

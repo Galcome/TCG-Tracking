@@ -35,6 +35,14 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow TCG Investments to scan cards so it can name and price them.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-build-properties"
     ],
     "experiments": {

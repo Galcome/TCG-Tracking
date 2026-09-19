@@ -36,6 +36,8 @@ import {
 import { money, todayIso } from '../lib/format'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Row, Sheet } from './ui'
 import { PhotoReader } from './photo-reader'
+import { CardScanner, canLiveScan } from './card-scanner'
+import type { ScanItem } from '../lib/scan-session'
 
 export interface RipDialogProps {
   product: Product
@@ -359,6 +361,7 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
   const [occurredOn, setOccurredOn] = useState(todayIso())
   const [rows, setRows] = useState<RipHitDraft[]>([emptyHit()])
   const [photoBusy, setPhotoBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [validation, setValidation] = useState<RipValidation>({})
   const [emptyConfirmedKey, setEmptyConfirmedKey] = useState<string | null>(null)
 
@@ -532,18 +535,30 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
   const lookupPending = productTypes.isPending
   const currentBucket = rows[0]?.bucket ?? 'inventory'
 
-  function appendPhotoCards(cards: ReadCard[]) {
-    if (!cards.length) return
+  function appendHits(hits: Partial<RipHitDraft>[]) {
+    if (!hits.length) return
     setEmptyConfirmedKey(null)
     setRows((current) => {
       const blank = current.length === 1 && current[0].choice === 'undecided' && !current[0].productId &&
         !current[0].name && !current[0].setName && !current[0].collectorNumber && !current[0].variant && !current[0].language && !current[0].value && !current[0].cost && current[0].quantity === '1'
       const bucket = current[0]?.bucket ?? 'inventory'
-      return [...(blank ? [] : current), ...cards.map((card) => ({
-        ...emptyHit(bucket), name: card.name, setName: card.set_name, collectorNumber: card.collector_number,
-        variant: card.variant, language: card.language,
-      }))]
+      return [...(blank ? [] : current), ...hits.map((hit) => ({ ...emptyHit(bucket), ...hit }))]
     })
+  }
+
+  function appendPhotoCards(cards: ReadCard[]) {
+    appendHits(cards.map((card) => ({
+      name: card.name, setName: card.set_name, collectorNumber: card.collector_number,
+      variant: card.variant, language: card.language,
+    })))
+  }
+
+  /** Scanned cards arrive priced: the market price is each hit's value for the allocation. */
+  function appendScannedCards(items: ScanItem[]) {
+    appendHits(items.map((item) => ({
+      name: item.name, setName: item.setName, collectorNumber: item.collectorNumber,
+      variant: item.variant, language: item.language, quantity: String(item.quantity), value: item.price.trim(),
+    })))
   }
 
   return (
@@ -612,6 +627,20 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
         Add only the cards worth tracking. Every entered value is a dated estimate for the
         server&apos;s proportional allocation; it never becomes cost basis or profit.
       </Copy>
+      {canLiveScan ? <Card>
+        <Copy>Scan the hits</Copy>
+        <Copy muted>Point the camera at the cards. Each is named and priced from TCGplayer in CAD; you review every row before logging.</Copy>
+        <Button variant="primary" label="Scan cards" disabled={run.isPending} onPress={() => setScanning(true)} />
+      </Card> : null}
+      <CardScanner
+        open={scanning}
+        gameId={product.game.id}
+        title="Scan the hits"
+        doneLabel="Add to hits"
+        validate={(items) => items.some((item) => item.status === 'pricing') ? 'Still pricing a card.' : null}
+        onDone={appendScannedCards}
+        onClose={() => setScanning(false)}
+      />
       <PhotoReader disabled={run.isPending} onCards={appendPhotoCards} onBusy={setPhotoBusy} />
       {rows.map((row, index) => (
         <HitIdentityChooser
