@@ -117,6 +117,8 @@ export interface CardLookupInput {
   set_name?: string
   collector_number?: string
   variant?: string
+  /** The product type name, e.g. "Booster Box". Defaults to a single. */
+  kind?: string
 }
 
 export interface TCGCSVCategory {

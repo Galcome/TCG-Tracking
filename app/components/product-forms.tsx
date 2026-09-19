@@ -12,6 +12,7 @@ import {
   type Bucket,
   type NewAdjustment,
   type NewProduct,
+  type PricedListing,
   type Product,
   type ProductDetail,
   type Transaction,
@@ -33,6 +34,7 @@ import { SetField } from './set-field'
 import { AllocationEditor } from './allocation-editor'
 import { allocationError, fundingPayload, type AllocationDraft } from '../lib/allocation-drafts'
 import { DateField } from './date-field'
+import { CatalogMatch } from './catalog-match'
 
 export interface ProductFormsProps {
   /** The product being edited or the product receiving a ledger operation. */
@@ -40,6 +42,8 @@ export interface ProductFormsProps {
   /** A transaction is required for `transaction` and `void` modes. */
   transaction?: Transaction
   mode: ProductFormMode
+  /** Prefills the name in `add` mode, e.g. from an empty stock search. */
+  initialName?: string
   onClose: () => void
 }
 
@@ -212,12 +216,12 @@ function AccountChoice({
   return <Choice label={label} value={value} options={accountOptions} onChange={onChange} />
 }
 
-function AddProductForm({ onClose }: { onClose: () => void }) {
+function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; initialName?: string }) {
   const api = useApi()
   const { games, productTypes } = useGamesAndTypes()
   const { accounts, mine, error: accountError } = useAccounts()
-  const [name, setName] = useState('')
-  const [nameTouched, setNameTouched] = useState(false)
+  const [name, setName] = useState(initialName)
+  const [nameTouched, setNameTouched] = useState(Boolean(initialName))
   const [gameId, setGameId] = useState('')
   const [productTypeId, setProductTypeId] = useState('')
   const [setLabel, setSetLabel] = useState('')
@@ -244,9 +248,22 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const [fundingSplit, setFundingSplit] = useState<AllocationDraft[] | null>(null)
   const [validation, setValidation] = useState<DraftValidation>({})
   const [showOptional, setShowOptional] = useState(false)
-  // A product that can have a market price lands on its page, where the catalog listing
-  // is already suggested and one tap away from giving it a value.
-  const create = useLedgerMutation(api.createProduct, (created) => {
+  const [listing, setListing] = useState<PricedListing | null>(null)
+  // A listing picked before saving maps the product in the same step. A failed mapping
+  // never undoes the purchase; the product page still offers the listing.
+  const create = useLedgerMutation(async (input: NewProduct) => {
+    const created = await api.createProduct(input)
+    if (listing && canUseFreeMarketPricing(created)) {
+      await api.createPricingMapping({
+        product_id: created.id,
+        external_product_id: String(listing.listing.product_id),
+        external_group_id: String(listing.listing.group_id),
+        external_category_id: String(listing.listing.category_id),
+        subtype_name: listing.subtype,
+      }).catch(() => undefined)
+    }
+    return created
+  }, (created) => {
     onClose()
     if (canUseFreeMarketPricing(created)) router.push(`/products/${created.id}`)
   })
@@ -260,6 +277,18 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const effectiveName = effectiveProductName(name, nameTouched, setLabel, chosenType)
   const nameIsTheirs = !namedByItsSet(chosenType?.slug)
   const showSlabFields = chosenType?.slug === 'graded-card'
+  const catalogable = Boolean(chosenType) && canUseFreeMarketPricing({
+    product_type: chosenType!, grading_company: null, grade: null, cert_number: null,
+  })
+
+  function pickListing(row: PricedListing | null) {
+    setListing(row)
+    if (!row) return
+    setNameTouched(true)
+    setName(row.listing.name)
+    if (row.listing.number) setCollectorNumber(row.listing.number)
+    if (row.subtype !== 'Normal') setVariant(row.subtype)
+  }
 
   function submit() {
     const errors = validateDraft('add', {
@@ -321,13 +350,13 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
           label="Game"
           value={effectiveGameId}
           options={(games.data ?? []).map((game) => option(game.id, game.name))}
-          onChange={setGameId}
+          onChange={(value) => { setGameId(value); setListing(null) }}
         />
         <Choice
           label="Product type"
           value={effectiveProductTypeId}
           options={(productTypes.data ?? []).map((type) => option(type.id, type.name))}
-          onChange={setProductTypeId}
+          onChange={(value) => { setProductTypeId(value); setListing(null) }}
         />
       </Row>
       <Choice
@@ -339,7 +368,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       <SetField
         game={games.data?.find(game => game.id === effectiveGameId)?.slug ?? ''}
         value={setLabel}
-        onChange={setSetLabel}
+        onChange={(value) => { setSetLabel(value); setListing(null) }}
         autoFocus={!nameIsTheirs}
       />
       <Field
@@ -352,6 +381,11 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
         autoFocus={nameIsTheirs}
         placeholder={nameIsTheirs ? 'Card name' : 'Pick a set above'}
       />
+      {catalogable ? <CatalogMatch picked={listing} onPick={pickListing}
+        input={effectiveGameId && setLabel.trim() && effectiveName.trim() ? {
+          game_id: effectiveGameId, name: effectiveName.trim(), set_name: setLabel.trim(),
+          kind: chosenType!.name, ...(collectorNumber.trim() ? { collector_number: collectorNumber.trim() } : {}),
+        } : null} /> : null}
       <Row>
         <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" />
         <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
@@ -856,10 +890,10 @@ function VoidForm({ transaction, onClose }: { transaction: Transaction; onClose:
 }
 
 /** Unified entry point used by domain screens; only implemented modes are exposed. */
-export function ProductForms({ mode, product, transaction, onClose }: ProductFormsProps) {
+export function ProductForms({ mode, product, transaction, initialName, onClose }: ProductFormsProps) {
   switch (mode) {
     case 'add':
-      return <AddProductForm onClose={onClose} />
+      return <AddProductForm onClose={onClose} initialName={initialName} />
     case 'edit':
       return product ? <EditProductForm product={product} onClose={onClose} /> : <MissingProduct mode={mode} onClose={onClose} />
     case 'purchase':

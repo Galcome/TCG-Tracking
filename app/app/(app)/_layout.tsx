@@ -8,6 +8,7 @@ import { AddProductDialog } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { ScanSinglesDialog } from '../../components/scan-singles';
 import { ExpenseDialog } from '../../components/money-forms';
+import { RipPickerDialog } from '../../components/rip-picker';
 import { canLiveScan } from '../../components/card-scanner';
 import { useSession } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
@@ -21,6 +22,7 @@ export default function ProtectedLayout() {
   const [selling, setSelling] = useState(false);
   const [scanningSingles, setScanningSingles] = useState(false);
   const [expensing, setExpensing] = useState(false);
+  const [ripping, setRipping] = useState(false);
   const [quickActions, setQuickActions] = useState(false);
   const [more, setMore] = useState(false);
   const [account, setAccount] = useState(false);
@@ -71,6 +73,7 @@ export default function ProtectedLayout() {
         {member.data && selling ? <RecordSaleDialog onClose={() => setSelling(false)} /> : null}
         {member.data && scanningSingles ? <ScanSinglesDialog onClose={() => setScanningSingles(false)} /> : null}
         {member.data && expensing ? <ExpenseDialog onClose={() => setExpensing(false)} /> : null}
+        {member.data && ripping ? <RipPickerDialog onClose={() => setRipping(false)} /> : null}
       </View>
       {!isDesktop ? <View style={{ borderTopWidth: 1, borderColor: colors.edge, backgroundColor: colors.background }}>
         <View accessibilityLabel="Main navigation" style={{ flexDirection: 'row', flexWrap: wrapNavigation ? 'wrap' : 'nowrap', paddingHorizontal: 4 }}>{navigation}</View>
@@ -79,12 +82,13 @@ export default function ProtectedLayout() {
         <Button variant="primary" label="Add product" onPress={() => { setQuickActions(false); setAdding(true); }} />
         {canLiveScan ? <Button label="Scan singles" onPress={() => { setQuickActions(false); setScanningSingles(true); }} /> : null}
         <Button label="Record sale" onPress={() => { setQuickActions(false); setSelling(true); }} />
+        <Button label="Rip a box" onPress={() => { setQuickActions(false); setRipping(true); }} />
         <Button label="Add expense" onPress={() => { setQuickActions(false); setExpensing(true); }} />
       </Sheet>
       <Sheet title="More" open={more} compact onClose={() => setMore(false)}>
         {links.slice(3).filter(link => ['Vault', 'Money', 'Reports'].includes(link.label)).map(link => <Button key={link.label} label={link.label} onPress={() => { setMore(false); router.push(link.href); }} />)}
       </Sheet>
-      <Sheet title="Account" open={account} compact onClose={() => setAccount(false)}><Copy>{member.data?.display_name}</Copy><Button label="Sign out" onPress={() => { setAccount(false); setAdding(false); setSelling(false); setScanningSingles(false); setExpensing(false); void signOut().catch(setActionError); }} /></Sheet>
+      <Sheet title="Account" open={account} compact onClose={() => setAccount(false)}><Copy>{member.data?.display_name}</Copy><Button label="Sign out" onPress={() => { setAccount(false); setAdding(false); setSelling(false); setScanningSingles(false); setExpensing(false); setRipping(false); void signOut().catch(setActionError); }} /></Sheet>
     </View>
   </SafeAreaView>;
 }
