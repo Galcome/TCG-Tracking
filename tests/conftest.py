@@ -46,7 +46,7 @@ os.environ["GEMINI_API_KEY"] = ""
 # Pinned so an assertion about the request URL does not change when the default does.
 os.environ["GEMINI_MODEL"] = "gemini-flash-lite-latest"
 os.environ["GROQ_API_KEY"] = ""
-os.environ["GROQ_MODEL"] = "meta-llama/llama-4-scout-17b-16e-instruct"
+os.environ["GROQ_MODEL"] = "qwen/qwen3.6-27b"
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ANTHROPIC_MODEL"] = "claude-haiku-4-5-20251001"
 os.environ["OPENAI_API_KEY"] = ""
