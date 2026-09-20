@@ -105,8 +105,8 @@ function StockWorth({ data }: { data: DashboardData }) {
   if (data.units_in_stock === 0) return null;
   if (data.priced_units === 0) return <Card>
     <Copy muted>Stock value</Copy>
-    <Copy>No market prices yet. Set up a price from any stock card to see what the shelf is worth.</Copy>
-    <Button variant="link" label="Open stock" onPress={() => router.push('/inventory')} />
+    <Copy>No market prices yet. Match your stock to the price catalog once and it keeps itself up to date.</Copy>
+    <Button variant="primary" label="Set up prices" onPress={() => router.push('/pricing')} />
   </Card>;
   const partial = data.priced_units < data.units_in_stock;
   return <Card>
@@ -114,6 +114,7 @@ function StockWorth({ data }: { data: DashboardData }) {
     <Text style={{ color: colors.text, fontFamily: fonts.display, fontSize: 28, lineHeight: 34, fontWeight: '700', fontVariant: ['tabular-nums'] }} allowFontScaling>{money(data.market_value)}</Text>
     <Row><Copy>Unrealized <Signed value={data.unrealized_gain}>{money(data.unrealized_gain)}</Signed></Copy><Copy muted>vs {money(data.priced_cost)} cost</Copy></Row>
     <Copy muted>Priced {data.priced_units} of {data.units_in_stock} unit{data.units_in_stock === 1 ? '' : 's'}{data.stale_units > 0 ? ` · ${data.stale_units} on stale quotes` : ''}</Copy>
+    {partial ? <Button variant="link" label="Price the rest" onPress={() => router.push('/pricing')} /> : null}
   </Card>;
 }
 

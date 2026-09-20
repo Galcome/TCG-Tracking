@@ -26,6 +26,9 @@ from src.services.pricing import CatalogProduct, TCGCSVProvider
 #: Enough to hold the right listing among near misses; few enough to keep the prompt cheap.
 MAX_CANDIDATES = 8
 
+#: Product type names whose listing is one card. Everything else is a sealed product.
+SINGLE_KINDS = frozenset({"single", "raw single", "graded card"})
+
 Method = Literal["exact", "ai"]
 
 
@@ -79,14 +82,27 @@ def identity(product: Product) -> Identity:
     )
 
 
+def wants_a_card(wanted: Identity) -> bool:
+    """Whether this is one card rather than a sealed product.
+
+    A catalog carries both in the same group, and only the cards have a printed number.
+    A recorded number settles it; otherwise the product type does.
+    """
+    return _card_number(wanted.number) is not None or _normalise(wanted.kind) in SINGLE_KINDS
+
+
 def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
     names = {_normalise(wanted.name), _normalise(f"{wanted.set_name} {wanted.name}")}
     number = _card_number(wanted.number)
+    # A sealed product is never a numbered card, whatever its name says. The reverse is
+    # not assumed: a catalog single can be listed without a number.
+    card = wants_a_card(wanted)
     return [
         item
         for item in catalog
         if (_normalise(item.name) in names or _normalise(item.clean_name) in names)
         and (number is None or _card_number(item.number) == number)
+        and (card or _card_number(item.number) is None)
     ]
 
 
@@ -98,18 +114,24 @@ def overlap(wanted: str, offered: str, ignore: set[str] | frozenset[str] = froze
 
 
 def _ranked(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
-    """The closest listings by shared words, ignoring the set name every listing carries."""
+    """The closest listings by shared words, ignoring the set name every listing carries.
+
+    A listing of the wrong kind sorts below every listing of the right kind however many
+    words it shares, so a single never outranks a box for a box.
+    """
     set_words = _words(wanted.set_name)
     number = _card_number(wanted.number)
-    scored: list[tuple[float, str, CatalogProduct]] = []
+    card = wants_a_card(wanted)
+    scored: list[tuple[bool, float, str, CatalogProduct]] = []
     for item in catalog:
         score = overlap(wanted.name, item.name, set_words)
         if number is not None and _card_number(item.number) == number:
             score += 1.0
         if score > 0:
-            scored.append((score, item.name.casefold(), item))
-    scored.sort(key=lambda row: (-row[0], row[1]))
-    return [item for _, _, item in scored[:MAX_CANDIDATES]]
+            same_kind = (_card_number(item.number) is not None) == card
+            scored.append((same_kind, score, item.name.casefold(), item))
+    scored.sort(key=lambda row: (not row[0], -row[1], row[2]))
+    return [item for _, _, _, item in scored[:MAX_CANDIDATES]]
 
 
 def _subject(wanted: Identity) -> str:

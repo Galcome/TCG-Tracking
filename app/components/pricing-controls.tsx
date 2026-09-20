@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Text, View } from 'react-native'
 
 import { useApi } from '../context/AppContext'
@@ -17,6 +17,7 @@ import { reportMoney } from '../lib/reports'
 import {
   canUseFreeMarketPricing,
   catalogId,
+  isCertainSuggestion,
   pricingEligibilityMessage,
   preferredSubtype,
   pricingMappingDraft,
@@ -276,10 +277,25 @@ export function PriceSuggestion({ product }: { product: ProductDetail }) {
     },
   })
 
+  // One certain listing is not a choice, so it is not worth a tap. Mapping it is
+  // reversible from the controls below, and a quote still never touches cost or profit.
+  const certain = isCertainSuggestion(suggestion.data)
+  const autoConfirmed = useRef(false)
+  useEffect(() => {
+    if (!certain || autoConfirmed.current) return
+    autoConfirmed.current = true
+    confirm.mutate(suggestion.data!.candidates[0])
+    // Only the arrival of a certain suggestion starts this; the ref makes it run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [certain])
+
   if (confirm.data === false) {
     return <Card><Copy>Price listing saved. Its value appears after the nightly refresh.</Copy></Card>
   }
   if (!eligible || !unmapped) return null
+  if (certain) {
+    return <Card><Copy muted>Matching this to its catalog listing…</Copy><Loading /></Card>
+  }
 
   const data = suggestion.data
   const suggested = data?.suggested_index == null ? null : data.candidates[data.suggested_index] ?? null

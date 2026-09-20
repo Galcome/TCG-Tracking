@@ -130,7 +130,9 @@ def test_the_number_matches_without_its_leading_zeros(monkeypatch):
 def test_the_clean_name_counts_as_the_name(monkeypatch):
     Chooser(monkeypatch)
 
-    found = price_match.suggest(product("Pikachu ex 247 191"), FakeProvider())
+    found = price_match.suggest(
+        product("Pikachu ex 247 191", type_name="Raw Single"), FakeProvider()
+    )
 
     assert (ids(found), found.method) == ([8], "exact")
 
@@ -196,6 +198,37 @@ def test_a_matching_number_boosts_a_ranked_candidate(monkeypatch):
     )
 
     assert ids(found) == [11, 10]
+
+
+SEALED_AND_SINGLE = [
+    listing(20, "Mega Booster Box Display"),
+    listing(21, "Mega Booster", "008/084"),
+]
+
+
+def test_a_sealed_product_never_matches_a_numbered_card(monkeypatch):
+    """The catalog holds cards and boxes in one group; only cards carry a number."""
+    chooser = Chooser(monkeypatch, answer=0)
+
+    found = price_match.suggest(
+        product("Mega Booster", type_name="Booster Box"), FakeProvider(SEALED_AND_SINGLE)
+    )
+
+    # The single is the better name match, so without the kind rule it would be certain.
+    assert found.method == "ai"
+    assert ids(found) == [20, 21]
+    assert chooser.asked[0][1][0] == "Mega Booster Box Display"
+
+
+def test_a_card_ranks_numbered_listings_above_sealed_ones(monkeypatch):
+    Chooser(monkeypatch, answer=0)
+
+    found = price_match.suggest(
+        product("Mega Booster Display", type_name="Raw Single"),
+        FakeProvider(SEALED_AND_SINGLE),
+    )
+
+    assert ids(found) == [21, 20]
 
 
 def test_the_short_list_is_bounded(monkeypatch):

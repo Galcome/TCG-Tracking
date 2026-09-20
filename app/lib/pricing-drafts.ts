@@ -3,6 +3,7 @@ import type {
   CatalogMappingDraft,
   Product,
   PricingRefresh,
+  PricingSuggestion,
 } from './api'
 import { decimalCents } from './money-drafts'
 
@@ -115,4 +116,46 @@ export function preferredSubtype(subtypes: string[], variant: string | null | un
     ?? subtypes.find((subtype) => subtype === 'Normal')
     ?? subtypes[0]
     ?? 'Normal'
+}
+
+/**
+ * Whether the suggestion is the one listing this can be, with nothing to choose between.
+ * Code only claims this when the catalog name matches and, for a card, the number does
+ * too - so confirming it adds no information a person could.
+ */
+export function isCertainSuggestion(
+  suggestion: PricingSuggestion | undefined,
+): boolean {
+  return Boolean(
+    suggestion &&
+      suggestion.method === 'exact' &&
+      suggestion.suggested_index === 0 &&
+      suggestion.candidates.length === 1,
+  )
+}
+
+/** Stock that could carry a market value but has no catalog mapping yet. */
+export function needsPricingSetup(
+  products: Product[],
+  mappings: CatalogMapping[],
+): Product[] {
+  const mapped = new Set(mappings.map((mapping) => mapping.product_id))
+  return products.filter(
+    (product) => canUseFreeMarketPricing(product) && !mapped.has(product.id),
+  )
+}
+
+export type PricingSetupOutcome = 'matched' | 'chosen' | 'skipped' | 'none' | 'failed'
+
+/** Plain English for what a run of the set-up walk actually did. */
+export function pricingSetupSummary(outcomes: PricingSetupOutcome[]): string {
+  if (outcomes.length === 0) return 'Nothing to price.'
+  const count = (outcome: PricingSetupOutcome) =>
+    outcomes.filter((value) => value === outcome).length
+  const priced = count('matched') + count('chosen')
+  const parts = [`Priced ${priced} of ${outcomes.length}`]
+  if (count('skipped') > 0) parts.push(`${count('skipped')} skipped`)
+  if (count('none') > 0) parts.push(`${count('none')} with no listing`)
+  if (count('failed') > 0) parts.push(`${count('failed')} failed`)
+  return `${parts.join(' · ')}.`
 }

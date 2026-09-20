@@ -1041,8 +1041,8 @@ export function createApi(request: ApiRequest) { return {
       `/api/v1/products/candidates${query(input)}`,
     ),
 
-  pricingMappings: (productId?: string) =>
-    request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId })}`),
+  pricingMappings: (productId?: string, limit?: number) =>
+    request<CatalogMapping[]>(`/api/v1/pricing/mappings${query({ product_id: productId, limit })}`),
 
   pricingCatalogCategories: () =>
     request<TCGCSVCategory[]>('/api/v1/pricing/catalog/categories'),

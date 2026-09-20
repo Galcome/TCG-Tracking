@@ -1465,3 +1465,57 @@ for(const width of [390,768,1536]) {
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
   });
 }
+
+test('bulk price set-up takes a certain listing on its own and stops only for a real choice', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const boxType = types.find((item: { slug: string }) => item.slug === 'booster-box').id;
+  const make = async (name: string) => {
+    const created = await request.post(API + '/api/v1/products', { data: { name, game_id: games[0].id,
+      product_type_id: boxType, initial_purchase: { quantity: 1, amount: '10.01', funding: [] } } });
+    expect(created.ok()).toBeTruthy();
+    return await created.json();
+  };
+  const certain = await make('Bulk setup certain box');
+  const ambiguous = await make('Bulk setup ambiguous box');
+
+  const listing = (productId: number, name: string) => ({ product_id: productId, category_id: 3,
+    group_id: 123, name, clean_name: null, image_url: null, url: null, subtypes: ['Normal'], number: null });
+
+  // Only this pair is in the walk, so the run is exactly the two cases under test.
+  await page.route(API + '/api/v1/products?*', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.items = body.items.filter((item: { id: string }) => item.id === certain.id || item.id === ambiguous.id);
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(API + '/api/v1/pricing/suggestion?*', route => {
+    const forCertain = route.request().url().includes(certain.id);
+    route.fulfill({ json: forCertain
+      ? { candidates: [listing(456, 'Certain box listing')], suggested_index: 0, method: 'exact', message: null }
+      : { candidates: [listing(457, 'Ambiguous box listing A'), listing(458, 'Ambiguous box listing B')],
+          suggested_index: null, method: null, message: null } });
+  });
+  await page.route(API + '/api/v1/pricing/refresh', route => route.fulfill({ json: {
+    attempted: 2, refreshed: 2, skipped: 0, stale: 0, unavailable: 0, errors: [],
+  } }));
+
+  await signIn(page);
+  await page.goto('/pricing');
+  await expect(page.getByText('2 of 2 left · a listing is confirmed, never guessed', { exact: true })).toBeVisible();
+
+  // The certain one is never offered as a choice: it maps itself and the walk moves on.
+  await expect(page.getByText('Bulk setup ambiguous box', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Confirm match', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Which of these is it?', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'This one', exact: true }).first().click();
+
+  await expect(page.getByText('Priced 2 of 2.', { exact: true })).toBeVisible();
+  for (const [item, external] of [[certain, '456'], [ambiguous, '457']] as const) {
+    const mappings = await (await request.get(API + '/api/v1/pricing/mappings?product_id=' + item.id)).json();
+    expect(mappings.map((m: { external_product_id: string }) => m.external_product_id)).toEqual([external]);
+    const latest = await (await request.get(API + '/api/v1/products/' + item.id)).json();
+    expect(latest.stats.remaining_cost).toBe('10.01');
+    expect(latest.stats.quantity_on_hand).toBe(1);
+  }
+});
