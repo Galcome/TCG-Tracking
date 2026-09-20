@@ -1,15 +1,24 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import type { CatalogMapping, Product, PricingRefresh } from '../lib/api.ts'
+import type {
+  CatalogMapping,
+  Product,
+  PricingRefresh,
+  PricingSuggestion,
+  TCGCSVProduct,
+} from '../lib/api.ts'
 import {
   canUseFreeMarketPricing,
   catalogId,
+  isCertainSuggestion,
   marketPosition,
+  needsPricingSetup,
   preferredSubtype,
   pricingEligibilityMessage,
   pricingMappingDraft,
   pricingRefreshSummary,
+  pricingSetupSummary,
   validatePricingMappingDraft,
 } from '../lib/pricing-drafts.ts'
 
@@ -148,5 +157,68 @@ test('refresh summary states every source outcome and provider errors', () => {
   assert.equal(
     pricingRefreshSummary(result),
     'Checked 3: 1 refreshed, 1 skipped, 0 stale, 1 unavailable. One mapping unavailable.',
+  )
+})
+
+function listing(productId: number, number: string | null = null): TCGCSVProduct {
+  return {
+    product_id: productId,
+    category_id: 3,
+    group_id: 23651,
+    name: 'Surging Sparks Booster Box',
+    clean_name: null,
+    image_url: null,
+    url: null,
+    subtypes: ['Normal'],
+    number,
+  }
+}
+
+function suggestion(overrides: Partial<PricingSuggestion>): PricingSuggestion {
+  return {
+    candidates: [listing(1)],
+    suggested_index: 0,
+    method: 'exact',
+    message: null,
+    ...overrides,
+  }
+}
+
+test('only one exact listing with nothing to choose between is certain', () => {
+  assert.equal(isCertainSuggestion(suggestion({})), true)
+  assert.equal(isCertainSuggestion(undefined), false)
+  // A model's pick is a judgement, so a person still confirms it.
+  assert.equal(isCertainSuggestion(suggestion({ method: 'ai' })), false)
+  // Two exact listings means the name alone did not settle it.
+  assert.equal(
+    isCertainSuggestion(suggestion({ candidates: [listing(1), listing(2)] })),
+    false,
+  )
+  assert.equal(isCertainSuggestion(suggestion({ suggested_index: null })), false)
+  assert.equal(isCertainSuggestion(suggestion({ candidates: [], suggested_index: null })), false)
+})
+
+test('set-up queue is stock that can be priced and has no listing yet', () => {
+  const box = { id: 'type', name: 'Box', slug: 'booster-box', is_system: true, sort_order: 0 }
+  const lot = { id: 'type', name: 'Lot', slug: 'lot', is_system: true, sort_order: 0 }
+  const products = [
+    product({ id: 'unmapped', product_type: box }),
+    product({ id: 'mapped', product_type: box }),
+    product({ id: 'ineligible', product_type: lot }),
+  ]
+  const mapping = { ...pricingMappingDraft(null), product_id: 'mapped' } as unknown as CatalogMapping
+
+  assert.deepEqual(
+    needsPricingSetup(products, [mapping]).map((item) => item.id),
+    ['unmapped'],
+  )
+})
+
+test('the set-up summary counts only what actually happened', () => {
+  assert.equal(pricingSetupSummary([]), 'Nothing to price.')
+  assert.equal(pricingSetupSummary(['matched', 'chosen']), 'Priced 2 of 2.')
+  assert.equal(
+    pricingSetupSummary(['matched', 'skipped', 'none', 'failed']),
+    'Priced 1 of 4 · 1 skipped · 1 with no listing · 1 failed.',
   )
 })
