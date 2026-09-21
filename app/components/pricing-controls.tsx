@@ -306,7 +306,7 @@ export function PriceSuggestion({ product }: { product: ProductDetail }) {
       <Text accessibilityRole="header" style={styles.sectionTitle}>Give this a market value</Text>
       {suggestion.isPending ? <><Loading /><Copy muted>Finding it in the price catalog…</Copy></> : null}
       <ErrorNotice error={suggestion.error} retry={() => { void suggestion.refetch() }} />
-      {data?.message ? <Copy muted>{data.message} You can still find it by hand under Market pricing.</Copy> : null}
+      {data?.message ? <Copy muted>{data.message} You can also find it by hand under Market pricing.</Copy> : null}
       {suggested ? (
         <View style={styles.identity}>
           <Copy>{listingLabel(suggested)}</Copy>
@@ -323,7 +323,7 @@ export function PriceSuggestion({ product }: { product: ProductDetail }) {
       ) : null}
       {others.length > 0 ? (
         <View style={styles.discoveryResults}>
-          <Copy muted>{suggested ? 'Not it? Other close listings:' : 'Which of these is it?'}</Copy>
+          <Copy muted>{suggested ? 'Not it? Other close listings:' : data?.message ? 'Closest listings, in case one is it:' : 'Which of these is it? If none, find it by hand under Market pricing.'}</Copy>
           {others.map((listing) => (
             <View key={listing.product_id} style={styles.discoveryResult}>
               <View style={styles.primary}><Copy>{listingLabel(listing)}</Copy></View>

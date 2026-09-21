@@ -342,12 +342,12 @@ def test_the_route_describes_sealed_product_by_its_type(client, game, providers,
             "game_id": str(game.id),
             "name": "Pikachu",
             "set_name": "Surging Sparks",
-            "kind": "Booster Box",
+            "kind": "Box Set",
         },
     )
 
     assert response.status_code == 200, response.text
-    assert chooser.asked[-1][0].startswith("Booster Box - Pikachu")
+    assert chooser.asked[-1][0].startswith("Box Set - Pikachu")
 
 
 def test_the_route_reports_a_catalog_outage(client, game, providers, monkeypatch):
