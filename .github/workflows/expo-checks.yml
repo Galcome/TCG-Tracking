@@ -1,10 +1,10 @@
-name: Expo rewrite checks
+name: Expo app
 
 on:
   workflow_dispatch:
   pull_request:
     branches: [main, dev]
-    paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", ".github/workflows/expo-checks.yml"]
+    paths: ["app/**", "src/**", "tests/e2e/**", "migrations/**", "uv.lock", "firebase.json", ".github/workflows/expo-checks.yml"]
   push:
     # Always validate exact protected-branch commits, including docs-only merges,
     # so a future exact-main mobile release gate can find an authoritative result.
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   expo:
-    name: Expo checks (no deployment)
+    name: Expo checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -78,3 +78,93 @@ jobs:
           name: expo-test-failures
           path: app/test-results/
           retention-days: 7
+
+  deploy-web:
+    name: Deploy web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The web app is the Expo export, so the gate is the Expo suite that just ran: lint,
+    # typecheck, unit tests and the Playwright run that drives this exact bundle in a
+    # browser. Only a real push to main deploys; pull requests build nothing.
+    needs: [expo]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+
+    environment:
+      name: production
+      url: https://tcg-tracking.web.app
+
+    defaults:
+      run:
+        working-directory: app
+
+    env:
+      # Repository *variables*, not secrets: every EXPO_PUBLIC_* value is compiled into
+      # the bundle and served to the browser, so treating them as secret would be theatre.
+      # They are still named VITE_* because the Vite site owned them first and the values
+      # are identical - same API, same Firebase project. Rename them when web/ is deleted.
+      EXPO_PUBLIC_API_URL: ${{ vars.VITE_API_URL }}
+      EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      # app/.env is a developer's localhost file. A release must never read it.
+      EXPO_NO_DOTENV: "1"
+      CI: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # An unset variable becomes an empty string and Metro compiles it happily, producing
+      # a bundle that fails at runtime for reasons nobody can see. Fail here instead.
+      - name: Require the production values
+        run: |
+          missing=""
+          for name in EXPO_PUBLIC_API_URL EXPO_PUBLIC_FIREBASE_API_KEY \
+                      EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN EXPO_PUBLIC_FIREBASE_PROJECT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "::error::Set them under Settings -> Secrets and variables -> Actions -> Variables."
+            echo "::error::They must be Variables, not Secrets - this job reads vars.*"
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run export:web
+
+      # The exact mistake this guard exists to prevent: a bundle built from a localhost
+      # env that silently talks to nothing once it is live.
+      - name: Refuse to publish a bundle that talks to localhost
+        run: |
+          if grep -rlq '127\.0\.0\.1:8001\|localhost:8000' dist/_expo/ 2>/dev/null; then
+            echo "::error::The bundle contains a localhost API - EXPO_PUBLIC_API_URL did not take effect."
+            exit 1
+          fi
+          if ! grep -rlq -- "$EXPO_PUBLIC_API_URL" dist/_expo/ 2>/dev/null; then
+            echo "::error::The bundle does not contain $EXPO_PUBLIC_API_URL."
+            exit 1
+          fi
+
+      # `entryPoint` is the repo root on purpose: firebase.json lives there and points at
+      # app/dist. channelId `live` is the real site rather than a preview channel.
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TCG_TRACKING }}
+          projectId: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          channelId: live
