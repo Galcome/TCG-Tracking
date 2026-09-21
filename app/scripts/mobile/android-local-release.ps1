@@ -102,7 +102,20 @@ try {
         $taskIdentity = [regex]::Escape("package: name='$($target.androidPackage)' versionCode='$($taskConfig.expo.android.versionCode)' versionName='$($taskConfig.expo.version)'")
         if ($LASTEXITCODE -ne 0 -or $taskBadging -notmatch $taskIdentity) { throw 'APK identity/version verification failed' }
         if ([string]::IsNullOrWhiteSpace($TesterGroups) -or $TesterGroups -notmatch '^[a-zA-Z0-9_,\-]+$') { throw 'Explicit valid Firebase tester group aliases required' }
-        & $taskFirebase appdistribution:distribute $taskApk --app $target.androidAppId --project $target.firebaseProjectId --groups $TesterGroups --release-notes 'TCG universal Android internal beta; live Vite website unchanged. Device acceptance pending.'
+        # Android will not install a versionCode over an equal one, so a repeat upload is
+        # a release testers cannot take. Refuse it here instead of after the upload.
+        $taskVersionCode = [int]$taskConfig.expo.android.versionCode
+        $taskDistributedPath = Join-Path $taskAppRoot '.native-release/distributed.json'
+        if (Test-Path -LiteralPath $taskDistributedPath) {
+            $taskDistributed = Get-Content -LiteralPath $taskDistributedPath -Raw | ConvertFrom-Json
+            if ($taskVersionCode -le [int]$taskDistributed.versionCode) { throw "versionCode $taskVersionCode was already distributed; bump expo.android.versionCode and expo.version in app.json" }
+        }
+        $taskCommit = (& git rev-parse --short=12 HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot read the release commit' }
+        $taskNotes = "TCG Tracking $($taskConfig.expo.version) ($taskVersionCode) from main $taskCommit. Same app as https://tcg-tracking.web.app."
+        & $taskFirebase appdistribution:distribute $taskApk --app $target.androidAppId --project $target.firebaseProjectId --groups $TesterGroups --release-notes $taskNotes
         if ($LASTEXITCODE -ne 0) { throw 'Firebase distribution failed; local APK retained' }
+        @{ versionCode = $taskVersionCode; version = $taskConfig.expo.version; commit = $taskCommit } |
+            ConvertTo-Json | Set-Content -LiteralPath $taskDistributedPath -Encoding UTF8
     }
 } finally { Pop-Location }

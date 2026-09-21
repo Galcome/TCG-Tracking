@@ -14,3 +14,12 @@ test('Android distribution calls the exact-main guard and retains artifact gates
   assert.match(script, /approved TCG release certificate/);
   assert.ok(distribution.indexOf('assert-main-release.mjs') < distribution.indexOf('appdistribution:distribute'));
 });
+
+test('Android distribution refuses a repeated versionCode and names the release it ships', () => {
+  const script = readFileSync(new URL('../scripts/mobile/android-local-release.ps1', import.meta.url), 'utf8');
+  const distribution = script.slice(script.indexOf("if ($Command -in @('distribute', 'release'))"));
+  assert.ok(distribution.indexOf('was already distributed') < distribution.indexOf('appdistribution:distribute'));
+  assert.match(distribution, /--release-notes \$taskNotes/);
+  assert.doesNotMatch(script, /Vite/);
+  assert.ok(distribution.indexOf('Set-Content -LiteralPath $taskDistributedPath') > distribution.indexOf('appdistribution:distribute'));
+});

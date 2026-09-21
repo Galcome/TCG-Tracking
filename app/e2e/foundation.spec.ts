@@ -1519,3 +1519,14 @@ test('bulk price set-up takes a certain listing on its own and stops only for a 
     expect(latest.stats.quantity_on_hand).toBe(1);
   }
 });
+
+test('desktop sidebar actions are one width', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+  const widths = await Promise.all(['New product', 'New sale', 'New expense'].map(async (name) => {
+    const button = page.getByRole('button', { name, exact: true });
+    await expect(button).toBeVisible();
+    return (await button.boundingBox())!.width;
+  }));
+  expect(new Set(widths).size).toBe(1);
+});

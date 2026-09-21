@@ -1,9 +1,10 @@
 import { Redirect } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Brand, Button, Card, Copy, ErrorNotice, Field, Loading, Page } from '../components/ui';
 import { useSession } from '../context/AppContext';
+import { googleRedirectError } from '../lib/firebase';
 import { colors } from '../context/ThemeContext';
 import { CardBackdrop } from '../components/card-backdrop';
 export default function Login() {
@@ -12,6 +13,11 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void googleRedirectError().then((failure) => { if (active && failure) setError(failure); });
+    return () => { active = false; };
+  }, []);
   if (auth.loading) return <Loading />;
   if (auth.session) return <Redirect href="/" />;
   async function run(action: () => Promise<void>) {
