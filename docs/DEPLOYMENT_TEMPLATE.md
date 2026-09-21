@@ -26,7 +26,7 @@ Change these every time:
 - Firebase project id and web app config (API key, auth domain).
 - Railway project id, service names, public domain, and service env values.
 - Sentry project slugs and runtime DSNs. The Sentry auth token can be shared; DSNs cannot.
-- `VITE_API_URL`, `VITE_FIREBASE_*`, and `VITE_SENTRY_DSN` for the web app.
+- `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_FIREBASE_*` for the app (web and native).
 - CORS origins.
 
 ## Neon (Postgres)
@@ -123,9 +123,9 @@ project as Auth removes that entire class of problem.
 
 ### Deploys are automatic
 
-`deploy-web` in `.github/workflows/ci.yml` publishes on every push to `main`, gated on
-`tests-required` so nothing ships that has not passed the backend suite, the web build and
-the browser suite.
+`deploy-web` in `.github/workflows/expo-checks.yml` exports `app/` for web and publishes it on
+every push to `main`, gated on the `expo` job (lint, typecheck, unit tests and the Playwright
+suite that drives this same bundle).
 
 It was not always so. The API has auto-deployed from `main` since day one and the web app
 never did, so six merges once landed a backend nobody could see - every new screen was
@@ -142,15 +142,12 @@ to check.
 | Variable | `VITE_FIREBASE_API_KEY` | Firebase web API key | Set |
 | Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `tcg-tracking.firebaseapp.com` | Set |
 | Variable | `VITE_FIREBASE_PROJECT_ID` | `tcg-tracking` | Set |
-| Variable | `VITE_SENTRY_DSN` | Optional; unset disables Sentry | Unset, deliberately |
 
-`VITE_SENTRY_DSN` is left **unset** rather than set to an empty string, because GitHub
-rejects a variable with an empty value (`422: missing required key: value`). An unset
-variable resolves to `""`, which is what the app wants when Sentry is off — so the
-required-values check below deliberately does not include it. The four it does check are
-the ones whose absence produces a bundle that builds fine and fails in the browser.
+The job maps these to `EXPO_PUBLIC_*` at build time. They keep their `VITE_*` names because
+the retired Vite site created them; the values are the same. The job refuses to build if any
+is empty, because a missing one produces a bundle that builds fine and fails in the browser.
 
-The `VITE_*` values are repository **variables**, not secrets. Every one of them is
+The values are repository **variables**, not secrets. Every one of them is
 compiled into the bundle and served to any browser that loads the site, so hiding them
 would be theatre - and a secret that silently resolves to an empty string is worse than a
 visible one. The service account is the only real credential.
@@ -163,7 +160,7 @@ firebase init hosting:github
 
 It creates the service account, grants it hosting access and writes the secret to the repo
 under exactly the name above. It also writes two workflows of its own - delete both; the
-job in `ci.yml` supersedes them and is gated on the tests, which theirs are not.
+job in `expo-checks.yml` supersedes them and is gated on the tests, which theirs are not.
 
 ### Deploying by hand
 
@@ -171,21 +168,21 @@ Still works, and is the fallback when Actions is down or you need to publish som
 is not on `main`:
 
 ```powershell
-cd web
-$env:VITE_API_URL = "https://api-production-6ea5.up.railway.app"
-npm run build
+cd app
+$env:EXPO_NO_DOTENV = "1"
+$env:EXPO_PUBLIC_API_URL = "https://api-production-6ea5.up.railway.app"
+$env:EXPO_PUBLIC_FIREBASE_API_KEY = "<web API key>"
+$env:EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN = "tcg-tracking.firebaseapp.com"
+$env:EXPO_PUBLIC_FIREBASE_PROJECT_ID = "tcg-tracking"
+npm run export:web
 cd ..
 firebase deploy --only hosting --project tcg-tracking
 ```
 
-Setting `VITE_API_URL` on the command line is not optional. `web/.env` points at
-`localhost:8000` for local development, and a build that picks that up produces a site that
-looks perfectly normal and talks to nothing. The CI job greps the built bundle for
-`localhost:8000` and refuses to publish if it finds it; by hand, you are the check.
-
-`VITE_*` values are baked in **at build time**, not read at runtime. Building with the wrong
-`VITE_API_URL` produces a bundle that quietly talks to the wrong backend, so set them on the
-build command rather than relying on a local `web/.env` (which points at localhost).
+`EXPO_NO_DOTENV` is not optional. `app/.env` points at localhost for local development, and
+a build that picks it up produces a site that looks perfectly normal and talks to nothing.
+The CI job greps the export for localhost and refuses to publish if it finds it; by hand,
+you are the check. `EXPO_PUBLIC_*` values are baked in **at build time**, not read at runtime.
 
 `firebase.json` holds the SPA rewrite - without it any deep link such as `/products/new` 404s
 on refresh - plus cache headers. Fingerprinted assets are immutable for a year; `index.html`

@@ -20,9 +20,6 @@ ENV/
 .env
 .env.*
 !.env.example
-web/.env
-web/.env.*
-!web/.env.example
 railway_vars.txt
 .sessions.json
 google-services.json
@@ -30,11 +27,9 @@ GoogleService-Info.plist
 
 # MCP server config - contains real API tokens
 .mcp.json
-web/.mcp.json
 
 # Node / web app
 node_modules/
-web/dist/
 *.tsbuildinfo
 
 # Wrangler local cache - holds the Cloudflare account id and email
@@ -63,7 +58,3 @@ htmlcov/
 firebase-debug.log
 
 # Playwright
-web/test-results/
-web/playwright-report/
-web/blob-report/
-web/.playwright/

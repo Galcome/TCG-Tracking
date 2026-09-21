@@ -105,7 +105,7 @@ tester group alias in `FIREBASE_TESTER_GROUPS`, then run
 `npm run mobile:android:distribute:local`. Distribution checks a build receipt against
 current app sources and APK bytes, verifies APK identity/version, and requires successful
 CI for the exact main commit. Only an explicitly approved first internal feature build
-may set `TCG_INTERNAL_BRANCH_RELEASE_APPROVED=1`. The live website remains Vite.
+may set `TCG_INTERNAL_BRANCH_RELEASE_APPROVED=1`. The website is this app's web export.
 App Distribution must be initialized for TCG before upload. iOS will use EAS cloud once
 its native configuration/signing is verified. New CI/CD automation follows the first
 successful internal deployment, not before it.

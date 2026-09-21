@@ -2,7 +2,7 @@
 
 Source plan: [approved rewrite](2026-09-08-expo-universal-rewrite.md).
 Baseline: `origin/main` c1c21b3; PR73 bucket visuals and PR74 reporting periods are approved
-requirements in addition to that baseline. Current production build remains `web/dist`.
+requirements in addition to that baseline. Production has served the Expo web export since 2026-09-21 (PR #113); the Vite `web/` app was deleted afterwards.
 
 ## Workflow inventory
 
@@ -30,7 +30,7 @@ foundation owner until its interface is stable.
 | Sealed pricing (F2-F4) | Packs/boxes/ETBs/collections/decks eligible, suggested mapping, holding value + unrealized P&L, Set up price CTA | `pricing.spec.ts`; new pytest eligibility | Built: PR #101 (pytest 100% coverage, app checks pass); merge after #96-#100 |
 | Set sync (F5) | Daily TCGCSV group sync, recent releases lead suggestions | New pytest with fake groups feed | Built: PR #98 (pytest 100% coverage); first nightly sync after merge |
 | Live scan (F6-F8) | Camera session list with prices, Rip + Add singles, explicit identity/listing confirmation, separate actual paid cost, vision provider fallback, per-member limits | New pytest lookup/fallback; scanner unit tests; device acceptance | Built: PR #102 on #101 (pytest 100% coverage; app 138 tests, Android/web/iOS exports); needs new Android build + device acceptance |
-| Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Pending |
+| Release/cutover | Separate exports/preview, production env validation, native identifiers/signing/telemetry, exact-version checks, website rollback | Approved plan stage8/9 | Done: web cutover PR #113 (2026-09-21); Vite `web/` removed. Rollback is a redeploy of an earlier Expo commit |
 
 ## Acceptance evidence
 
