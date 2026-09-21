@@ -80,7 +80,7 @@ in the browser.
 is `https://securetoken.google.com/<FIREBASE_PROJECT_ID>`. A frontend pointed at a different
 Firebase project produces perfectly valid tokens that this backend correctly rejects.
 
-**Fix:** Confirm `FIREBASE_PROJECT_ID` on the API and `VITE_FIREBASE_PROJECT_ID` on the web app
+**Fix:** Confirm `FIREBASE_PROJECT_ID` on the API and `EXPO_PUBLIC_FIREBASE_PROJECT_ID` on the app
 name the same project. There is no shared secret to compare - the project id *is* the binding.
 
 ---
@@ -354,7 +354,7 @@ Three separate features were reported as "I don't see any changes" while being l
 correct on the server, and each time the answer looked like a deploy problem.
 
 The fix is to put the cache rule on the **catch-all** `**` block. Ordering does the rest:
-`/assets/**` is listed first and keeps its immutable year, which is safe because Vite
+`/_expo/static/**` and `/assets/**` are listed first and keep their immutable year, which is safe because Expo
 content-hashes those filenames - a new build produces a new name, so a stale one can never
 be served under the same URL.
 

@@ -103,8 +103,8 @@ jobs:
     env:
       # Repository *variables*, not secrets: every EXPO_PUBLIC_* value is compiled into
       # the bundle and served to the browser, so treating them as secret would be theatre.
-      # They are still named VITE_* because the Vite site owned them first and the values
-      # are identical - same API, same Firebase project. Rename them when web/ is deleted.
+      # Still named VITE_* because the retired Vite site owned them first; the values are
+      # identical - same API, same Firebase project. Renaming is a repo-variable change.
       EXPO_PUBLIC_API_URL: ${{ vars.VITE_API_URL }}
       EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
       EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
