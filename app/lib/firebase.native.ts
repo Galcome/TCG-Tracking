@@ -30,6 +30,9 @@ export const googleSignIn = createGoogleSignIn({
   signInWithCredential: (credential) => signInWithCredential(authInstance(), credential as Parameters<typeof signInWithCredential>[1]),
 });
 
+// Native sign-in never leaves the app, so there is no redirect to come back from.
+export const googleRedirectError = async (): Promise<Error | null> => null;
+
 export const signOut = createGoogleSignOut({
   nativeGoogle,
   firebaseSignOut: () => firebaseSignOut(authInstance()),

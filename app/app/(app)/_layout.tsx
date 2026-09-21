@@ -3,7 +3,7 @@ import { Redirect, Slot, router, usePathname, useGlobalSearchParams } from 'expo
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Brand, Button, Copy, ErrorNotice, Loading, Row, Sheet } from '../../components/ui';
+import { Brand, Button, Copy, ErrorNotice, Loading, Sheet } from '../../components/ui';
 import { AddProductDialog } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { ScanSinglesDialog } from '../../components/scan-singles';
@@ -62,9 +62,9 @@ export default function ProtectedLayout() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}><Brand /><Button variant="link" label="Account" onPress={() => setAccount(true)} /></View>
         {isDesktop ? <Copy muted>{member.data?.display_name ?? 'Checking membership…'}</Copy> : null}
         {isDesktop ? <View accessibilityLabel="Main navigation" style={{ gap: 4 }}>{navigation}</View> : null}
-        {isDesktop ? <Row><Button label="New product" disabled={!member.data} onPress={() => setAdding(true)} />
+        {isDesktop ? <View style={{ gap: 8 }}><Button label="New product" disabled={!member.data} onPress={() => setAdding(true)} />
           <Button variant="primary" label="New sale" disabled={!member.data} onPress={() => setSelling(true)} />
-          <Button label="New expense" disabled={!member.data} onPress={() => setExpensing(true)} /></Row> : null}
+          <Button label="New expense" disabled={!member.data} onPress={() => setExpensing(true)} /></View> : null}
       </View>
       <View style={{ flex: 1 }}>
         <ErrorNotice error={error ?? actionError ?? member.error} retry={member.isError ? () => { void member.refetch(); } : undefined} />
