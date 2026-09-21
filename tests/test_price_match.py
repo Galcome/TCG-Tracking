@@ -347,3 +347,49 @@ def test_the_route_404s_an_unknown_product(client):
     )
 
     assert response.status_code == 404
+
+
+# ------------------------------------------------------------ wrong kind
+
+
+CELEBRATION = [
+    listing(20, "ME: 30th Celebration Elite Trainer Box"),
+    listing(21, "ME: 30th Celebration Pokemon Center Elite Trainer Box"),
+    listing(22, "ME: 30th Celebration Booster Bundle"),
+    listing(23, "Pikachu", "001/030"),
+]
+
+
+def celebration(name: str, kind: str) -> price_match.Identity:
+    return price_match.Identity(name=name, set_name="30th Celebration", kind=kind)
+
+
+def test_a_set_code_in_the_listing_name_does_not_block_an_exact_match(monkeypatch):
+    chooser = Chooser(monkeypatch)
+
+    found = price_match.match(celebration("Elite Trainer Box", "Box Set"), CELEBRATION)
+
+    assert (ids(found), found.suggested, found.method) == ([20], 0, "exact")
+    assert chooser.asked == []
+
+
+def test_a_kind_the_set_does_not_have_says_so_and_suggests_nothing(monkeypatch):
+    chooser = Chooser(monkeypatch, answer=0)
+
+    found = price_match.match(celebration("Booster Box", "Booster Box"), CELEBRATION)
+
+    assert found.message == (
+        "30th Celebration has no Booster Box listing. If you bought something else, "
+        "edit this product's type and name to match it; otherwise skip it."
+    )
+    assert ids(found) and 23 not in ids(found)
+    assert (found.suggested, found.method) == (None, None)
+    assert chooser.asked == []
+
+
+def test_a_kind_with_no_catalog_word_is_never_called_missing(monkeypatch):
+    Chooser(monkeypatch, answer=None)
+
+    found = price_match.match(celebration("Tin", "Collection"), CELEBRATION)
+
+    assert found.message == "No listing in 30th Celebration looks like this."

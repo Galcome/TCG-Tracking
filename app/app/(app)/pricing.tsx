@@ -184,7 +184,7 @@ export default function PricingSetup() {
           </View>
         ) : null}
         {others.length > 0 ? (
-          <Copy muted>{suggested ? 'Not it? Other close listings:' : 'Which of these is it?'}</Copy>
+          <Copy muted>{suggested ? 'Not it? Other close listings:' : data?.message ? 'Closest listings, in case one is it:' : 'Which of these is it? If none, skip it.'}</Copy>
         ) : null}
         {others.map((listing) => (
           <Row key={listing.product_id}>

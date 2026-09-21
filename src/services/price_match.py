@@ -22,12 +22,17 @@ from typing import Literal
 from src.models.product import Product
 from src.services import ai
 from src.services.pricing import CatalogProduct, TCGCSVProvider
+from src.services.set_sync import display_name
 
 #: Enough to hold the right listing among near misses; few enough to keep the prompt cheap.
 MAX_CANDIDATES = 8
 
 #: Product type names whose listing is one card. Everything else is a sealed product.
 SINGLE_KINDS = frozenset({"single", "raw single", "graded card"})
+
+#: Product types whose name is also how the catalog lists them, so a group without one
+#: really has none. "Box Set" or "Collection" never appear in a listing's name.
+LISTED_KINDS = frozenset({"booster box", "booster pack"})
 
 Method = Literal["exact", "ai"]
 
@@ -38,7 +43,7 @@ class Suggestion:
     #: Index into `candidates`, or None when neither code nor a model could tell.
     suggested: int | None = None
     method: Method | None = None
-    #: Why there are no candidates at all, for the person looking at an empty list.
+    #: Why the list is empty or cannot hold the product, for the person looking at it.
     message: str | None = None
 
 
@@ -91,6 +96,16 @@ def wants_a_card(wanted: Identity) -> bool:
     return _card_number(wanted.number) is not None or _normalise(wanted.kind) in SINGLE_KINDS
 
 
+def _listed_names(item: CatalogProduct) -> set[str]:
+    # "ME: 30th Celebration Elite Trainer Box": the set code is not part of the name.
+    return {
+        _normalise(name)
+        for text in (item.name, item.clean_name)
+        if text
+        for name in (text, display_name(text))
+    }
+
+
 def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
     names = {_normalise(wanted.name), _normalise(f"{wanted.set_name} {wanted.name}")}
     number = _card_number(wanted.number)
@@ -100,7 +115,7 @@ def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProdu
     return [
         item
         for item in catalog
-        if (_normalise(item.name) in names or _normalise(item.clean_name) in names)
+        if _listed_names(item) & names
         and (number is None or _card_number(item.number) == number)
         and (card or _card_number(item.number) is None)
     ]
@@ -147,13 +162,28 @@ def _option(item: CatalogProduct) -> str:
     return f"{item.name} (number {item.number})" if item.number else item.name
 
 
+def _missing_kind(wanted: Identity, catalog: list[CatalogProduct]) -> str | None:
+    """A message when the set has no listing of this product's type at all."""
+    kind = _normalise(wanted.kind)
+    if kind not in LISTED_KINDS or any(kind in _normalise(item.name) for item in catalog):
+        return None
+    return (
+        f"{wanted.set_name} has no {wanted.kind} listing. If you bought something else, "
+        "edit this product's type and name to match it; otherwise skip it."
+    )
+
+
 def match(wanted: Identity, catalog: list[CatalogProduct]) -> Suggestion:
     """The listing in one catalog group that `wanted` most likely is."""
     exact = _exact(wanted, catalog)
     if len(exact) == 1:
         return Suggestion(exact, suggested=0, method="exact")
 
+    missing = _missing_kind(wanted, catalog)
     candidates = _ranked(wanted, catalog)
+    if missing:
+        # Any pick would be a different product; the list is only there to jog a memory.
+        return Suggestion(candidates, message=missing)
     if not candidates:
         return Suggestion([], message=f"No listing in {wanted.set_name} looks like this.")
     try:

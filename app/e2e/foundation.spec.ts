@@ -148,6 +148,27 @@ test('responsive stock cards preserve action guards and keep controls within the
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
 });
 
+test('a location view says its value covers every unit on hand', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const product = await (await request.post(API + '/api/v1/products', { data: {
+    name: 'Split location valued box', game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === 'box-set').id,
+    initial_purchase: { quantity: 1, amount: '10.00', funding: [] },
+  } })).json();
+  const valued = { ...product,
+    stats: { ...product.stats, quantity_on_hand: 36, by_bucket: { inventory: 10, store: 26, vault: 0 }, remaining_cost: '360.00' },
+    market_estimate: { value: '15.00', captured_on: '2026-09-20', status: 'fresh', provider: 'tcgcsv', source_revision: 'test' } };
+  await page.route(API + '/api/v1/products?*', route => route.fulfill({ json: {
+    items: [valued], total: 1, bucket_totals: { inventory: 10, store: 26, vault: 0 } } }));
+  await signIn(page);
+  const card = page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true });
+  await page.goto('/inventory?bucket=inventory');
+  await expect(card.getByText('In Inventory', { exact: true })).toBeVisible();
+  await expect(card.getByText('Value of all 36 $540.00', { exact: true })).toBeVisible();
+  await page.goto('/inventory');
+  await expect(card.getByText('Value $540.00', { exact: true })).toBeVisible();
+});
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
@@ -1507,7 +1528,7 @@ test('bulk price set-up takes a certain listing on its own and stops only for a 
   // The certain one is never offered as a choice: it maps itself and the walk moves on.
   await expect(page.getByText('Bulk setup ambiguous box', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Confirm match', exact: true })).toHaveCount(0);
-  await expect(page.getByText('Which of these is it?', { exact: true })).toBeVisible();
+  await expect(page.getByText('Which of these is it? If none, skip it.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'This one', exact: true }).first().click();
 
   await expect(page.getByText('Priced 2 of 2.', { exact: true })).toBeVisible();
