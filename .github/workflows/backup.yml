@@ -38,7 +38,7 @@ jobs:
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Match the client major to the source server rather than taking the newest.
       # pg_dump refuses a server newer than itself, and a newer pg_dump writes
@@ -106,7 +106,7 @@ jobs:
       RESTORE_CONFIRM: DROP_TARGET_SCHEMA
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Newest client here on purpose: pg_restore reads archives from its own major
       # and older, and the scratch service above is that same major.
