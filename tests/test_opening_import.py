@@ -8,12 +8,13 @@ profit the app computed itself.
 
 import logging
 from contextlib import contextmanager
+from datetime import date
 
 import pytest
 from sqlalchemy import func, select
 
 from src.jobs import import_opening as job
-from src.models.ledger import Purchase, Sale
+from src.models.ledger import InventoryAdjustment, Purchase, Sale
 from src.models.member import Member
 from src.models.money import ACCOUNT_JOINT, MoneyAccount, MoneyMovement, MoneyPosting
 from src.models.price_snapshot import PriceSnapshot
@@ -386,3 +387,74 @@ def test_the_summary_reads_as_one_line():
 def test_a_balance_row_with_no_account_named_is_refused(db, member, database, tmp_path):
     path = write(tmp_path, [balance_row(account="")])
     assert job.main([str(path), "--apply"], db_factory=database) == 2
+
+
+# ------------------------------------------------------------------ stock of unknown cost
+
+
+def counted_in(**overrides) -> dict:
+    """The shape most of the Vault arrives in: certainly held, cost not findable."""
+    return stock(**{"unit_cost": "", "purchase_date": "", "source": "", **overrides})
+
+
+def test_a_blank_cost_counts_stock_in_instead_of_inventing_a_purchase(db, member, database):
+    summary = job.load(db, [counted_in(quantity="3")], member_id=member.id)
+
+    adjustment = db.scalars(select(InventoryAdjustment)).one()
+    assert adjustment.quantity_delta == 3
+    assert adjustment.reason == "opening_inventory"
+    assert adjustment.landed_cost_cents is None
+    assert adjustment.bucket == "vault"
+    assert db.scalar(select(func.count()).select_from(Purchase)) == 0
+    assert summary.counted_in == 1 and summary.purchases == 0
+
+
+def test_counting_stock_in_moves_no_money(db, member, database):
+    """Nobody's balance changes, because nobody can say what was paid or by whom."""
+    before = account_balance(db, joint(db))
+    job.load(db, [counted_in()], member_id=member.id)
+
+    assert db.scalar(select(func.count()).select_from(MoneyMovement)) == 0
+    assert account_balance(db, joint(db)) == before
+
+
+def test_funding_without_a_cost_is_refused(db, member, database):
+    """A split of an amount nobody knows is a contradiction, not a row to guess at."""
+    with pytest.raises(job.RowError, match="funding needs a unit_cost"):
+        job.load(db, [counted_in(funding="Patrick")], member_id=member.id)
+
+
+def test_counted_in_stock_may_still_carry_a_date(db, member, database):
+    job.load(db, [counted_in(purchase_date="2026-03-01")], member_id=member.id)
+
+    assert db.scalars(select(InventoryAdjustment)).one().adjustment_date == date(2026, 3, 1)
+
+
+def test_an_unreadable_date_on_counted_in_stock_is_still_refused(db, member, database):
+    with pytest.raises(job.RowError, match="ISO date"):
+        job.load(db, [counted_in(purchase_date="21/03/26")], member_id=member.id)
+
+
+def test_selling_counted_in_stock_reports_unknown_cost_not_fake_profit(db, member, database):
+    """The whole point of the path: an honest blank beats a confident wrong number."""
+    job.load(
+        db,
+        [counted_in(sale_amount="1800.00", sale_date="2026-05-01")],
+        member_id=member.id,
+    )
+
+    sale = db.scalars(select(Sale)).one()
+    assert sale.cost_basis_cents is None
+    assert sale.has_unknown_cost is True
+    assert sale.realized_profit_cents is None
+
+
+def test_counted_in_stock_can_still_be_valued(db, member, database):
+    """Collectr knows what it is worth today even when nobody knows what it cost."""
+    job.load(
+        db,
+        [counted_in(value="1520.00", valued_on="2026-09-22")],
+        member_id=member.id,
+    )
+
+    assert db.scalars(select(PriceSnapshot)).one().value_cents == 152000

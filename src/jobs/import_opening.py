@@ -18,9 +18,11 @@ review could not confirm are simply absent from the file; this job never guesses
 Three kinds of row:
 
 ``stock``
-    A product and the purchase that brought it in. Optionally a sale (making it a confirmed
-    buy-and-sold pair, with FIFO profit computed by the ledger, not here) and optionally a
-    valuation, which is what the Vault tab's yearly numbers become.
+    A product and how it came to be held. With a `unit_cost` that is a real purchase; with
+    the cost left blank it is stock counted in at unknown cost, which is what most of the
+    Vault is. Optionally a sale (making it a confirmed buy-and-sold pair, with FIFO profit
+    computed by the ledger, not here) and optionally a valuation, which is what the Vault
+    tab's yearly numbers become.
 ``expense``
     Overhead: subscriptions and anything else that left the business with no stock back.
 ``balance``
@@ -52,7 +54,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.database import get_db
-from src.models.ledger import BUCKETS, Purchase, Sale
+from src.models.ledger import BUCKETS, InventoryAdjustment, Purchase, Sale
 from src.models.member import Member
 from src.models.money import (
     ACCOUNT_JOINT,
@@ -99,6 +101,7 @@ class Summary:
 
     products: int = 0
     purchases: int = 0
+    counted_in: int = 0
     sales: int = 0
     valuations: int = 0
     expenses: int = 0
@@ -107,7 +110,8 @@ class Summary:
 
     def as_log(self) -> str:
         return (
-            f"products={self.products} purchases={self.purchases} sales={self.sales} "
+            f"products={self.products} purchases={self.purchases} "
+            f"counted_in={self.counted_in} sales={self.sales} "
             f"valuations={self.valuations} expenses={self.expenses} "
             f"balances={self.balances} skipped={len(self.skipped)}"
         )
@@ -146,6 +150,11 @@ def day(value: str, *, label: str) -> date:
         return date.fromisoformat(text)
     except ValueError as error:
         raise RowError(f"{label} must be an ISO date (YYYY-MM-DD), got {value!r}") from error
+
+
+def _maybe_day(value: str, *, label: str) -> date | None:
+    """A date if the sheet has one. Stock counted in at unknown cost often has neither."""
+    return day(value, label=label) if (value or "").strip() else None
 
 
 def _account(db: Session, token: str) -> MoneyAccount:
@@ -226,7 +235,11 @@ def _existing(db: Session, key: str) -> Product | None:
 
 
 def stock_row(db: Session, row: dict, *, member_id: uuid.UUID, summary: Summary) -> None:
-    """A product, the purchase that brought it in, and optionally its sale and value."""
+    """A product, how it came to be held, and optionally its sale and value.
+
+    A blank `unit_cost` is a statement, not an omission: the item is certainly held and its
+    cost is not findable. See `_counted_in`.
+    """
     key = (row.get("key") or "").strip()
     if not key:
         raise RowError("every stock row needs a key")
@@ -257,6 +270,83 @@ def stock_row(db: Session, row: dict, *, member_id: uuid.UUID, summary: Summary)
     summary.products += 1
 
     quantity = whole(row.get("quantity", ""), label="quantity")
+    held = _counted_in if not (row.get("unit_cost") or "").strip() else _bought
+    held(
+        db,
+        row,
+        product=product,
+        quantity=quantity,
+        bucket=bucket,
+        member_id=member_id,
+        summary=summary,
+    )
+
+    _maybe_sale(db, row, product=product, quantity=quantity, member_id=member_id, summary=summary)
+    _maybe_valuation(db, row, product=product, member_id=member_id, summary=summary)
+
+
+def _counted_in(
+    db: Session,
+    row: dict,
+    *,
+    product: Product,
+    quantity: int,
+    bucket: str,
+    member_id: uuid.UUID,
+    summary: Summary,
+) -> None:
+    """Stock that is certainly held but whose cost nobody can find.
+
+    Most of the Vault is this: the collection export lists what is on the shelf, and the
+    spreadsheet calls the same box by a nickname three years and two tabs away. Inventing a
+    plausible cost would make every future sale report a profit that is partly fiction.
+
+    So it goes in the way the app already handles stock of unknown cost - an
+    `opening_inventory` adjustment with no cost on it. The quantity is real, the holding
+    shows up, no money moves, and the costing engine marks any later sale as unknown-cost
+    rather than quietly crediting it with profit. When the cost turns up, the adjustment is
+    edited or replaced with a real purchase; nothing here is a dead end.
+    """
+    if (row.get("funding") or "").strip():
+        raise RowError("funding needs a unit_cost - who paid how much for a cost nobody knows?")
+
+    adjustment = InventoryAdjustment(
+        product_id=product.id,
+        quantity_delta=quantity,
+        reason="opening_inventory",
+        landed_cost_cents=None,
+        adjustment_date=_maybe_day(row.get("purchase_date", ""), label="purchase_date"),
+        member_id=member_id,
+        bucket=bucket,
+        notes=(row.get("notes") or "").strip() or "Opening position, cost unknown",
+        created_by_member_id=member_id,
+    )
+    db.add(adjustment)
+    db.flush()
+    ledger.recompute_product(db, product.id)
+    ledger.record_audit(
+        db,
+        entity_type="adjustment",
+        entity_id=adjustment.id,
+        action="create",
+        member_id=member_id,
+        after=ledger.snapshot(adjustment, ["quantity_delta", "reason", "adjustment_date"]),
+        reason="opening position import",
+    )
+    summary.counted_in += 1
+
+
+def _bought(
+    db: Session,
+    row: dict,
+    *,
+    product: Product,
+    quantity: int,
+    bucket: str,
+    member_id: uuid.UUID,
+    summary: Summary,
+) -> None:
+    """A real purchase: a known cost, a known date, and money that left an account."""
     amount = cents(row.get("unit_cost", ""), label="unit_cost") * quantity
     purchase = Purchase(
         product_id=product.id,
@@ -287,9 +377,6 @@ def stock_row(db: Session, row: dict, *, member_id: uuid.UUID, summary: Summary)
         reason="opening position import",
     )
     summary.purchases += 1
-
-    _maybe_sale(db, row, product=product, quantity=quantity, member_id=member_id, summary=summary)
-    _maybe_valuation(db, row, product=product, member_id=member_id, summary=summary)
 
 
 def _maybe_sale(
