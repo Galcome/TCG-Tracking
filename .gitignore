@@ -58,3 +58,4 @@ htmlcov/
 firebase-debug.log
 
 # Playwright
+.claude/settings.local.json

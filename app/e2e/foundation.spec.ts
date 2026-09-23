@@ -1564,3 +1564,44 @@ test('desktop sidebar actions are one width', async ({ page }) => {
   }));
   expect(new Set(widths).size).toBe(1);
 });
+
+test('a debt the group owes is never coloured as a gain', async ({ page, request }) => {
+  await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Money', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Money', exact: true })).toBeVisible();
+  const accounts = (await (await request.get(API + '/api/v1/money/accounts')).json()).items;
+  const joint = accounts.find((a: { kind: string }) => a.kind === 'joint');
+  const member = accounts.find((a: { name: string }) => a.name === 'E2E Tester');
+  // Put the member in the red. A member balance is negated at read time, so a debt arrives at the
+  // component as a positive number - colouring by sign alone would paint what is owed as profit.
+  await page.getByRole('group', { name: member.name, exact: true }).getByRole('button', { name: 'Adjust', exact: true }).click();
+  await page.getByLabel('How much', { exact: true }).fill('12.34');
+  await page.getByLabel('Audit note', { exact: true }).fill('Expo owed-colour check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const owed = page.getByRole('group', { name: member.name, exact: true });
+  await expect(owed.getByText('The group owes ' + member.name, { exact: false })).toBeVisible();
+  const colourOf = (name: string) =>
+    page.getByRole('group', { name, exact: true }).getByText(/^-?\$/).first().evaluate(el => getComputedStyle(el).color);
+  const GAIN = 'rgb(116, 228, 179)'; // colors.gain
+  const LOSS = 'rgb(255, 155, 166)'; // colors.loss
+  const owedColour = await colourOf(member.name);
+  expect(owedColour).not.toBe(GAIN);
+  expect(owedColour).toBe(LOSS);
+  // Joint cash keeps sign-based colouring: it is the one balance where up really is good.
+  await page.getByRole('group', { name: joint.name, exact: true }).getByRole('button', { name: 'Adjust', exact: true }).click();
+  await page.getByLabel('How much', { exact: true }).fill('25.00');
+  await page.getByLabel('Audit note', { exact: true }).fill('Expo joint-colour check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await colourOf(joint.name)).toBe(GAIN);
+  await page.getByRole('group', { name: 'Expo joint-colour check', exact: true }).getByRole('button', { name: 'Void', exact: true }).click();
+  await page.getByLabel('Reason', { exact: true }).fill('Reverse joint colour check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Void it', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('group', { name: 'Expo owed-colour check', exact: true }).getByRole('button', { name: 'Void', exact: true }).click();
+  await page.getByLabel('Reason', { exact: true }).fill('Reverse colour check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Void it', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});

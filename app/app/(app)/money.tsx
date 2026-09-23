@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { View } from 'react-native'
+import { Text, View } from 'react-native'
 
 import { BalanceAdjustmentDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
-import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed } from '../../components/ui'
+import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
+import { colors } from '../../context/ThemeContext'
 import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
 import { money } from '../../lib/format'
 import { storeCreditMeaning } from '../../lib/money-drafts'
@@ -47,6 +48,18 @@ function accountMeaning(account: Account): string {
   return isNegativeMoney(account.balance) ? 'Cash account is below zero' : 'Cash available to spend'
 }
 
+/** Colour a balance by what it means, not by its sign. Only joint cash is a gain or a loss.
+ *  A partner balance is negated at read time, so a debt the group owes arrives positive - green
+ *  there would read as profit when it is the opposite. Store credit is value, never profit. */
+function balanceTone(account: Account): string | undefined {
+  if (account.balance_means === 'owed') {
+    if (isZeroMoney(account.balance) || isNegativeMoney(account.balance)) return undefined
+    return colors.loss
+  }
+  if (account.balance_means === 'credit') return undefined
+  return toneColor(account.balance)
+}
+
 function AccountCard({
   account,
   onTransfer,
@@ -64,7 +77,7 @@ function AccountCard({
             <Copy>{account.name}</Copy>
             <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
           </View>
-          <Copy><Signed value={account.balance}>{money(account.balance)}</Signed></Copy>
+          <Copy><Text style={{ color: balanceTone(account) }}>{money(account.balance)}</Text></Copy>
         </Row>
         <Row>
           <Button label="Move money" onPress={onTransfer} />
