@@ -97,6 +97,45 @@ export function parseAdjustmentCents(value: string): number | null {
   return Number(cents)
 }
 
+/** The reason stamped on the void half of an edit, so the audit trail says what happened. */
+export const EDIT_VOID_REASON = 'Replaced by a corrected adjustment'
+
+/**
+ * Re-open a posted adjustment as the draft that produced it.
+ *
+ * A leg carries raw cash flow; an adjustment is entered in the account's own terms, and for
+ * a liability those are opposites - "owed $50 more" is $50 of cash flowing the other way.
+ * The flip is its own inverse, so applying it again recovers what was typed.
+ *
+ * Returns null for anything that is not a single-leg adjustment, which is the only shape
+ * this editor can honestly reproduce.
+ */
+export function adjustmentDraftFromMovement(
+  movement: {
+    kind: string
+    legs: { account_id: string; amount: string }[]
+    occurred_on: string | null
+    notes: string | null
+  },
+  isLiability: boolean,
+  today: string,
+): BalanceAdjustmentDraft | null {
+  if (movement.kind !== 'adjustment' || movement.legs.length !== 1) return null
+  const [leg] = movement.legs
+  const raw = leg.amount.trim()
+  const negative = raw.startsWith('-')
+  const magnitude = decimalCents(negative ? raw.slice(1) : raw)
+  if (magnitude === null || magnitude === 0n) return null
+  const down = negative !== isLiability
+  return {
+    accountId: leg.account_id,
+    direction: down ? 'down' : 'up',
+    amount: `${magnitude / 100n}.${String(magnitude % 100n).padStart(2, '0')}`,
+    occurredOn: movement.occurred_on ?? today,
+    notes: movement.notes ?? '',
+  }
+}
+
 function validateDate(errors: MoneyValidation, value: string | undefined) {
   if (!value || !isIsoDate(value)) errors.occurredOn = 'Enter a date in YYYY-MM-DD format.'
 }
