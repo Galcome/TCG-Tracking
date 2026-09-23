@@ -58,8 +58,10 @@ export default function ProtectedLayout() {
   if (!session) return <Redirect href="/login" />;
   return <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
     <View style={{ flex: 1, flexDirection: isDesktop ? 'row' : 'column' }}>
-      <View style={{ padding: isDesktop ? 16 : 12, gap: isDesktop ? 18 : 8, width: isDesktop ? 220 : '100%', borderColor: colors.edge, borderRightWidth: isDesktop ? 1 : 0, borderBottomWidth: isDesktop ? 0 : 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}><Brand /><Button variant="link" label="Account" onPress={() => setAccount(true)} /></View>
+      <View style={{ padding: isDesktop ? 16 : 12, gap: isDesktop ? 18 : 8, width: isDesktop ? 240 : '100%', borderColor: colors.edge, borderRightWidth: isDesktop ? 1 : 0, borderBottomWidth: isDesktop ? 0 : 1 }}>
+        {/* The desktop rail is 220px wide, which the brand alone fills once it has wrapped.
+            Side by side the Account link lands on top of the title, so stack them there. */}
+        <View style={{ flexDirection: isDesktop ? 'column' : 'row', alignItems: isDesktop ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 8 }}><Brand /><Button variant="link" label="Account" onPress={() => setAccount(true)} /></View>
         {isDesktop ? <Copy muted>{member.data?.display_name ?? 'Checking membership…'}</Copy> : null}
         {isDesktop ? <View accessibilityLabel="Main navigation" style={{ gap: 4 }}>{navigation}</View> : null}
         {isDesktop ? <View style={{ gap: 8 }}><Button label="New product" disabled={!member.data} onPress={() => setAdding(true)} />

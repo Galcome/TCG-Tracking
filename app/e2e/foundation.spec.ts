@@ -1416,6 +1416,19 @@ async function openProductSections(page: Page) {
   }
 }
 
+test('the desktop rail keeps the brand and the account link off each other', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+  const brand = page.getByText('TCG Investments', { exact: true });
+  const account = page.getByRole('button', { name: 'Account', exact: true });
+  const [title, link] = [await brand.boundingBox(), await account.boundingBox()];
+  if (!title || !link) throw new Error('brand and account link must both render in the rail');
+  // Side by side they overlapped. Stacked, the link clears the title outright.
+  expect(link.y).toBeGreaterThanOrEqual(title.y + title.height);
+  // A rail too narrow for the title wraps it, which is what pushed the two together.
+  expect(title.height).toBeLessThan(30);
+});
+
 async function signIn(page: Page) {
   await firebaseFixture(page);await page.goto('/');
   await page.getByLabel('Email',{exact:true}).fill('e2e@example.test');
