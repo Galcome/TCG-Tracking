@@ -13,6 +13,7 @@ from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
 from src.schemas.pricing import MarketEstimateRead
+from src.schemas.taxonomy import TaxonomyRead
 from src.services import reporting, rollups, vault
 
 router = APIRouter()
@@ -431,6 +432,10 @@ class VaultHoldingRead(BaseModel):
 
     product_id: uuid.UUID
     product_name: str
+    #: The same identity the stock list shows, so a Vault row reads like any other row.
+    game: TaxonomyRead
+    product_type: TaxonomyRead
+    set_name: str | None
     units: int
     cost: MoneyOut = Field(validation_alias="cost_cents")
 

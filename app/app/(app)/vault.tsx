@@ -3,6 +3,7 @@ import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { Text, View } from 'react-native'
 
+import { GameIdentity } from '../../components/game-identity'
 import { RecordValuationDialog } from '../../components/valuation-form'
 import { Button, Card, Copy, Disclosure, ErrorNotice, Field, Loading, Page, Row, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
@@ -162,12 +163,21 @@ function HoldingCard({
 }) {
   const { isDesktop, width, fontScale } = useResponsiveLayout()
   const slot = { isDesktop, width, fontScale }
+  const setRepeatsName = Boolean(
+    holding.set_name &&
+      holding.product_name.toLocaleLowerCase().includes(holding.set_name.toLocaleLowerCase()),
+  )
   return (
     <View role="group" accessibilityLabel={holding.product_name}>
       <Card>
         <Row>
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Copy>{holding.product_name}</Copy>
+            <GameIdentity slug={holding.game.slug} name={holding.game.name} />
+            <Copy muted>
+              {holding.product_type.name}
+              {holding.set_name && !setRepeatsName ? ` · ${holding.set_name}` : ''}
+            </Copy>
             <Copy muted>
               {daysLabel(holding.days_held, 'Held for', 'Held age unknown')}
             </Copy>
@@ -222,7 +232,12 @@ export default function Vault() {
   const rows = useMemo(
     () =>
       (holdings.data ?? []).filter((holding) =>
-        search ? holding.product_name.toLocaleLowerCase().includes(search) : true,
+        search
+          ? [holding.product_name, holding.game.name, holding.set_name ?? '']
+              .join(' ')
+              .toLocaleLowerCase()
+              .includes(search)
+          : true,
       ),
     [holdings.data, search],
   )
@@ -232,11 +247,11 @@ export default function Vault() {
       <Copy muted>Held on purpose; estimates stay separate from cost and profit. Search loaded holdings.</Copy>
       <Field
         label="Search Vault holdings"
+        placeholder="Product, game or set"
         value={searchInput}
         onChangeText={setSearchInput}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="Product name"
       />
 
       <ErrorNotice error={holdings.error} retry={() => { void holdings.refetch() }} />

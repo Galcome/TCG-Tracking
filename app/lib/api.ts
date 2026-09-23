@@ -775,6 +775,9 @@ export interface LineageRollup {
 export interface VaultHolding {
   product_id: string
   product_name: string
+  game: Taxonomy
+  product_type: Taxonomy
+  set_name: string | null
   units: number
   cost: string
   /** null means never valued, and it stays null — cost is not a substitute for worth. */
