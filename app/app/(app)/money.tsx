@@ -7,8 +7,12 @@ import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, to
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
 import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
-import { money } from '../../lib/format'
-import { storeCreditMeaning } from '../../lib/money-drafts'
+import { money, todayIso } from '../../lib/format'
+import {
+  adjustmentDraftFromMovement,
+  storeCreditMeaning,
+  type BalanceAdjustmentDraft,
+} from '../../lib/money-drafts'
 
 const PAGE_SIZE = 50
 
@@ -106,7 +110,15 @@ function MovementLegs({ movement }: { movement: Movement }) {
   )
 }
 
-function MovementCard({ movement, onVoid }: { movement: Movement; onVoid: () => void }) {
+function MovementCard({
+  movement,
+  onVoid,
+  onEdit,
+}: {
+  movement: Movement
+  onVoid: () => void
+  onEdit?: () => void
+}) {
   const canVoid = movement.status !== 'voided' && !movement.purchase_id && !movement.sale_id
   return (
     <View role="group" accessibilityLabel={movement.notes || movement.id}>
@@ -127,11 +139,26 @@ function MovementCard({ movement, onVoid }: { movement: Movement; onVoid: () => 
         {movement.notes ? <Copy muted>{movement.notes}</Copy> : null}
         <Row>
           <Copy muted>{movement.status === 'voided' ? 'Voided — retained for audit' : 'Posted'}</Copy>
+          {canVoid && onEdit ? <Button label="Edit" onPress={onEdit} /> : null}
           {canVoid ? <Button label="Void" onPress={onVoid} danger /> : null}
         </Row>
       </Card>
     </View>
   )
+}
+
+interface EditTarget {
+  id: string
+  account: Account
+  draft: BalanceAdjustmentDraft
+}
+
+/** An adjustment can be re-opened only when its one account is still on the books. */
+function editTarget(movement: Movement, accounts: Account[]): EditTarget | null {
+  const account = accounts.find((item) => item.id === movement.legs[0]?.account_id)
+  if (!account) return null
+  const draft = adjustmentDraftFromMovement(movement, account.balance_means === 'owed', todayIso())
+  return draft ? { id: movement.id, account, draft } : null
 }
 
 export interface MoneyProps {
@@ -146,6 +173,7 @@ export function Money(_props: MoneyProps = {}) {
   const [offset, setOffset] = useState(0)
   const [transferFrom, setTransferFrom] = useState<string | null>(null)
   const [adjusting, setAdjusting] = useState<Account | null>(null)
+  const [editing, setEditing] = useState<EditTarget | null>(null)
   const [voiding, setVoiding] = useState<string | null>(null)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
@@ -257,9 +285,17 @@ export function Money(_props: MoneyProps = {}) {
           </Copy>
         </Card>
       ) : null}
-      {rows.map((movement) => (
-        <MovementCard key={movement.id} movement={movement} onVoid={() => setVoiding(movement.id)} />
-      ))}
+      {rows.map((movement) => {
+        const target = editTarget(movement, items)
+        return (
+          <MovementCard
+            key={movement.id}
+            movement={movement}
+            onVoid={() => setVoiding(movement.id)}
+            onEdit={target ? () => setEditing(target) : undefined}
+          />
+        )
+      })}
       {movements.data && movements.data.total > PAGE_SIZE ? (
         <Row>
           <Button
@@ -280,6 +316,14 @@ export function Money(_props: MoneyProps = {}) {
 
       {transferFrom ? <TransferDialog accounts={items} from={transferFrom} onClose={() => setTransferFrom(null)} /> : null}
       {adjusting ? <BalanceAdjustmentDialog account={adjusting} onClose={() => setAdjusting(null)} /> : null}
+      {editing ? (
+        <BalanceAdjustmentDialog
+          key={editing.id}
+          account={editing.account}
+          replacing={{ id: editing.id, draft: editing.draft }}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
       {voiding ? <VoidMovementDialog id={voiding} onClose={() => setVoiding(null)} /> : null}
     </Page>
   )

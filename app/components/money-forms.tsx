@@ -12,7 +12,9 @@ import {
   validateExpenseDraft,
   validateTransferDraft,
   validateVoidMovementDraft,
+  EDIT_VOID_REASON,
   type BalanceAdjustmentDraft,
+  type BalanceAdjustmentPayload,
   type MoneyAdjustmentDirection,
   type MoneyValidation,
   type TransferDraft,
@@ -159,16 +161,30 @@ function transferMeaning(from: Account, to: Account, amount: string): string {
 export interface BalanceAdjustmentDialogProps {
   account: Account
   onClose: () => void
+  /**
+   * The posted adjustment this one corrects. Saving voids it and posts the replacement, so
+   * the ledger keeps both rows - movements are never edited in place, by design.
+   */
+  replacing?: { id: string; draft: BalanceAdjustmentDraft }
 }
 
-export function BalanceAdjustmentDialog({ account, onClose }: BalanceAdjustmentDialogProps) {
+export function BalanceAdjustmentDialog({ account, onClose, replacing }: BalanceAdjustmentDialogProps) {
   const api = useApi()
-  const [direction, setDirection] = useState<MoneyAdjustmentDirection>('up')
-  const [amount, setAmount] = useState('')
-  const [occurredOn, setOccurredOn] = useState(todayIso())
-  const [notes, setNotes] = useState('')
+  const [direction, setDirection] = useState<MoneyAdjustmentDirection>(replacing?.draft.direction ?? 'up')
+  const [amount, setAmount] = useState(replacing?.draft.amount ?? '')
+  const [occurredOn, setOccurredOn] = useState(replacing?.draft.occurredOn ?? todayIso())
+  const [notes, setNotes] = useState(replacing?.draft.notes ?? '')
   const [validation, setValidation] = useState<MoneyValidation>({})
-  const mutation = useMoneyMutation(api.createMoneyAdjustment, onClose)
+  // The void half can succeed while the repost fails. Remembering it means a retry posts the
+  // correction rather than voiding a second time.
+  const [voided, setVoided] = useState(false)
+  const mutation = useMoneyMutation(async (payload: BalanceAdjustmentPayload) => {
+    if (replacing && !voided) {
+      await api.voidMovement(replacing.id, EDIT_VOID_REASON)
+      setVoided(true)
+    }
+    return api.createMoneyAdjustment(payload)
+  }, onClose)
   const draft = useMemo<BalanceAdjustmentDraft>(() => ({
     accountId: account.id,
     direction,
@@ -192,17 +208,24 @@ export function BalanceAdjustmentDialog({ account, onClose }: BalanceAdjustmentD
 
   return (
     <MoneySheet
-      title={`Adjust ${account.name}`}
+      title={replacing ? `Edit adjustment · ${account.name}` : `Adjust ${account.name}`}
       onClose={onClose}
       onSubmit={submit}
       busy={mutation.isPending}
-      submitLabel="Save"
+      submitLabel={replacing ? 'Save correction' : 'Save'}
       error={mutation.error}
       validation={validation}
     >
       <Card>
         <Copy>{account.name}</Copy>
         <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
+        {replacing ? (
+          <Copy muted>
+            {voided && mutation.error
+              ? 'The original was voided but the correction did not save. Save again to post it.'
+              : 'Saving voids the original and posts this in its place. Both rows stay on the ledger.'}
+          </Copy>
+        ) : null}
       </Card>
       <Choice
         label="Direction"

@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   MAX_ADJUSTMENT_CENTS,
+  adjustmentDraftFromMovement,
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   buildTransferPayload,
@@ -111,4 +112,61 @@ test('expense validation refuses future dates, no payer, and an unexplained othe
   assert.ok(errors.notes)
   assert.ok(validateExpenseDraft({}, date).category)
   assert.equal(buildExpensePayload({ category: 'other', amount: '5.00', occurredOn: date, paidFrom: 'joint', split: null, notes: '' }, date), null)
+})
+
+const adjustment = (amount: string, overrides: Record<string, unknown> = {}) => ({
+  kind: 'adjustment',
+  legs: [{ account_id: 'acct', amount }],
+  occurred_on: date,
+  notes: 'Opening balance',
+  ...overrides,
+})
+
+test('a posted adjustment re-opens as the draft that produced it', () => {
+  assert.deepEqual(adjustmentDraftFromMovement(adjustment('790.00'), false, date), {
+    accountId: 'acct',
+    direction: 'up',
+    amount: '790.00',
+    occurredOn: date,
+    notes: 'Opening balance',
+  })
+  assert.equal(adjustmentDraftFromMovement(adjustment('-12.05'), false, date)?.direction, 'down')
+  assert.equal(adjustmentDraftFromMovement(adjustment('-12.05'), false, date)?.amount, '12.05')
+})
+
+test('a liability account reads back in its own terms, not raw cash flow', () => {
+  // "Jason is owed $5,613" posts as -5613 of cash flow; re-opening must say owed more.
+  const draft = adjustmentDraftFromMovement(adjustment('-5613.00'), true, date)
+  assert.equal(draft?.direction, 'up')
+  assert.equal(draft?.amount, '5613.00')
+  assert.equal(adjustmentDraftFromMovement(adjustment('5613.00'), true, date)?.direction, 'down')
+})
+
+test('a re-opened draft round-trips back to the payload that posted it', () => {
+  const draft = adjustmentDraftFromMovement(adjustment('-1296.22'), true, date)
+  assert.deepEqual(buildBalanceAdjustmentPayload(draft!), {
+    account_id: 'acct',
+    amount: 129622,
+    occurred_on: date,
+    notes: 'Opening balance',
+  })
+})
+
+test('only a single-leg adjustment with a real amount can be re-opened', () => {
+  assert.equal(adjustmentDraftFromMovement(adjustment('10.00', { kind: 'transfer' }), false, date), null)
+  assert.equal(adjustmentDraftFromMovement(adjustment('0.00'), false, date), null)
+  assert.equal(
+    adjustmentDraftFromMovement(
+      adjustment('10.00', { legs: [{ account_id: 'a', amount: '10.00' }, { account_id: 'b', amount: '-10.00' }] }),
+      false,
+      date,
+    ),
+    null,
+  )
+})
+
+test('an undated adjustment re-opens on today rather than blank', () => {
+  const draft = adjustmentDraftFromMovement(adjustment('5.00', { occurred_on: null, notes: null }), false, date)
+  assert.equal(draft?.occurredOn, date)
+  assert.equal(draft?.notes, '')
 })
