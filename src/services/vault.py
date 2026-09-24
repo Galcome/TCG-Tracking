@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from src.models.ledger import BUCKET_STORE, BUCKET_VAULT, STATUS_ACTIVE, StockMove
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
+from src.models.taxonomy import Game, ProductType
 from src.services import inventory
 from src.services.pricing import MarketEstimate, current_estimates
 
@@ -44,6 +45,10 @@ class VaultHolding:
 
     product_id: uuid.UUID
     product_name: str
+    #: The same identity the stock list shows, so a Vault row reads like any other row.
+    game: Game
+    product_type: ProductType
+    set_name: str | None
     units: int
     cost_cents: int
 
@@ -104,9 +109,10 @@ def holdings(db: Session, today: date | None = None) -> list[VaultHolding]:
     if not vaulted:
         return []
 
-    names = dict(
-        db.execute(select(Product.id, Product.name).where(Product.id.in_(vaulted))).all()
-    )
+    products = {
+        product.id: product
+        for product in db.scalars(select(Product).where(Product.id.in_(vaulted)))
+    }
 
     # Latest estimate per product. `distinct on` would be tidier but this stays portable
     # and the Vault is a few dozen deliberate holds, not a catalogue.
@@ -149,6 +155,7 @@ def holdings(db: Session, today: date | None = None) -> list[VaultHolding]:
 
     rows: list[VaultHolding] = []
     for product_id, entry in vaulted.items():
+        product = products[product_id]
         units = entry.by_bucket[BUCKET_VAULT]
         unit_cost = entry.average_unit_cost_cents or 0
         snapshot = latest.get(product_id)
@@ -160,7 +167,10 @@ def holdings(db: Session, today: date | None = None) -> list[VaultHolding]:
         rows.append(
             VaultHolding(
                 product_id=product_id,
-                product_name=names.get(product_id, ""),
+                product_name=product.name,
+                game=product.game,
+                product_type=product.product_type,
+                set_name=product.set_name,
                 units=units,
                 cost_cents=unit_cost * units,
                 value_cents=snapshot[0] if snapshot else None,

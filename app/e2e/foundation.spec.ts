@@ -783,6 +783,8 @@ test('Vault keeps market quotes separate from unknown manual value and recovers 
     return route.fulfill({ status: reads === 1 ? 403 : 200, contentType: 'application/json', body: JSON.stringify(reads === 1
       ? { detail: 'Vault report temporarily unavailable' }
       : [{ product_id: '11111111-1111-4111-8111-111111111111', product_name: name, units: 2, cost: '10.00',
+        game: { slug: 'lorcana', name: 'Disney Lorcana' }, product_type: { slug: 'booster-box', name: 'Booster Box' },
+        set_name: 'Rise of the Floodborn',
         value: null, valued_on: null, days_since_valued: null, appreciation: null, appreciation_pct: null,
         annualised: null, days_held: 700, days_in_store_first: 30,
         market_estimate: { value: '99.99', captured_on: '2025-01-02', status: 'stale', provider: 'tcgcsv', source_revision: 'test' } }]) });

@@ -186,6 +186,18 @@ def test_there_is_no_days_to_sell_figure(client, make_product):
     assert "sell_through" not in row
 
 
+def test_a_holding_carries_the_same_identity_the_stock_list_shows(client, make_product):
+    """A Vault row should read like any other stock row: game, type and set, not a bare name."""
+    held = make_product("Rise of the Floodborn Booster Box", set_name="Rise of the Floodborn")
+    buy(client, held["id"], 1, "150.00", bucket="vault")
+
+    row = vault(client)["Rise of the Floodborn Booster Box"]
+    assert row["game"]["slug"] == held["game"]["slug"]
+    assert row["game"]["name"] == held["game"]["name"]
+    assert row["product_type"]["name"] == held["product_type"]["name"]
+    assert row["set_name"] == "Rise of the Floodborn"
+
+
 def test_nothing_in_the_vault_reports_nothing(client):
     assert client.get("/api/v1/reports/vault").json() == []
 
