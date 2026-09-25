@@ -5,13 +5,22 @@ import { Pressable, Text, View } from 'react-native';
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Loading, Page, Row } from '../../components/ui';
 import { useApi } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
-import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type VaultHolding } from '../../lib/api';
+import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type ProductSort, type VaultHolding } from '../../lib/api';
 import { ProductForms } from '../../components/product-forms';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { StockCard } from '../../components/stock-card';
 import { RipDialog } from '../../components/rip-form';
 import { RecordValuationDialog } from '../../components/valuation-form';
 import { canRip } from '../../lib/product-types';
+const SORTS: { value: ProductSort; label: string }[] = [
+  { value: 'value_desc', label: 'Value: high to low' },
+  { value: 'value_asc', label: 'Value: low to high' },
+  { value: 'unit_value_desc', label: 'Unit value: high to low' },
+  { value: 'type', label: 'Type, then value' },
+  { value: 'quantity_desc', label: 'Quantity: most first' },
+  { value: 'newest', label: 'Recently added' },
+];
+
 export default function Inventory() {
   const { isDesktop, fontScale } = useResponsiveLayout();
   const wrapLocations = !isDesktop && fontScale > 1.3;
@@ -25,6 +34,7 @@ export default function Inventory() {
   const [stock, setStock] = useState('in');
   const [type, setType] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [sort, setSort] = useState<ProductSort | ''>('');
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
   const [operation, setOperation] = useState<{ product: Product; mode: 'move' } | null>(null);
@@ -34,12 +44,15 @@ export default function Inventory() {
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
   const games = useQuery({ queryKey: ['games'], queryFn: api.games });
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
-  const products = useQuery({ queryKey: ['products', q, game, stock, bucket, type, includeArchived, offset],
-    queryFn: () => api.products({ q, game, stock, bucket, product_type: type, include_archived: includeArchived, limit: 30, offset }) });
+  const products = useQuery({ queryKey: ['products', q, game, stock, bucket, type, includeArchived, sort, offset],
+    queryFn: () => api.products({ q, game, stock, bucket, product_type: type, include_archived: includeArchived, sort: sort || undefined, limit: 30, offset }) });
+  // With no explicit sort, a search ranks by match; offering "Name" then is a real choice.
+  const sortOptions = [{ value: '', label: q.trim() ? 'Best match' : 'Name A-Z' },
+    ...(q.trim() ? [{ value: 'name', label: 'Name A-Z' }] : []), ...SORTS];
   // The Vault tab is the one Vault: its rows carry the valuation report alongside the stock.
   const vault = useQuery({ queryKey: ['vaultHoldings'], queryFn: api.vaultHoldings, enabled: bucket === 'vault' });
   const holdings = useMemo(() => new Map((vault.data ?? []).map(h => [h.product_id, h] as [string, VaultHolding])), [vault.data]);
-  const activeFilters = [games.data?.find(g => g.slug === game)?.name, types.data?.find(t => t.slug === type)?.name,
+  const activeFilters = [SORTS.find(s => s.value === sort)?.label, games.data?.find(g => g.slug === game)?.name, types.data?.find(t => t.slug === type)?.name,
     stock === 'out' ? 'Sold out' : stock === '' ? 'All products' : null, includeArchived ? 'Archived included' : null].filter(Boolean);
   return <Page title={bucket ? BUCKET_LABELS[bucket] : 'Stock'}>
     {isDesktop ? <Button label="Add product" onPress={() => setAdding(true)} /> : null}
@@ -55,7 +68,9 @@ export default function Inventory() {
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}><Field label="Search products" value={search} onChangeText={setSearch} style={{ flex: 1 }} />
       {!isDesktop ? <Button style={{ minWidth: 86, paddingHorizontal: 10 }} label={filtersOpen ? 'Done' : 'Filters'} onPress={() => setFiltersOpen(value => !value)} /> : null}</View>
     {!isDesktop && !filtersOpen && activeFilters.length > 0 ? <Copy muted>{activeFilters.join(' · ')}</Copy> : null}
-    {isDesktop || filtersOpen ? <Row><Choice label="Game" value={game} options={[{value:'',label:'All games'}, ...(games.data ?? []).map(g=>({value:g.slug,label:g.name}))]}
+    {isDesktop || filtersOpen ? <Row><Choice label="Sort" value={sort} options={sortOptions}
+      onChange={v=>{setSort(v as ProductSort | '');setOffset(0);}} />
+    <Choice label="Game" value={game} options={[{value:'',label:'All games'}, ...(games.data ?? []).map(g=>({value:g.slug,label:g.name}))]}
       onChange={v=>{setGame(v);setOffset(0);}} />
     <Choice label="Stock" value={stock} options={[{value:'in',label:'In stock'},{value:'out',label:'Sold out'},{value:'',label:'All products'}]}
       onChange={v=>{setStock(v);setOffset(0);}} />

@@ -353,3 +353,222 @@ def test_a_product_with_no_transactions_at_all_is_sold_out(client, make_product)
 
     page = client.get("/api/v1/products", params={"q": "Never Traded", "stock": "out"}).json()
     assert [item["name"] for item in page["items"]] == ["Never Traded"]
+
+
+# ---------------------------------------------------------------------- sorting
+
+
+def _stock(client, product_id: str, quantity: int, bucket: str = "inventory") -> None:
+    response = client.post(
+        "/api/v1/purchases",
+        json={"product_id": product_id, "quantity": quantity, "amount": "1.00", "bucket": bucket},
+    )
+    assert response.status_code == 201, response.text
+
+
+def _value(client, product_id: str, amount: str, captured_on: str = "2026-09-01") -> None:
+    response = client.post(
+        "/api/v1/valuations",
+        json={"product_id": product_id, "value": amount, "captured_on": captured_on},
+    )
+    assert response.status_code == 201, response.text
+
+
+def _quote(client, db, product_id: str, cad_cents: int, match_status: str = "confirmed"):
+    from src.models.catalog import CatalogMapping
+    from src.models.market_price import CurrentMarketQuote
+
+    created = client.post(
+        "/api/v1/pricing/mappings",
+        json={
+            "product_id": product_id,
+            "provider": "tcgcsv",
+            "external_product_id": "42",
+            "external_group_id": "7",
+            "external_category_id": "1",
+            "subtype_name": "Normal",
+        },
+    )
+    assert created.status_code == 201, created.text
+    mapping = db.get(CatalogMapping, uuid.UUID(created.json()["id"]))
+    mapping.match_status = match_status
+    db.add(
+        CurrentMarketQuote(
+            mapping_id=mapping.id,
+            product_id=mapping.product_id,
+            status="fresh",
+            original_currency="CAD",
+            original_value_cents=cad_cents,
+            cad_value_cents=cad_cents,
+        )
+    )
+    db.flush()
+
+
+def _names(client, **params) -> list[str]:
+    response = client.get("/api/v1/products", params=params)
+    assert response.status_code == 200, response.text
+    return [item["name"] for item in response.json()["items"]]
+
+
+def test_value_sort_ranks_whole_holdings_and_sinks_unvalued(client, make_product):
+    """Two $10 units outrank one $15 unit; a product nobody valued goes last either way."""
+    pair = make_product("Sort Pair")
+    single = make_product("Sort Single")
+    unvalued = make_product("Sort Unvalued")
+    _stock(client, pair["id"], 2)
+    _stock(client, single["id"], 1)
+    _stock(client, unvalued["id"], 5)
+    _value(client, pair["id"], "10.00")
+    _value(client, single["id"], "15.00")
+
+    assert _names(client, q="Sort", sort="value_desc") == [
+        "Sort Pair",
+        "Sort Single",
+        "Sort Unvalued",
+    ]
+    assert _names(client, q="Sort", sort="value_asc") == [
+        "Sort Single",
+        "Sort Pair",
+        "Sort Unvalued",
+    ]
+    assert _names(client, q="Sort", sort="unit_value_desc") == [
+        "Sort Single",
+        "Sort Pair",
+        "Sort Unvalued",
+    ]
+    assert _names(client, q="Sort", sort="quantity_desc") == [
+        "Sort Unvalued",
+        "Sort Pair",
+        "Sort Single",
+    ]
+
+
+def test_value_sort_pages_in_the_database(client, make_product):
+    """The order has to hold across pages, not just within the thirty on screen."""
+    for index, amount in enumerate(["5.00", "50.00", "20.00"]):
+        product = make_product(f"Paged Value {index}")
+        _stock(client, product["id"], 1)
+        _value(client, product["id"], amount)
+
+    first = _names(client, q="Paged Value", sort="value_desc", limit=1)
+    second = _names(client, q="Paged Value", sort="value_desc", limit=1, offset=1)
+    assert first + second == ["Paged Value 1", "Paged Value 2"]
+
+
+def test_the_latest_manual_valuation_is_the_one_that_counts(client, make_product):
+    rising = make_product("Latest Rising")
+    steady = make_product("Latest Steady")
+    for product in (rising, steady):
+        _stock(client, product["id"], 1)
+    _value(client, rising["id"], "1.00", "2026-01-01")
+    _value(client, rising["id"], "90.00", "2026-09-01")
+    _value(client, steady["id"], "50.00", "2026-09-01")
+
+    assert _names(client, q="Latest", sort="value_desc") == ["Latest Rising", "Latest Steady"]
+
+
+def test_market_quote_leads_outside_the_vault_and_manual_leads_inside(client, db, make_product):
+    """Each tab sorts by the number its cards show."""
+    quoted = make_product("Lead Quoted")
+    manual = make_product("Lead Manual")
+    for product in (quoted, manual):
+        _stock(client, product["id"], 1, bucket="vault")
+    # Quoted: market $80 but valued by hand at $10. Manual: valued by hand at $40 only.
+    _quote(client, db, quoted["id"], 8000)
+    _value(client, quoted["id"], "10.00")
+    _value(client, manual["id"], "40.00")
+
+    assert _names(client, q="Lead", sort="value_desc") == ["Lead Quoted", "Lead Manual"]
+    assert _names(client, q="Lead", sort="value_desc", bucket="vault") == [
+        "Lead Manual",
+        "Lead Quoted",
+    ]
+
+
+def test_hidden_quotes_do_not_count_toward_value(client, db, make_product):
+    """An unconfirmed mapping, or a raw quote on a card graded since, is not a value."""
+    from sqlalchemy import select
+
+    from src.models.taxonomy import ProductType
+
+    graded_type = db.scalar(select(ProductType.id).where(ProductType.slug == "graded-card"))
+    slab = make_product("Hidden Slab")
+    pending = make_product("Hidden Pending")
+    plain = make_product("Hidden Plain")
+    for product in (slab, pending, plain):
+        _stock(client, product["id"], 1)
+    _quote(client, db, slab["id"], 99900)
+    graded = client.patch(
+        f"/api/v1/products/{slab['id']}",
+        json={"product_type_id": str(graded_type), "grading_company": "PSA", "grade": "10"},
+    )
+    assert graded.status_code == 200, graded.text
+    _quote(client, db, pending["id"], 99900, match_status="disabled")
+    _value(client, plain["id"], "5.00")
+
+    assert _names(client, q="Hidden", sort="value_desc")[0] == "Hidden Plain"
+
+
+def test_value_uses_only_the_selected_bucket(client, make_product):
+    """A product with 9 in the Store and 1 in the Vault is a small Vault holding."""
+    mostly_store = make_product("Bucket Mostly Store")
+    vault_heavy = make_product("Bucket Vault Heavy")
+    _stock(client, mostly_store["id"], 9, bucket="store")
+    _stock(client, mostly_store["id"], 1, bucket="vault")
+    _stock(client, vault_heavy["id"], 3, bucket="vault")
+    _value(client, mostly_store["id"], "10.00")
+    _value(client, vault_heavy["id"], "10.00")
+
+    assert _names(client, q="Bucket", sort="value_desc") == [
+        "Bucket Mostly Store",
+        "Bucket Vault Heavy",
+    ]
+    assert _names(client, q="Bucket", sort="value_desc", bucket="vault") == [
+        "Bucket Vault Heavy",
+        "Bucket Mostly Store",
+    ]
+
+
+def test_type_sort_groups_by_type_then_value(client, db, make_product):
+    from sqlalchemy import select
+
+    from src.models.taxonomy import ProductType
+
+    single_type = db.scalar(select(ProductType.id).where(ProductType.slug == "single"))
+    cheap_box = make_product("Group Cheap Box")
+    dear_box = make_product("Group Dear Box")
+    card = make_product("Group Card", product_type_id=str(single_type))
+    for product, amount in ((cheap_box, "5.00"), (dear_box, "500.00"), (card, "1.00")):
+        _stock(client, product["id"], 1)
+        _value(client, product["id"], amount)
+
+    # Single sorts before Booster Box in the taxonomy; within a type, worth decides.
+    assert _names(client, q="Group", sort="type") == [
+        "Group Card",
+        "Group Dear Box",
+        "Group Cheap Box",
+    ]
+
+
+def test_newest_and_name_sorts(client, make_product):
+    make_product("Order B")
+    make_product("Order A")
+    make_product("Order C")
+
+    assert _names(client, q="Order", sort="newest") == ["Order C", "Order A", "Order B"]
+    assert _names(client, q="Order", sort="name") == ["Order A", "Order B", "Order C"]
+
+
+def test_an_explicit_sort_overrides_search_relevance(client, make_product):
+    exact = make_product("Relevance Charizard")
+    loose = make_product("Relevance Charizard Deluxe Collection")
+    _stock(client, exact["id"], 1)
+    _stock(client, loose["id"], 1)
+    _value(client, loose["id"], "300.00")
+
+    assert _names(client, q="Relevance Charizard", sort="value_desc")[0] == loose["name"]
+
+
+def test_an_unknown_sort_is_rejected(client):
+    assert client.get("/api/v1/products", params={"sort": "price; drop"}).status_code == 422

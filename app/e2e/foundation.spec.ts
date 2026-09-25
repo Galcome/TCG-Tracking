@@ -1618,3 +1618,30 @@ test('a debt the group owes is never coloured as a gain', async ({ page, request
   await page.getByRole('dialog').getByRole('button', { name: 'Void it', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+test('stock sorts by holding value across the whole list, not just the page', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  for (const [name, value] of [['Sorted worth low', '5.00'], ['Sorted worth high', '50.00'], ['Sorted worth mid', '20.00']]) {
+    const product = await (await request.post(API + '/api/v1/products', { data: {
+      name, game_id: games[0].id, product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id,
+      initial_purchase: { quantity: 1, amount: '1.00', funding: [] },
+    } })).json();
+    expect((await request.post(API + '/api/v1/valuations', { data: { product_id: product.id, value } })).ok()).toBeTruthy();
+  }
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('/inventory');
+  await page.getByLabel('Search products', { exact: true }).fill('Sorted worth');
+  await page.getByRole('button', { name: 'Filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Sort: Best match', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Sort', exact: true }).getByRole('button', { name: 'Value: high to low', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByText(/^Value: high to low/)).toBeVisible();
+  const cards = page.getByRole('group', { name: /^Stock product: Sorted worth/ });
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toHaveAccessibleName('Stock product: Sorted worth high');
+  await expect(cards.nth(1)).toHaveAccessibleName('Stock product: Sorted worth mid');
+  await expect(cards.nth(2)).toHaveAccessibleName('Stock product: Sorted worth low');
+  expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
