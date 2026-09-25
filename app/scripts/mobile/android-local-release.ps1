@@ -37,6 +37,11 @@ try {
     $taskFirebase = (Get-Command firebase -ErrorAction SilentlyContinue).Source
     if ([string]::IsNullOrWhiteSpace($taskFirebase)) { throw 'Authenticated Firebase CLI unavailable' }
     if ($Command -in @('build', 'release')) {
+        # Never package code that fails its own checks; CI runs the same two.
+        & npm run typecheck
+        if ($LASTEXITCODE -ne 0) { throw 'Typecheck failed; not building' }
+        & npm test
+        if ($LASTEXITCODE -ne 0) { throw 'Tests failed; not building' }
         $taskSourceFingerprint = Get-SourceFingerprint
         New-Item -ItemType Directory -Path .native-release -Force | Out-Null
         $taskServiceSnapshot = [IO.Path]::GetFullPath((Join-Path $taskAppRoot ".native-release/google-services-$([guid]::NewGuid()).json"))
