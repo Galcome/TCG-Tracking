@@ -1006,6 +1006,8 @@ export const ADJUSTMENT_REASONS = [
   'other',
 ] as const
 
+export type ProductSort = 'name' | 'value_desc' | 'value_asc' | 'unit_value_desc' | 'quantity_desc' | 'type' | 'newest';
+
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const pairs = Object.entries(params).filter(([, value]) => value !== undefined && value !== '')
     .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
@@ -1025,6 +1027,8 @@ export function createApi(request: ApiRequest) { return {
     stock?: string
     bucket?: string
     include_archived?: boolean
+    /** Omitted: best search match first, else name. Value sorts rank whole holdings. */
+    sort?: ProductSort
     /** The endpoint has always paged; only the export needs to ask for a big one. */
     limit?: number
     offset?: number

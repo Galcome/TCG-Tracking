@@ -3,13 +3,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.database import Base
 from src.dependencies import db_session, get_current_member
+from src.models.catalog import MAPPING_CONFIRMED, CatalogMapping
 from src.models.ledger import BUCKETS, Purchase
+from src.models.market_price import CurrentMarketQuote
 from src.models.member import Member
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.routes.money import resolve_funding
@@ -26,7 +29,7 @@ from src.schemas.product import (
 )
 from src.services import history, inventory, ledger, sets
 from src.services import money as money_service
-from src.services.pricing import current_estimates
+from src.services.pricing import ELIGIBLE_PRODUCT_TYPE_SLUGS, current_estimates
 from src.services.product_matching import ProductIdentity, find_candidates
 from src.services.search import escape_like
 
@@ -42,6 +45,23 @@ SIMILARITY_THRESHOLD = 0.35
 
 STOCK_IN = "in"
 STOCK_OUT = "out"
+
+SORT_NAME = "name"
+SORT_VALUE_DESC = "value_desc"
+SORT_VALUE_ASC = "value_asc"
+SORT_UNIT_VALUE_DESC = "unit_value_desc"
+SORT_QUANTITY_DESC = "quantity_desc"
+SORT_NEWEST = "newest"
+SORT_TYPE = "type"
+SORTS = (
+    SORT_NAME,
+    SORT_VALUE_DESC,
+    SORT_VALUE_ASC,
+    SORT_UNIT_VALUE_DESC,
+    SORT_QUANTITY_DESC,
+    SORT_NEWEST,
+    SORT_TYPE,
+)
 
 
 def _attach_set(
@@ -110,6 +130,71 @@ def _apply_filters(
     return stmt
 
 
+def _unit_value_cents(bucket: str | None) -> ColumnElement:
+    """The per-unit worth a stock card shows, as SQL, so the list can sort before paging.
+
+    The same two sources the cards read: the latest manual valuation, and the market quote
+    `current_estimates` would surface (confirmed mapping, raw or sealed, no grading
+    identity). The Vault leads with the manual valuation, because that is what a Vault
+    card shows; everywhere else the market quote leads. Either falls back to the other.
+    """
+    manual = (
+        select(PriceSnapshot.value_cents)
+        .where(PriceSnapshot.product_id == Product.id)
+        .order_by(PriceSnapshot.captured_on.desc(), PriceSnapshot.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    ungraded = and_(
+        *[
+            func.coalesce(func.trim(column), "") == ""
+            for column in (Product.grading_company, Product.grade, Product.cert_number)
+        ]
+    )
+    market = (
+        select(CurrentMarketQuote.cad_value_cents)
+        .join(CatalogMapping, CatalogMapping.id == CurrentMarketQuote.mapping_id)
+        .where(
+            CurrentMarketQuote.product_id == Product.id,
+            CatalogMapping.match_status == MAPPING_CONFIRMED,
+            Product.product_type_id.in_(
+                select(ProductType.id).where(ProductType.slug.in_(ELIGIBLE_PRODUCT_TYPE_SLUGS))
+            ),
+            ungraded,
+        )
+        .order_by(CurrentMarketQuote.updated_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    return func.coalesce(manual, market) if bucket == "vault" else func.coalesce(market, manual)
+
+
+def _sort_keys(sort: str, quantity: ColumnElement, bucket: str | None) -> list:
+    """Order-by terms for one sort. Unvalued products always sink, whichever direction."""
+    unit = _unit_value_cents(bucket)
+    holding = quantity * unit
+    if sort == SORT_VALUE_DESC:
+        keys = [holding.desc().nullslast()]
+    elif sort == SORT_VALUE_ASC:
+        keys = [holding.asc().nullslast()]
+    elif sort == SORT_UNIT_VALUE_DESC:
+        keys = [unit.desc().nullslast()]
+    elif sort == SORT_QUANTITY_DESC:
+        keys = [quantity.desc()]
+    elif sort == SORT_NEWEST:
+        keys = [Product.created_at.desc()]
+    elif sort == SORT_TYPE:
+        type_order = (
+            select(ProductType.sort_order)
+            .where(ProductType.id == Product.product_type_id)
+            .scalar_subquery()
+        )
+        keys = [type_order.asc(), holding.desc().nullslast()]
+    else:
+        keys = []
+    return [*keys, Product.name.asc(), Product.id.asc()]
+
+
 @router.get("", response_model=ProductList)
 def list_products(
     q: str | None = Query(default=None, max_length=200, description="Free-text search"),
@@ -120,6 +205,11 @@ def list_products(
         default=None, pattern=f"^({'|'.join(BUCKETS)})$", description="inventory | store | vault"
     ),
     include_archived: bool = Query(default=False),
+    sort: str | None = Query(
+        default=None,
+        pattern=f"^({'|'.join(SORTS)})$",
+        description="Omitted: best search match first, else name. Values are per holding.",
+    ),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
@@ -170,14 +260,16 @@ def list_products(
         select(func.count()).select_from(narrowed.with_only_columns(Product.id).subquery())
     )
 
-    if search:
+    if search and sort is None:
         narrowed = narrowed.order_by(
             func.word_similarity(search, Product.search_text).desc(),
             Product.name.asc(),
             Product.id.asc(),
         )
     else:
-        narrowed = narrowed.order_by(Product.name.asc(), Product.id.asc())
+        # A holding is what is in the chosen bucket, or everything on hand under "All".
+        quantity = func.coalesce(totals.c[bucket] if bucket else totals.c.on_hand, 0)
+        narrowed = narrowed.order_by(*_sort_keys(sort or SORT_NAME, quantity, bucket))
 
     page = db.scalars(narrowed.limit(limit).offset(offset)).unique().all()
 
