@@ -15,6 +15,18 @@ test('Android distribution calls the exact-main guard and retains artifact gates
   assert.ok(distribution.indexOf('assert-main-release.mjs') < distribution.indexOf('appdistribution:distribute'));
 });
 
+test('Android build runs typecheck and tests before it fetches config or builds', () => {
+  const script = readFileSync(new URL('../scripts/mobile/android-local-release.ps1', import.meta.url), 'utf8');
+  const build = script.slice(script.indexOf("if ($Command -in @('build', 'release'))"));
+  const typecheck = build.indexOf('& npm run typecheck');
+  const tests = build.indexOf('& npm test');
+  assert.ok(typecheck > -1 && tests > -1);
+  assert.match(build, /throw 'Typecheck failed; not building'/);
+  assert.match(build, /throw 'Tests failed; not building'/);
+  assert.ok(tests < build.indexOf('apps:sdkconfig ANDROID'), 'checks run before any release work');
+  assert.ok(tests < build.indexOf('expo prebuild'));
+});
+
 test('Android distribution refuses a repeated versionCode and names the release it ships', () => {
   const script = readFileSync(new URL('../scripts/mobile/android-local-release.ps1', import.meta.url), 'utf8');
   const distribution = script.slice(script.indexOf("if ($Command -in @('distribute', 'release'))"));

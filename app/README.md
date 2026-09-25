@@ -89,7 +89,8 @@ Ordinary local exports/test fixtures remain unchanged.
 
 Following Household's local Gradle → Firebase process, use
 `npm run mobile:android:doctor`, then `npm run mobile:android:build:local`.
-The Windows script retrieves missing TCG configs into ignored files, supplies reviewed
+The Windows script first runs `npm run typecheck` and `npm test` and stops if either
+fails. It then retrieves missing TCG configs into ignored files, supplies reviewed
 public values with dotenv disabled, validates Android configuration, preserves native
 state with non-clean prebuild, and runs Gradle `assembleRelease` locally. No EAS Android
 credits are used. The generated `android/` directory stays ignored.
