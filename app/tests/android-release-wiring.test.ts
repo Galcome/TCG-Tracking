@@ -35,3 +35,17 @@ test('Android distribution refuses a repeated versionCode and names the release 
   assert.doesNotMatch(script, /Vite/);
   assert.ok(distribution.indexOf('Set-Content -LiteralPath $taskDistributedPath') > distribution.indexOf('appdistribution:distribute'));
 });
+
+test('Android build keeps the verified APK outside the worktree, then deletes native build output', () => {
+  const script = readFileSync(new URL('../scripts/mobile/android-local-release.ps1', import.meta.url), 'utf8');
+  const cleanup = script.slice(script.indexOf('function Remove-NativeBuildOutput'), script.indexOf('function Get-SourceFingerprint'));
+  assert.match(cleanup, /node_modules\/\*\/android/);
+  assert.match(cleanup, /@\('build', '\.cxx'\)/);
+  assert.doesNotMatch(cleanup, /native-release/, 'signing state must survive cleanup');
+  assert.match(script, /TCG_RELEASE_ARTIFACT_DIR/);
+  const copy = script.indexOf('Copy-Item -LiteralPath $taskApk -Destination $taskReleaseApk');
+  assert.ok(script.indexOf('approved TCG release certificate') < copy, 'only a verified APK is kept');
+  assert.ok(script.indexOf('Set-Content -LiteralPath $taskReceiptPath') < copy, 'the receipt hashes the same bytes that are kept');
+  assert.ok(copy < script.lastIndexOf('Remove-NativeBuildOutput'), 'the APK is copied before build output is deleted');
+  assert.ok(script.lastIndexOf('Remove-NativeBuildOutput') < script.indexOf("if ($Command -in @('distribute', 'release'))"));
+});

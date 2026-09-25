@@ -10,6 +10,18 @@ function Get-ReleaseFileHash([string]$Path) {
     try { return [BitConverter]::ToString($taskHasher.ComputeHash($taskStream)).Replace('-', '') }
     finally { $taskStream.Dispose(); $taskHasher.Dispose() }
 }
+# Gradle writes ~10 GB of native output, mostly inside node_modules. It is deleted once the
+# APK is copied out, so agent worktrees do not each keep a copy. Signing state in
+# .native-release is untouched.
+function Remove-NativeBuildOutput {
+    foreach ($taskPattern in @('node_modules/*/android', 'node_modules/@*/*/android', 'node_modules/*/node_modules/*/android', 'node_modules/*/node_modules/@*/*/android', 'android', 'android/app')) {
+        foreach ($taskAndroidDir in @(Get-Item -Path (Join-Path $taskAppRoot $taskPattern) -Force -ErrorAction SilentlyContinue)) {
+            foreach ($taskName in @('build', '.cxx')) {
+                Remove-Item -Recurse -Force (Join-Path $taskAndroidDir.FullName $taskName) -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
 function Get-SourceFingerprint {
     $taskFiles = @(& git ls-files --cached --others --exclude-standard -- .) | Sort-Object -Unique
     if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint release sources' }
@@ -79,7 +91,11 @@ try {
         } finally { Pop-Location }
         if ((Get-SourceFingerprint) -ne $taskSourceFingerprint) { throw 'Release sources changed during build; rebuild before distribution' }
     }
-    $taskApk = Join-Path $taskAppRoot 'android/app/build/outputs/apk/release/app-release.apk'
+    $taskConfig = Get-Content -LiteralPath app.json -Raw | ConvertFrom-Json
+    $taskReleaseDir = if ($env:TCG_RELEASE_ARTIFACT_DIR) { $env:TCG_RELEASE_ARTIFACT_DIR } else { Join-Path $env:USERPROFILE '.tcg-tracking/releases' }
+    $taskReleaseApk = Join-Path $taskReleaseDir "tcg-tracking-$($taskConfig.expo.version)-$($taskConfig.expo.android.versionCode).apk"
+    # build/release verify the fresh Gradle output; distribute uses the copy kept after cleanup.
+    $taskApk = if ($Command -in @('build', 'release')) { Join-Path $taskAppRoot 'android/app/build/outputs/apk/release/app-release.apk' } else { $taskReleaseApk }
     if (-not (Test-Path -LiteralPath $taskApk) -or (Get-Item -LiteralPath $taskApk).Length -eq 0) { throw 'APK absent or empty' }
     Write-Output "Internal Android APK ready: $taskApk"
     $taskApkSigner = Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/apksigner.bat'
@@ -92,6 +108,11 @@ try {
         New-Item -ItemType Directory -Path (Split-Path -Parent $taskReceiptPath) -Force | Out-Null
         @{ source = $taskSourceFingerprint; apk = (Get-ReleaseFileHash $taskApk) } |
             ConvertTo-Json | Set-Content -LiteralPath $taskReceiptPath -Encoding UTF8
+        New-Item -ItemType Directory -Path $taskReleaseDir -Force | Out-Null
+        Copy-Item -LiteralPath $taskApk -Destination $taskReleaseApk -Force
+        $taskApk = $taskReleaseApk
+        Write-Output "Release APK kept at $taskApk; removing native build output"
+        Remove-NativeBuildOutput
     }
     if ($Command -in @('distribute', 'release')) {
         # Verify the actual remote main commit, not a mutable local branch label.
@@ -103,7 +124,6 @@ try {
         if ($taskReceipt.source -ne (Get-SourceFingerprint) -or $taskReceipt.apk -ne (Get-ReleaseFileHash $taskApk)) { throw 'Sources or APK differ from validated build receipt' }
         $taskAapt = Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/aapt.exe'
         $taskBadging = (& $taskAapt dump badging $taskApk | Out-String)
-        $taskConfig = Get-Content -LiteralPath app.json -Raw | ConvertFrom-Json
         $taskIdentity = [regex]::Escape("package: name='$($target.androidPackage)' versionCode='$($taskConfig.expo.android.versionCode)' versionName='$($taskConfig.expo.version)'")
         if ($LASTEXITCODE -ne 0 -or $taskBadging -notmatch $taskIdentity) { throw 'APK identity/version verification failed' }
         if ([string]::IsNullOrWhiteSpace($TesterGroups) -or $TesterGroups -notmatch '^[a-zA-Z0-9_,\-]+$') { throw 'Explicit valid Firebase tester group aliases required' }

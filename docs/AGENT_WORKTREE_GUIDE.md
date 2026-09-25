@@ -93,3 +93,37 @@ gh run view <run-id> --log-failed
 
 If another agent has a PR open, merge or rebase only when the branches touch the
 same files or Joseph asks for integration.
+
+## Native Builds And Disk Space
+
+A local Android build writes about 10 GB of native output into that worktree
+(`android/**/build`, `.cxx`, and the `android/build` folders inside
+`node_modules`). Across many worktrees this fills the disk.
+
+- Do not run Android release builds, `expo prebuild`, `expo run:android`, or
+  `gradlew` in a task or agent worktree unless Joseph asks in the current
+  thread. Verify mobile changes with the app's tests, typecheck, and
+  `npx expo export`.
+- If you do run a native build, delete its output before finishing:
+  `android/**/build`, `android/**/.cxx`, and `node_modules/**/android/build`
+  and `.cxx`. Keep the release APK elsewhere if it is needed.
+- Do not add ABI restrictions (`reactNativeArchitectures=`) to save space;
+  release APKs ship every ABI.
+
+## Worktree Hygiene
+
+The per-agent worktrees above are permanent. Any extra worktree created for a
+single task is removed once its PR merges:
+
+```powershell
+git worktree remove ..\<repo-name>-<task>
+git branch -d <task-branch>
+```
+
+Do not remove a worktree that has uncommitted changes or belongs to another
+agent's active task.
+
+`git worktree remove` deletes ignored files without warning. Before removing a
+worktree, check for `app/.native-release/` (the Android release signing key)
+and make sure a backup or another worktree still holds it. Losing it means
+testers can never receive an update over their installed app.

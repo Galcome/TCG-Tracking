@@ -95,6 +95,12 @@ public values with dotenv disabled, validates Android configuration, preserves n
 state with non-clean prebuild, and runs Gradle `assembleRelease` locally. No EAS Android
 credits are used. The generated `android/` directory stays ignored.
 
+After the signed APK is verified, the script copies it to
+`%USERPROFILE%\.tcg-tracking\releases\tcg-tracking-<version>-<versionCode>.apk`
+(override with `TCG_RELEASE_ARTIFACT_DIR`) and deletes the ~10 GB of native build output
+under `android/` and `node_modules/*/android`. `distribute` uploads that copy. The next
+build recompiles native code from scratch.
+
 The script creates and retains a unique release key in ignored `.native-release/`.
 Securely back up both `tcg-release.jks` and `signing-password` before broader testing;
 losing them prevents updates signed with this key. Do not commit or upload these files.
