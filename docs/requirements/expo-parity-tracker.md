@@ -660,3 +660,12 @@ testers, review/deploy required backend compatibility changes, and satisfy the d
 main/exact-green-CI rule (or obtain the explicitly requested first-internal exception).
 Installed Android-device acceptance and secure keystore backup remain necessary; iOS cloud
 release remains deferred until the Android distribution checkpoint is cleared.
+
+## 2026-09-25 One Vault
+
+The separate `/vault` report page is retired; the Stock screen's Vault tab is the only Vault.
+On that tab each row carries its `/reports/vault` holding: Vault cost, unrealized
+appreciation, manual value per unit and held age replace the market position, "Record
+valuation" joins Sell/Move/Rip, and the manual/market/Store-history details sit in a
+collapsed "Valuation details" disclosure. `/vault` redirects to `/inventory?bucket=vault`,
+desktop's Vault link opens that tab, and Vault left the mobile More sheet. No backend change.

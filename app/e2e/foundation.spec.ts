@@ -85,8 +85,10 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
   await expect(page.getByRole('button', { name: 'Stock: All products', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('dialog', { name: 'More', exact: true }).getByRole('button', { name: 'Vault', exact: true }).click();
-  await expect(page).toHaveURL(/\/vault$/);
+  // The Vault is a Stock location now, not a second destination under More.
+  await expect(page.getByRole('dialog', { name: 'More', exact: true }).getByRole('button', { name: 'Vault', exact: true })).toHaveCount(0);
+  await page.goto('/vault');
+  await expect(page).toHaveURL(/\/inventory\?bucket=vault$/);
   expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
@@ -775,14 +777,20 @@ test('reporting period defaults to 60 days and stays shared across navigation an
   await page.reload();
   await expect(page.getByRole('button', { name: 'Reporting period: 30 days', exact: true })).toBeVisible();
 });
-test('Vault keeps market quotes separate from unknown manual value and recovers from read errors', async ({ page }) => {
+test('Vault keeps market quotes separate from unknown manual value and recovers from read errors', async ({ page, request }) => {
   const name = 'Vault quote separation fixture';
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const product = await (await request.post(API + '/api/v1/products', { data: {
+    name, game_id: games[0].id, product_type_id: types.find((t: { slug: string }) => t.slug === 'booster-box').id,
+    initial_purchase: { quantity: 2, amount: '10.00', bucket: 'vault', funding: [] },
+  } })).json();
   let reads = 0;
   await page.route(API + '/api/v1/reports/vault', route => {
     reads++;
     return route.fulfill({ status: reads === 1 ? 403 : 200, contentType: 'application/json', body: JSON.stringify(reads === 1
       ? { detail: 'Vault report temporarily unavailable' }
-      : [{ product_id: '11111111-1111-4111-8111-111111111111', product_name: name, units: 2, cost: '10.00',
+      : [{ product_id: product.id, product_name: name, units: 2, cost: '10.00',
         game: { slug: 'lorcana', name: 'Disney Lorcana' }, product_type: { slug: 'booster-box', name: 'Booster Box' },
         set_name: 'Rise of the Floodborn',
         value: null, valued_on: null, days_since_valued: null, appreciation: null, appreciation_pct: null,
@@ -793,20 +801,23 @@ test('Vault keeps market quotes separate from unknown manual value and recovers 
   await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(page.getByText('Vault report temporarily unavailable', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
-  const holding = page.getByRole('group', { name, exact: true });
-  await expect(holding.getByText('Unknown', { exact: true }).first()).toBeVisible();
+  const holding = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
+  await expect(holding.getByText('Manual value unknown · Held for 700 days', { exact: true })).toBeVisible();
+  await expect(holding.getByText('Set up price', { exact: true })).toHaveCount(0);
   await holding.getByRole('button', { name: 'Valuation details', exact: true }).click();
   await expect(holding.getByText('Not valued yet', { exact: true })).toBeVisible();
   await expect(holding.getByText('$99.99', { exact: true })).toBeVisible();
   await expect(holding.getByText('Stale', { exact: true })).toBeVisible();
   await expect(holding.getByText('tcgcsv', { exact: true })).toBeVisible();
-  await page.getByLabel('Search Vault holdings', { exact: true }).fill('no matching holding');
-  await expect(page.getByText('No Vault holdings match that search.', { exact: true })).toBeVisible();
-  await page.getByLabel('Search Vault holdings', { exact: true }).fill('');
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(holding).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    // The card clips overflow, so the page width alone missed details wrapping into a second column.
+    for (const part of [holding.getByRole('button', { name: 'Record valuation', exact: true }), holding.getByText('Not valued yet', { exact: true })]) {
+      const box = await part.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+    }
     await page.screenshot({ path: 'output/playwright/expo-vault-' + width + '.png', fullPage: true });
   }
 });
@@ -826,9 +837,9 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   expect((await readHolding()).value).toBeNull();
   await signIn(page);
   await page.getByRole('button', { name: 'Vault', exact: true }).click();
-  const holding = page.getByRole('group', { name: product.name, exact: true });
+  const holding = page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true });
   await expect(holding).toBeVisible();
-  await expect(holding.getByText('Unknown', { exact: true }).first()).toBeVisible();
+  await expect(holding.getByText(/^Manual value unknown/)).toBeVisible();
   await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
   await expect(page.getByLabel('Value per unit (CAD)', { exact: true })).toHaveValue('');
   await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('19.99');
@@ -844,7 +855,7 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   expect((await valuation).postDataJSON()).toMatchObject({ product_id: product.id, value: '19.99', captured_on: '2025-06-02' });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await readHolding()).toMatchObject({ units: 2, value: '19.99', cost: '10.00', appreciation: '29.98', valued_on: '2025-06-02' });
-  await expect(holding.getByText('$19.99', { exact: true }).first()).toBeVisible();
+  await expect(holding.getByText(/^\$19\.99 \/ unit · manual estimate/)).toBeVisible();
   // Zero is an explicit estimate, never "not valued"; the latest dated snapshot wins.
   await holding.getByRole('button', { name: 'Record valuation', exact: true }).click();
   await page.getByLabel('Value per unit (CAD)', { exact: true }).fill('0.00');
