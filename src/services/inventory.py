@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import Select, case, func, select, union_all
+from sqlalchemy import Select, case, func, literal, select, union_all
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Subquery
 
@@ -130,6 +130,71 @@ def stock_totals() -> Subquery:
         )
         .group_by(flat.c.product_id)
         .subquery("stock_totals")
+    )
+
+
+def cost_totals() -> Subquery:
+    """Per-product remaining cost and realized profit, as a subquery the list can sort on.
+
+    The same arithmetic `product_stats` does, in SQL. Write-offs and transformations are
+    one figure here: the bulk reclassification in `product_stats` moves cost between them
+    without changing their sum, and only the sum reaches remaining cost.
+
+    Columns: `product_id`, `remaining_cost`, `realized_profit`. As with `stock_totals`, a
+    product with no transactions has no row, and readers coalesce.
+    """
+    net = (
+        Sale.gross_amount_cents
+        - Sale.platform_fees_cents
+        - Sale.payment_fees_cents
+        - Sale.shipping_paid_cents
+    )
+    pieces = [
+        # Columns: invested, consumed (cost that left stock), cost of sales, known net.
+        select(
+            Purchase.product_id.label("product_id"),
+            (
+                Purchase.gross_amount_cents
+                + Purchase.shipping_cents
+                + Purchase.tax_cents
+                + Purchase.fees_cents
+            ).label("invested"),
+            literal(0).label("consumed"),
+            literal(0).label("cost_of_sales"),
+            literal(0).label("net_known"),
+        ).where(Purchase.status == STATUS_ACTIVE),
+        select(
+            Sale.product_id,
+            literal(0),
+            func.coalesce(Sale.cost_basis_cents, 0),
+            func.coalesce(Sale.cost_basis_cents, 0),
+            case((Sale.has_unknown_cost.is_(False), net), else_=0),
+        ).where(Sale.status == STATUS_ACTIVE),
+        select(
+            InventoryAdjustment.product_id,
+            case(
+                (
+                    InventoryAdjustment.quantity_delta > 0,
+                    func.coalesce(InventoryAdjustment.landed_cost_cents, 0),
+                ),
+                else_=0,
+            ),
+            func.coalesce(InventoryAdjustment.cost_removed_cents, 0),
+            literal(0),
+            literal(0),
+        ).where(InventoryAdjustment.status == STATUS_ACTIVE),
+    ]
+    flat = union_all(*pieces).subquery("cost_deltas")
+    return (
+        select(
+            flat.c.product_id,
+            func.greatest(func.sum(flat.c.invested) - func.sum(flat.c.consumed), 0).label(
+                "remaining_cost"
+            ),
+            (func.sum(flat.c.net_known) - func.sum(flat.c.cost_of_sales)).label("realized_profit"),
+        )
+        .group_by(flat.c.product_id)
+        .subquery("cost_totals")
     )
 
 
