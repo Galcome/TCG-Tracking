@@ -1006,7 +1006,8 @@ export const ADJUSTMENT_REASONS = [
   'other',
 ] as const
 
-export type ProductSort = 'name' | 'value_desc' | 'value_asc' | 'unit_value_desc' | 'quantity_desc' | 'type' | 'newest';
+export type ProductSort = 'name' | 'value_desc' | 'value_asc' | 'unit_value_desc' | 'quantity_desc' | 'type' | 'newest'
+  | 'cost_desc' | 'profit_desc' | 'unrealized_desc' | 'unrealized_asc';
 
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const pairs = Object.entries(params).filter(([, value]) => value !== undefined && value !== '')

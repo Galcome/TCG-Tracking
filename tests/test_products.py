@@ -572,3 +572,112 @@ def test_an_explicit_sort_overrides_search_relevance(client, make_product):
 
 def test_an_unknown_sort_is_rejected(client):
     assert client.get("/api/v1/products", params={"sort": "price; drop"}).status_code == 422
+
+
+def _buy(client, product_id: str, quantity: int, amount: str) -> None:
+    response = client.post(
+        "/api/v1/purchases",
+        json={"product_id": product_id, "quantity": quantity, "amount": amount},
+    )
+    assert response.status_code == 201, response.text
+
+
+def _sell(client, product_id: str, quantity: int, amount: str, oversell: bool = False) -> None:
+    response = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": product_id,
+            "quantity": quantity,
+            "amount": amount,
+            "allow_oversell": oversell,
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
+def _adjust(client, product_id: str, delta: int, reason: str, cost: str | None = None) -> None:
+    response = client.post(
+        "/api/v1/adjustments",
+        json={"product_id": product_id, "quantity_delta": delta, "reason": reason, "cost": cost},
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_the_sql_cost_totals_agree_with_product_stats(client, db, make_product):
+    """The sort must rank by the same cost and profit the card prints."""
+    from sqlalchemy import select
+
+    from src.services import inventory
+
+    sold = make_product("Agree Sold")
+    oversold = make_product("Agree Oversold")
+    written = make_product("Agree Written Off")
+    opening = make_product("Agree Opening")
+    _buy(client, sold["id"], 4, "100.00")
+    _sell(client, sold["id"], 1, "60.00")
+    _buy(client, oversold["id"], 1, "10.00")
+    _sell(client, oversold["id"], 3, "90.00", oversell=True)
+    _buy(client, written["id"], 3, "30.00")
+    _adjust(client, written["id"], -1, "damaged")
+    _adjust(client, opening["id"], 2, "opening_inventory", "40.00")
+    _adjust(client, opening["id"], 1, "opening_inventory")
+
+    costs = inventory.cost_totals()
+    ids = [uuid.UUID(product["id"]) for product in (sold, oversold, written, opening)]
+    rows = {
+        product_id: (int(remaining), int(profit))
+        for product_id, remaining, profit in db.execute(
+            select(costs.c.product_id, costs.c.remaining_cost, costs.c.realized_profit).where(
+                costs.c.product_id.in_(ids)
+            )
+        )
+    }
+    stats = inventory.product_stats(db, ids)
+    assert rows == {
+        product_id: (entry.remaining_cost_cents, entry.realized_profit_cents)
+        for product_id, entry in stats.items()
+    }
+    assert rows[ids[0]] == (7500, 3500)
+
+
+def test_cost_and_profit_sorts(client, make_product):
+    dear = make_product("Ledger Dear")
+    cheap = make_product("Ledger Cheap")
+    earner = make_product("Ledger Earner")
+    make_product("Ledger Untouched")
+    _buy(client, dear["id"], 1, "500.00")
+    _buy(client, cheap["id"], 1, "5.00")
+    _buy(client, earner["id"], 2, "20.00")
+    _sell(client, earner["id"], 1, "210.00")
+
+    assert _names(client, q="Ledger", sort="cost_desc") == [
+        "Ledger Dear",
+        "Ledger Earner",
+        "Ledger Cheap",
+        "Ledger Untouched",
+    ]
+    # A product that has not sold has made nothing, which outranks a loss.
+    assert _names(client, q="Ledger", sort="profit_desc")[0] == "Ledger Earner"
+
+
+def test_unrealized_sorts_rank_gain_over_cost_and_sink_unvalued(client, make_product):
+    """Gain is the whole on-hand value less its cost, as the card shows it."""
+    winner = make_product("Gain Winner")
+    loser = make_product("Gain Loser")
+    unvalued = make_product("Gain Unvalued")
+    _buy(client, winner["id"], 2, "20.00")
+    _value(client, winner["id"], "50.00")
+    _buy(client, loser["id"], 1, "300.00")
+    _value(client, loser["id"], "100.00")
+    _buy(client, unvalued["id"], 1, "1.00")
+
+    assert _names(client, q="Gain", sort="unrealized_desc") == [
+        "Gain Winner",
+        "Gain Loser",
+        "Gain Unvalued",
+    ]
+    assert _names(client, q="Gain", sort="unrealized_asc") == [
+        "Gain Loser",
+        "Gain Winner",
+        "Gain Unvalued",
+    ]

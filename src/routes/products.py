@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Subquery
 
 from src.database import Base
 from src.dependencies import db_session, get_current_member
@@ -53,6 +54,12 @@ SORT_UNIT_VALUE_DESC = "unit_value_desc"
 SORT_QUANTITY_DESC = "quantity_desc"
 SORT_NEWEST = "newest"
 SORT_TYPE = "type"
+SORT_COST_DESC = "cost_desc"
+SORT_PROFIT_DESC = "profit_desc"
+SORT_UNREALIZED_DESC = "unrealized_desc"
+SORT_UNREALIZED_ASC = "unrealized_asc"
+#: Sorts on cost or profit, which need the ledger's cost aggregate joined in.
+COST_SORTS = (SORT_COST_DESC, SORT_PROFIT_DESC, SORT_UNREALIZED_DESC, SORT_UNREALIZED_ASC)
 SORTS = (
     SORT_NAME,
     SORT_VALUE_DESC,
@@ -61,6 +68,7 @@ SORTS = (
     SORT_QUANTITY_DESC,
     SORT_NEWEST,
     SORT_TYPE,
+    *COST_SORTS,
 )
 
 
@@ -169,10 +177,22 @@ def _unit_value_cents(bucket: str | None) -> ColumnElement:
     return func.coalesce(manual, market) if bucket == "vault" else func.coalesce(market, manual)
 
 
-def _sort_keys(sort: str, quantity: ColumnElement, bucket: str | None) -> list:
-    """Order-by terms for one sort. Unvalued products always sink, whichever direction."""
+def _sort_keys(
+    sort: str,
+    quantity: ColumnElement,
+    bucket: str | None,
+    on_hand: ColumnElement,
+    costs: Subquery,
+) -> list:
+    """Order-by terms for one sort. Unvalued products always sink, whichever direction.
+
+    Cost, profit and unrealized gain are whole-product figures, as the card shows them,
+    so a bucket tab ranks by them without scoping them to the bucket.
+    """
     unit = _unit_value_cents(bucket)
     holding = quantity * unit
+    remaining_cost = func.coalesce(costs.c.remaining_cost, 0)
+    unrealized = on_hand * unit - remaining_cost
     if sort == SORT_VALUE_DESC:
         keys = [holding.desc().nullslast()]
     elif sort == SORT_VALUE_ASC:
@@ -190,6 +210,14 @@ def _sort_keys(sort: str, quantity: ColumnElement, bucket: str | None) -> list:
             .scalar_subquery()
         )
         keys = [type_order.asc(), holding.desc().nullslast()]
+    elif sort == SORT_COST_DESC:
+        keys = [remaining_cost.desc()]
+    elif sort == SORT_PROFIT_DESC:
+        keys = [func.coalesce(costs.c.realized_profit, 0).desc()]
+    elif sort == SORT_UNREALIZED_DESC:
+        keys = [unrealized.desc().nullslast()]
+    elif sort == SORT_UNREALIZED_ASC:
+        keys = [unrealized.asc().nullslast()]
     else:
         keys = []
     return [*keys, Product.name.asc(), Product.id.asc()]
@@ -269,7 +297,12 @@ def list_products(
     else:
         # A holding is what is in the chosen bucket, or everything on hand under "All".
         quantity = func.coalesce(totals.c[bucket] if bucket else totals.c.on_hand, 0)
-        narrowed = narrowed.order_by(*_sort_keys(sort or SORT_NAME, quantity, bucket))
+        costs = inventory.cost_totals()
+        if sort in COST_SORTS:
+            narrowed = narrowed.outerjoin(costs, costs.c.product_id == Product.id)
+        narrowed = narrowed.order_by(
+            *_sort_keys(sort or SORT_NAME, quantity, bucket, on_hand, costs)
+        )
 
     page = db.scalars(narrowed.limit(limit).offset(offset)).unique().all()
 
