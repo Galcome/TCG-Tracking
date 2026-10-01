@@ -130,10 +130,15 @@ class VisibilityChange(BaseModel):
     """Hide or unhide every product the accompanying stock filters match."""
 
     is_hidden: bool
+    #: Exactly these products, ignoring the filters. This is how a bulk change is undone:
+    #: the filters that found the products no longer describe them once they have moved.
+    product_ids: list[uuid.UUID] | None = Field(default=None, max_length=20_000)
 
 
 class VisibilityChanged(BaseModel):
     changed: int
+    #: The products this request actually changed, so the caller can put them back.
+    product_ids: list[uuid.UUID]
 
 
 class ProductStatsRead(BaseModel):
