@@ -76,6 +76,9 @@ class Product(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    #: Still owned, deliberately out of sight: left off the stock list and out of the
+    #: on-shelf totals. The ledger - cost, sales, profit - is untouched.
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True
     )

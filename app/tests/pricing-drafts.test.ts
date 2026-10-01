@@ -40,6 +40,7 @@ function product(overrides: Partial<Product>): Product {
     storage_location: null,
     notes: null,
     is_archived: false,
+    is_hidden: false,
     created_at: '2026-09-12T00:00:00Z',
     stats: {
       quantity_purchased: 0,

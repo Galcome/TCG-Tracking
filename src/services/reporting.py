@@ -370,13 +370,21 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
 
     # Stock and remaining cost are always as-of-now; a period cannot change what is on the
     # shelf today.
+    #
+    # Hidden products are left off the shelf figures - units, stock at cost, market value -
+    # because that is what hiding one asks for. Money that actually moved (spend, sales,
+    # write-offs) still counts, and so does a negative count, which is a ledger fault
+    # whether or not anyone is looking at the product.
+    hidden = set(db.scalars(select(Product.id).where(Product.is_hidden.is_(True))))
     estimates = current_estimates(db, today=today)
     for product_id, stats in product_stats(db).items():
-        result.units_in_stock += max(stats.quantity_on_hand, 0)
-        result.inventory_at_cost_cents += stats.remaining_cost_cents
         result.cost_written_off_cents += stats.cost_written_off_cents
         if stats.quantity_on_hand < 0:
             result.products_with_negative_stock += 1
+        if product_id in hidden:
+            continue
+        result.units_in_stock += max(stats.quantity_on_hand, 0)
+        result.inventory_at_cost_cents += stats.remaining_cost_cents
         estimate = estimates.get(product_id)
         if (
             stats.quantity_on_hand > 0

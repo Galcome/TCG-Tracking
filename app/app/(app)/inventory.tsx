@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -13,18 +13,28 @@ import { StockCard } from '../../components/stock-card';
 import { RipDialog } from '../../components/rip-form';
 import { RecordValuationDialog } from '../../components/valuation-form';
 import { canRip } from '../../lib/product-types';
+import { isMoneyString } from '../../lib/product-drafts';
 const SORTS: { value: ProductSort; label: string }[] = [
   { value: 'value_desc', label: 'Value: high to low' },
   { value: 'value_asc', label: 'Value: low to high' },
-  { value: 'unit_value_desc', label: 'Unit value: high to low' },
+  { value: 'unit_value_desc', label: 'Unit price: high to low' },
+  { value: 'unit_value_asc', label: 'Unit price: low to high' },
   { value: 'unrealized_desc', label: 'Unrealized gain: high to low' },
   { value: 'unrealized_asc', label: 'Unrealized gain: low to high' },
   { value: 'cost_desc', label: 'Cost: high to low' },
+  { value: 'cost_asc', label: 'Cost: low to high' },
   { value: 'profit_desc', label: 'Profit: high to low' },
+  { value: 'profit_asc', label: 'Profit: low to high' },
   { value: 'type', label: 'Type, then value' },
   { value: 'quantity_desc', label: 'Quantity: most first' },
+  { value: 'quantity_asc', label: 'Quantity: fewest first' },
   { value: 'newest', label: 'Recently added' },
+  { value: 'oldest', label: 'Oldest first' },
 ];
+const NO_RANGES = { minValue: '', maxValue: '', minQuantity: '', maxQuantity: '' };
+// A half-typed bound is simply not sent, so the list never errors mid-keystroke.
+const moneyBound = (text: string) => (text && isMoneyString(text) ? text : undefined);
+const quantityBound = (text: string) => (/^\d{1,7}$/.test(text) ? Number(text) : undefined);
 
 export default function Inventory() {
   const { isDesktop, fontScale } = useResponsiveLayout();
@@ -39,8 +49,20 @@ export default function Inventory() {
   const [stock, setStock] = useState('in');
   const [type, setType] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [hidden, setHidden] = useState<'exclude' | 'include' | 'only'>('exclude');
+  const [priced, setPriced] = useState<'' | 'yes' | 'no'>('');
+  const [rangeText, setRangeText] = useState(NO_RANGES);
+  const [ranges, setRanges] = useState(NO_RANGES);
   const [sort, setSort] = useState<ProductSort | ''>('');
   const [offset, setOffset] = useState(0);
+  const queries = useQueryClient();
+  // Hiding happens on the row itself: no dialog, and the same button undoes it.
+  const toggleHidden = useMutation({
+    mutationFn: (p: Product) => api.updateProduct(p.id, { is_hidden: !p.is_hidden }),
+    onSuccess: () => { void queries.invalidateQueries(); },
+  });
+  useEffect(() => { const t = setTimeout(() => { setRanges(rangeText); setOffset(0); }, 400); return () => clearTimeout(t); }, [rangeText]);
+  const setRange = (key: keyof typeof NO_RANGES) => (text: string) => setRangeText(current => ({ ...current, [key]: text.trim() }));
   const [adding, setAdding] = useState(false);
   const [operation, setOperation] = useState<{ product: Product; mode: 'move' } | null>(null);
   const [selling, setSelling] = useState<Product | null>(null);
@@ -50,8 +72,11 @@ export default function Inventory() {
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
   const games = useQuery({ queryKey: ['games'], queryFn: api.games });
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
-  const products = useQuery({ queryKey: ['products', q, game, stock, bucket, type, includeArchived, sort, offset],
-    queryFn: () => api.products({ q, game, stock, bucket, product_type: type, include_archived: includeArchived, sort: sort || undefined, limit: 30, offset }) });
+  const bounds = { min_unit_value: moneyBound(ranges.minValue), max_unit_value: moneyBound(ranges.maxValue),
+    min_quantity: quantityBound(ranges.minQuantity), max_quantity: quantityBound(ranges.maxQuantity) };
+  const products = useQuery({ queryKey: ['products', q, game, stock, bucket, type, includeArchived, hidden, priced, bounds, sort, offset],
+    queryFn: () => api.products({ q, game, stock, bucket, product_type: type, include_archived: includeArchived, hidden,
+      priced: priced || undefined, ...bounds, sort: sort || undefined, limit: 30, offset }) });
   // With no explicit sort, a search ranks by match; offering "Name" then is a real choice.
   const sortOptions = [{ value: '', label: q.trim() ? 'Best match' : 'Name A-Z' },
     ...(q.trim() ? [{ value: 'name', label: 'Name A-Z' }] : []), ...SORTS];
@@ -59,7 +84,13 @@ export default function Inventory() {
   const vault = useQuery({ queryKey: ['vaultHoldings'], queryFn: api.vaultHoldings, enabled: bucket === 'vault' });
   const holdings = useMemo(() => new Map((vault.data ?? []).map(h => [h.product_id, h] as [string, VaultHolding])), [vault.data]);
   const activeFilters = [SORTS.find(s => s.value === sort)?.label, games.data?.find(g => g.slug === game)?.name, types.data?.find(t => t.slug === type)?.name,
-    stock === 'out' ? 'Sold out' : stock === '' ? 'All products' : null, includeArchived ? 'Archived included' : null].filter(Boolean);
+    stock === 'out' ? 'Sold out' : stock === '' ? 'All products' : null, includeArchived ? 'Archived included' : null,
+    hidden === 'only' ? 'Hidden only' : hidden === 'include' ? 'Hidden included' : null,
+    priced === 'yes' ? 'Priced' : priced === 'no' ? 'No price' : null,
+    bounds.min_unit_value || bounds.max_unit_value ? `Unit price ${bounds.min_unit_value ?? '0'} to ${bounds.max_unit_value ?? 'any'}` : null,
+    bounds.min_quantity !== undefined || bounds.max_quantity !== undefined ? `Quantity ${bounds.min_quantity ?? 0} to ${bounds.max_quantity ?? 'any'}` : null].filter(Boolean);
+  const filtered = hidden !== 'exclude' || priced !== '' || Object.values(rangeText).some(Boolean) || game !== '' || type !== '' || stock !== 'in' || includeArchived || sort !== '';
+  const clearFilters = () => { setHidden('exclude'); setPriced(''); setRangeText(NO_RANGES); setRanges(NO_RANGES); setGame(''); setType(''); setStock('in'); setIncludeArchived(false); setSort(''); setOffset(0); };
   return <Page title={bucket ? BUCKET_LABELS[bucket] : 'Stock'}>
     {isDesktop ? <Button label="Add product" onPress={() => setAdding(true)} /> : null}
     {adding && <ProductForms mode="add" initialName={products.data?.items.length === 0 ? q.trim() : undefined} onClose={() => setAdding(false)} />}
@@ -84,7 +115,18 @@ export default function Inventory() {
     <Choice label="Product type" value={type} options={[{value:'',label:'All types'}, ...(types.data ?? []).map(t=>({value:t.slug,label:t.name}))]}
       onChange={v=>{setType(v);setOffset(0);}} />
     <Choice label="Archived products" value={includeArchived ? 'include' : 'hide'} options={[{value:'hide',label:'Hide archived'},{value:'include',label:'Include archived'}]}
-      onChange={v=>{setIncludeArchived(v === 'include');setOffset(0);}} /></Row> : null}
+      onChange={v=>{setIncludeArchived(v === 'include');setOffset(0);}} />
+    <Choice label="Hidden products" value={hidden} options={[{value:'exclude',label:'Leave out hidden'},{value:'only',label:'Hidden only'},{value:'include',label:'Include hidden'}]}
+      onChange={v=>{setHidden(v as typeof hidden);setOffset(0);}} />
+    <Choice label="Price" value={priced} options={[{value:'',label:'Priced or not'},{value:'yes',label:'Has a price'},{value:'no',label:'No price yet'}]}
+      onChange={v=>{setPriced(v as typeof priced);setOffset(0);}} /></Row> : null}
+    {isDesktop || filtersOpen ? <Row>
+      <Field label="Unit price from" value={rangeText.minValue} onChangeText={setRange('minValue')} keyboardType="decimal-pad" placeholder="0.00" style={{ minWidth: 110 }} />
+      <Field label="Unit price to" value={rangeText.maxValue} onChangeText={setRange('maxValue')} keyboardType="decimal-pad" placeholder="Any" style={{ minWidth: 110 }} />
+      <Field label="Quantity from" value={rangeText.minQuantity} onChangeText={setRange('minQuantity')} keyboardType="number-pad" placeholder="0" style={{ minWidth: 110 }} />
+      <Field label="Quantity to" value={rangeText.maxQuantity} onChangeText={setRange('maxQuantity')} keyboardType="number-pad" placeholder="Any" style={{ minWidth: 110 }} />
+      {filtered ? <Button variant="link" label="Clear filters" onPress={clearFilters} /> : null}</Row> : null}
+    <ErrorNotice error={toggleHidden.error} />
     {bucket === 'vault' ? <Copy muted>Held on purpose. Manual valuations and appreciation are unrealized estimates, separate from cost and profit.</Copy> : null}
     <ErrorNotice error={products.error ?? games.error ?? types.error ?? (bucket === 'vault' ? vault.error : null)} retry={()=>{void products.refetch();void games.refetch();void types.refetch();if (bucket === 'vault') void vault.refetch();}} />
     {products.isPending && <Loading />}
@@ -95,7 +137,8 @@ export default function Inventory() {
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
       onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
-      onEditCost={() => setCosting(p)} />)}
+      onEditCost={() => setCosting(p)}
+      onToggleHidden={toggleHidden.isPending ? undefined : () => toggleHidden.mutate(p)} />)}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}
   </Page>;

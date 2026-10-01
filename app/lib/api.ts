@@ -204,6 +204,8 @@ export interface Product {
   storage_location: string | null
   notes: string | null
   is_archived: boolean
+  /** Still owned and sellable, but left off the stock list and the on-shelf totals. */
+  is_hidden: boolean
   created_at: string
   stats: ProductStats
   /** Current free-source quote, separate from cost and realized profit. */
@@ -1007,7 +1009,8 @@ export const ADJUSTMENT_REASONS = [
 ] as const
 
 export type ProductSort = 'name' | 'value_desc' | 'value_asc' | 'unit_value_desc' | 'quantity_desc' | 'type' | 'newest'
-  | 'cost_desc' | 'profit_desc' | 'unrealized_desc' | 'unrealized_asc';
+  | 'cost_desc' | 'profit_desc' | 'unrealized_desc' | 'unrealized_asc'
+  | 'unit_value_asc' | 'quantity_asc' | 'oldest' | 'cost_asc' | 'profit_asc';
 
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const pairs = Object.entries(params).filter(([, value]) => value !== undefined && value !== '')
@@ -1028,6 +1031,15 @@ export function createApi(request: ApiRequest) { return {
     stock?: string
     bucket?: string
     include_archived?: boolean
+    /** Omitted: hidden products are left out. Pickers that sell or open stock include them. */
+    hidden?: 'exclude' | 'include' | 'only'
+    priced?: 'yes' | 'no'
+    /** Per unit, inclusive. A product with no value fails either bound. */
+    min_unit_value?: string
+    max_unit_value?: string
+    /** On hand, inclusive. */
+    min_quantity?: number
+    max_quantity?: number
     /** Omitted: best search match first, else name. Value sorts rank whole holdings. */
     sort?: ProductSort
     /** The endpoint has always paged; only the export needs to ask for a big one. */
@@ -1094,7 +1106,7 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(product),
     }),
 
-  updateProduct: (id: string, changes: Partial<NewProduct> & { is_archived?: boolean }) =>
+  updateProduct: (id: string, changes: Partial<NewProduct> & { is_archived?: boolean; is_hidden?: boolean }) =>
     request<ProductDetail>(`/api/v1/products/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(changes),

@@ -23,6 +23,11 @@ export function ProductLifecycle({ product }: { product: Product }) {
     },
     onSettled: () => { running.current = false },
   })
+  // No confirmation: hiding changes nothing but visibility and is one tap to undo.
+  const hide = useMutation({
+    mutationFn: () => api.updateProduct(product.id, { is_hidden: !product.is_hidden }),
+    onSuccess: () => { void queries.invalidateQueries() },
+  })
   function open(next: 'archive' | 'delete') { change.reset(); setConfirmation(''); setMode(next) }
   function submit() {
     if (!mode || running.current || (mode === 'delete' && confirmation !== 'DELETE')) return
@@ -32,7 +37,10 @@ export function ProductLifecycle({ product }: { product: Product }) {
   return <Card>
     <Copy>Catalogue management</Copy>
     <Copy muted>Archive hides a product without changing stock or losing financial history. Deletion is only for mistaken products with no history; the API enforces this even for voided transactions.</Copy>
-    <Row><Button label={product.is_archived ? 'Restore archived product' : 'Archive product'} onPress={() => open('archive')} />
+    <Copy muted>{product.is_hidden ? 'Hidden: left off the stock list and the on-shelf totals. Still owned and sellable.' : 'Hide keeps the stock but leaves it off the stock list and the on-shelf totals.'}</Copy>
+    <ErrorNotice error={hide.error} />
+    <Row><Button label={product.is_hidden ? 'Unhide product' : 'Hide product'} disabled={hide.isPending} onPress={() => hide.mutate()} />
+      <Button label={product.is_archived ? 'Restore archived product' : 'Archive product'} onPress={() => open('archive')} />
       <Button label="Delete mistaken product" danger onPress={() => open('delete')} /></Row>
     {mode ? <Sheet title={mode === 'delete' ? 'Delete product permanently' : product.is_archived ? 'Restore product' : 'Archive product'} open dismissDisabled={change.isPending} onClose={() => { if (!running.current) setMode(null) }}>
       <Copy>{product.name}</Copy>

@@ -314,6 +314,7 @@ function ExistingGradedProductPicker({
       q: search.trim() || undefined,
       product_type: 'graded-card',
       include_archived: false,
+      hidden: 'include',
       limit: 30,
     }),
   })

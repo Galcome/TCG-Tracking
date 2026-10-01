@@ -252,7 +252,7 @@ function SaleForm({ product, onClose }: { product: Product; onClose: () => void 
   const candidates = useQuery({
     queryKey: ['products', 'sale-line-picker', lineSearch],
     enabled: adding,
-    queryFn: () => api.products({ q: lineSearch || undefined, stock: 'in', limit: 20 }),
+    queryFn: () => api.products({ q: lineSearch || undefined, stock: 'in', hidden: 'include', limit: 20 }),
   })
   const queryClient = useQueryClient()
   const create = useMutation({
@@ -490,7 +490,7 @@ export function RecordSaleDialog({ product, onClose }: RecordSaleDialogProps) {
   const picker = useQuery({
     queryKey: ['products', 'sale-picker', search],
     enabled: !picked,
-    queryFn: () => api.products({ q: search || undefined, stock: 'in', limit: 30 }),
+    queryFn: () => api.products({ q: search || undefined, stock: 'in', hidden: 'include', limit: 30 }),
   })
 
   if (!picked) {

@@ -17,6 +17,7 @@ from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.routes.money import resolve_funding
+from src.schemas.money import MoneyIn
 from src.schemas.product import (
     EMPTY_STATS,
     NAME_MAX_LENGTH,
@@ -47,26 +48,49 @@ SIMILARITY_THRESHOLD = 0.35
 STOCK_IN = "in"
 STOCK_OUT = "out"
 
+HIDDEN_EXCLUDE = "exclude"
+HIDDEN_INCLUDE = "include"
+HIDDEN_ONLY = "only"
+HIDDEN_MODES = (HIDDEN_EXCLUDE, HIDDEN_INCLUDE, HIDDEN_ONLY)
+
+PRICED_YES = "yes"
+PRICED_NO = "no"
+
 SORT_NAME = "name"
 SORT_VALUE_DESC = "value_desc"
 SORT_VALUE_ASC = "value_asc"
 SORT_UNIT_VALUE_DESC = "unit_value_desc"
+SORT_UNIT_VALUE_ASC = "unit_value_asc"
 SORT_QUANTITY_DESC = "quantity_desc"
+SORT_QUANTITY_ASC = "quantity_asc"
 SORT_NEWEST = "newest"
+SORT_OLDEST = "oldest"
 SORT_TYPE = "type"
 SORT_COST_DESC = "cost_desc"
+SORT_COST_ASC = "cost_asc"
 SORT_PROFIT_DESC = "profit_desc"
+SORT_PROFIT_ASC = "profit_asc"
 SORT_UNREALIZED_DESC = "unrealized_desc"
 SORT_UNREALIZED_ASC = "unrealized_asc"
 #: Sorts on cost or profit, which need the ledger's cost aggregate joined in.
-COST_SORTS = (SORT_COST_DESC, SORT_PROFIT_DESC, SORT_UNREALIZED_DESC, SORT_UNREALIZED_ASC)
+COST_SORTS = (
+    SORT_COST_DESC,
+    SORT_COST_ASC,
+    SORT_PROFIT_DESC,
+    SORT_PROFIT_ASC,
+    SORT_UNREALIZED_DESC,
+    SORT_UNREALIZED_ASC,
+)
 SORTS = (
     SORT_NAME,
     SORT_VALUE_DESC,
     SORT_VALUE_ASC,
     SORT_UNIT_VALUE_DESC,
+    SORT_UNIT_VALUE_ASC,
     SORT_QUANTITY_DESC,
+    SORT_QUANTITY_ASC,
     SORT_NEWEST,
+    SORT_OLDEST,
     SORT_TYPE,
     *COST_SORTS,
 )
@@ -116,9 +140,15 @@ def _apply_filters(
     game: str | None,
     product_type: str | None,
     include_archived: bool,
+    hidden: str,
+    set_id: uuid.UUID | None,
 ) -> Select:
     if not include_archived:
         stmt = stmt.where(Product.is_archived.is_(False))
+    if hidden != HIDDEN_INCLUDE:
+        stmt = stmt.where(Product.is_hidden.is_(hidden == HIDDEN_ONLY))
+    if set_id is not None:
+        stmt = stmt.where(Product.set_id == set_id)
     if game:
         stmt = stmt.where(Product.game_id.in_(select(Game.id).where(Game.slug == game)))
     if product_type:
@@ -199,10 +229,16 @@ def _sort_keys(
         keys = [holding.asc().nullslast()]
     elif sort == SORT_UNIT_VALUE_DESC:
         keys = [unit.desc().nullslast()]
+    elif sort == SORT_UNIT_VALUE_ASC:
+        keys = [unit.asc().nullslast()]
     elif sort == SORT_QUANTITY_DESC:
         keys = [quantity.desc()]
+    elif sort == SORT_QUANTITY_ASC:
+        keys = [quantity.asc()]
     elif sort == SORT_NEWEST:
         keys = [Product.created_at.desc()]
+    elif sort == SORT_OLDEST:
+        keys = [Product.created_at.asc()]
     elif sort == SORT_TYPE:
         type_order = (
             select(ProductType.sort_order)
@@ -212,8 +248,12 @@ def _sort_keys(
         keys = [type_order.asc(), holding.desc().nullslast()]
     elif sort == SORT_COST_DESC:
         keys = [remaining_cost.desc()]
+    elif sort == SORT_COST_ASC:
+        keys = [remaining_cost.asc()]
     elif sort == SORT_PROFIT_DESC:
         keys = [func.coalesce(costs.c.realized_profit, 0).desc()]
+    elif sort == SORT_PROFIT_ASC:
+        keys = [func.coalesce(costs.c.realized_profit, 0).asc()]
     elif sort == SORT_UNREALIZED_DESC:
         keys = [unrealized.desc().nullslast()]
     elif sort == SORT_UNREALIZED_ASC:
@@ -233,6 +273,21 @@ def list_products(
         default=None, pattern=f"^({'|'.join(BUCKETS)})$", description="inventory | store | vault"
     ),
     include_archived: bool = Query(default=False),
+    hidden: str = Query(
+        default=HIDDEN_EXCLUDE,
+        pattern=f"^({'|'.join(HIDDEN_MODES)})$",
+        description="exclude | include | only",
+    ),
+    set_id: uuid.UUID | None = Query(default=None, description="Only this set"),
+    priced: str | None = Query(
+        default=None,
+        pattern=f"^({PRICED_YES}|{PRICED_NO})$",
+        description="yes: has a unit value. no: has none.",
+    ),
+    min_unit_value: MoneyIn | None = Query(default=None, description="Per unit, inclusive"),
+    max_unit_value: MoneyIn | None = Query(default=None, description="Per unit, inclusive"),
+    min_quantity: int | None = Query(default=None, ge=0, description="On hand, inclusive"),
+    max_quantity: int | None = Query(default=None, ge=0, description="On hand, inclusive"),
     sort: str | None = Query(
         default=None,
         pattern=f"^({'|'.join(SORTS)})$",
@@ -258,9 +313,26 @@ def list_products(
     on_hand = func.coalesce(totals.c.on_hand, 0)
 
     def matching() -> Select:
-        """Everything the search, taxonomy and stock filters keep. Not the bucket filter."""
+        """Everything the search, taxonomy, range and stock filters keep. Not the bucket filter."""
         stmt = select(Product).outerjoin(totals, totals.c.product_id == Product.id)
-        stmt = _apply_filters(stmt, search, game, product_type, include_archived)
+        stmt = _apply_filters(
+            stmt, search, game, product_type, include_archived, hidden, set_id
+        )
+        # A product with no unit value fails either bound: a range is a claim about a
+        # price, and "unknown" is not inside any of them.
+        unit = _unit_value_cents(bucket)
+        if priced == PRICED_YES:
+            stmt = stmt.where(unit.is_not(None))
+        elif priced == PRICED_NO:
+            stmt = stmt.where(unit.is_(None))
+        if min_unit_value is not None:
+            stmt = stmt.where(unit >= min_unit_value)
+        if max_unit_value is not None:
+            stmt = stmt.where(unit <= max_unit_value)
+        if min_quantity is not None:
+            stmt = stmt.where(on_hand >= min_quantity)
+        if max_quantity is not None:
+            stmt = stmt.where(on_hand <= max_quantity)
         if stock == STOCK_IN:
             # Deliberately `!= 0`, so negative stock stays visible. An oversell means the
             # ledger disagrees with the shelf, and this list is where that gets fixed.
