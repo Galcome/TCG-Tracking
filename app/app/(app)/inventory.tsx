@@ -31,7 +31,9 @@ const SORTS: { value: ProductSort; label: string }[] = [
   { value: 'newest', label: 'Recently added' },
   { value: 'oldest', label: 'Oldest first' },
 ];
-const NO_RANGES = { minValue: '', maxValue: '', minQuantity: '', maxQuantity: '' };
+// One-tap "unit price up to" bounds: the usual way bulk gets cleared off the list.
+const PRICE_CAPS = ['5', '10', '25'];
+const NO_RANGES ={ minValue: '', maxValue: '', minQuantity: '', maxQuantity: '' };
 // A half-typed bound is simply not sent, so the list never errors mid-keystroke.
 const moneyBound = (text: string) => (text && isMoneyString(text) ? text : undefined);
 const quantityBound = (text: string) => (/^\d{1,7}$/.test(text) ? Number(text) : undefined);
@@ -74,9 +76,21 @@ export default function Inventory() {
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
   const bounds = { min_unit_value: moneyBound(ranges.minValue), max_unit_value: moneyBound(ranges.maxValue),
     min_quantity: quantityBound(ranges.minQuantity), max_quantity: quantityBound(ranges.maxQuantity) };
+  const view = { q, game, stock, bucket, product_type: type, include_archived: includeArchived, hidden, priced: priced || undefined, ...bounds };
   const products = useQuery({ queryKey: ['products', q, game, stock, bucket, type, includeArchived, hidden, priced, bounds, sort, offset],
-    queryFn: () => api.products({ q, game, stock, bucket, product_type: type, include_archived: includeArchived, hidden,
-      priced: priced || undefined, ...bounds, sort: sort || undefined, limit: 30, offset }) });
+    queryFn: () => api.products({ ...view, sort: sort || undefined, limit: 30, offset }) });
+  // One tap acts on everything the view holds, not just the page of 30 on screen.
+  const setAllHidden = useMutation({
+    mutationFn: (isHidden: boolean) => api.setProductsHidden(view, isHidden),
+    onSuccess: () => { setOffset(0); void queries.invalidateQueries(); },
+  });
+  const showingHidden = hidden === 'only';
+  // "Hide all" is only offered once something narrows the view, so one stray tap
+  // cannot hide the whole stock.
+  const narrowed = q.trim() !== '' || game !== '' || type !== '' || priced !== '' || stock === 'out' || Object.values(bounds).some(v => v !== undefined);
+  const total = products.data?.total ?? 0;
+  const bulkLabel = total === 0 || hidden === 'include' ? null : showingHidden ? `Unhide all ${total}` : narrowed ? `Hide all ${total}` : null;
+  const priceCap = (cap: string) => { const next = { ...rangeText, minValue: '', maxValue: rangeText.maxValue === cap ? '' : cap }; setRangeText(next); setRanges(next); setOffset(0); };
   // With no explicit sort, a search ranks by match; offering "Name" then is a real choice.
   const sortOptions = [{ value: '', label: q.trim() ? 'Best match' : 'Name A-Z' },
     ...(q.trim() ? [{ value: 'name', label: 'Name A-Z' }] : []), ...SORTS];
@@ -126,7 +140,15 @@ export default function Inventory() {
       <Field label="Quantity from" value={rangeText.minQuantity} onChangeText={setRange('minQuantity')} keyboardType="number-pad" placeholder="0" style={{ minWidth: 110 }} />
       <Field label="Quantity to" value={rangeText.maxQuantity} onChangeText={setRange('maxQuantity')} keyboardType="number-pad" placeholder="Any" style={{ minWidth: 110 }} />
       {filtered ? <Button variant="link" label="Clear filters" onPress={clearFilters} /> : null}</Row> : null}
-    <ErrorNotice error={toggleHidden.error} />
+    <View accessibilityLabel="Quick filters" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+      {PRICE_CAPS.map(cap => <Button key={cap} label={`Under $${cap}`} variant={rangeText.maxValue === cap ? 'primary' : 'secondary'} onPress={() => priceCap(cap)} />)}
+      <Button label={showingHidden ? 'Back to stock' : 'Show hidden'} variant={showingHidden ? 'primary' : 'secondary'}
+        onPress={() => { setHidden(showingHidden ? 'exclude' : 'only'); setOffset(0); }} />
+      {bulkLabel ? <Button label={setAllHidden.isPending ? 'Working...' : bulkLabel} danger={!showingHidden} disabled={setAllHidden.isPending || products.isFetching}
+        onPress={() => setAllHidden.mutate(!showingHidden)} /> : null}
+    </View>
+    {setAllHidden.data && !setAllHidden.isPending ? <Copy muted>{setAllHidden.variables ? 'Hid' : 'Unhid'} {setAllHidden.data.changed} products.{setAllHidden.variables ? ' Show hidden to bring them back.' : ''}</Copy> : null}
+    <ErrorNotice error={toggleHidden.error ?? setAllHidden.error} />
     {bucket === 'vault' ? <Copy muted>Held on purpose. Manual valuations and appreciation are unrealized estimates, separate from cost and profit.</Copy> : null}
     <ErrorNotice error={products.error ?? games.error ?? types.error ?? (bucket === 'vault' ? vault.error : null)} retry={()=>{void products.refetch();void games.refetch();void types.refetch();if (bucket === 'vault') void vault.refetch();}} />
     {products.isPending && <Loading />}

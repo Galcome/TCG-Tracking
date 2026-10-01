@@ -1,9 +1,10 @@
 """Product routes: creation, retrieval, editing, deletion and forgiving search."""
 
 import uuid
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import ColumnElement, Select, and_, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Subquery
 
@@ -28,6 +29,8 @@ from src.schemas.product import (
     ProductRead,
     ProductStatsRead,
     ProductUpdate,
+    VisibilityChange,
+    VisibilityChanged,
 )
 from src.services import history, inventory, ledger, sets
 from src.services import money as money_service
@@ -263,8 +266,71 @@ def _sort_keys(
     return [*keys, Product.name.asc(), Product.id.asc()]
 
 
-@router.get("", response_model=ProductList)
-def list_products(
+@dataclass(frozen=True)
+class StockFilters:
+    """Everything that decides which products a stock view holds. Not sorting or paging."""
+
+    search: str | None
+    game: str | None
+    product_type: str | None
+    stock: str | None
+    bucket: str | None
+    include_archived: bool
+    hidden: str
+    set_id: uuid.UUID | None
+    priced: str | None
+    min_unit_value: int | None
+    max_unit_value: int | None
+    min_quantity: int | None
+    max_quantity: int | None
+
+    def matching(self, totals: Subquery) -> Select:
+        """What the search, taxonomy, range and stock filters keep. Not the bucket filter."""
+        on_hand = func.coalesce(totals.c.on_hand, 0)
+        stmt = select(Product).outerjoin(totals, totals.c.product_id == Product.id)
+        stmt = _apply_filters(
+            stmt,
+            self.search,
+            self.game,
+            self.product_type,
+            self.include_archived,
+            self.hidden,
+            self.set_id,
+        )
+        # A product with no unit value fails either bound: a range is a claim about a
+        # price, and "unknown" is not inside any of them.
+        unit = _unit_value_cents(self.bucket)
+        if self.priced == PRICED_YES:
+            stmt = stmt.where(unit.is_not(None))
+        elif self.priced == PRICED_NO:
+            stmt = stmt.where(unit.is_(None))
+        if self.min_unit_value is not None:
+            stmt = stmt.where(unit >= self.min_unit_value)
+        if self.max_unit_value is not None:
+            stmt = stmt.where(unit <= self.max_unit_value)
+        if self.min_quantity is not None:
+            stmt = stmt.where(on_hand >= self.min_quantity)
+        if self.max_quantity is not None:
+            stmt = stmt.where(on_hand <= self.max_quantity)
+        if self.stock == STOCK_IN:
+            # Deliberately `!= 0`, so negative stock stays visible. An oversell means the
+            # ledger disagrees with the shelf, and this list is where that gets fixed.
+            return stmt.where(on_hand != 0)
+        if self.stock == STOCK_OUT:
+            return stmt.where(on_hand == 0)
+        return stmt
+
+    def narrowed(self, totals: Subquery) -> Select:
+        """`matching`, then the bucket tab: exactly the rows the list shows."""
+        stmt = self.matching(totals)
+        if self.bucket is not None:
+            # Zero in a bucket means not there, so a product with 3 in the Vault and none
+            # in the Store is absent from the Store view.
+            stmt = stmt.where(func.coalesce(totals.c[self.bucket], 0) > 0)
+        return stmt
+
+
+def stock_filters(
     q: str | None = Query(default=None, max_length=200, description="Free-text search"),
     game: str | None = Query(default=None, max_length=60, description="Game slug"),
     product_type: str | None = Query(default=None, max_length=60, description="Product type slug"),
@@ -288,6 +354,50 @@ def list_products(
     max_unit_value: MoneyIn | None = Query(default=None, description="Per unit, inclusive"),
     min_quantity: int | None = Query(default=None, ge=0, description="On hand, inclusive"),
     max_quantity: int | None = Query(default=None, ge=0, description="On hand, inclusive"),
+) -> StockFilters:
+    return StockFilters(
+        search=(q or "").strip() or None,
+        game=game,
+        product_type=product_type,
+        stock=stock,
+        bucket=bucket,
+        include_archived=include_archived,
+        hidden=hidden,
+        set_id=set_id,
+        priced=priced,
+        min_unit_value=min_unit_value,
+        max_unit_value=max_unit_value,
+        min_quantity=min_quantity,
+        max_quantity=max_quantity,
+    )
+
+
+@router.post("/visibility", response_model=VisibilityChanged)
+def set_visibility(
+    payload: VisibilityChange,
+    filters: StockFilters = Depends(stock_filters),
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> VisibilityChanged:
+    """Hide or unhide every product a stock view holds, in one go.
+
+    Takes the list's own filters rather than a set of ids, so "everything under $10" is one
+    request however many pages it runs to, and it changes exactly what the screen counted.
+    """
+    totals = inventory.stock_totals()
+    targets = filters.narrowed(totals).with_only_columns(Product.id)
+    changed = db.execute(
+        update(Product)
+        .where(Product.id.in_(targets), Product.is_hidden.is_(not payload.is_hidden))
+        .values(is_hidden=payload.is_hidden)
+        .execution_options(synchronize_session=False)
+    )
+    return VisibilityChanged(changed=changed.rowcount)
+
+
+@router.get("", response_model=ProductList)
+def list_products(
+    filters: StockFilters = Depends(stock_filters),
     sort: str | None = Query(
         default=None,
         pattern=f"^({'|'.join(SORTS)})$",
@@ -303,7 +413,8 @@ def list_products(
     Matching is forgiving: exact substring OR trigram similarity, so partial words and
     small misspellings still find the item.
     """
-    search = (q or "").strip() or None
+    search = filters.search
+    bucket = filters.bucket
 
     # Stock is an aggregate over four tables, so it lives in a subquery the database can
     # join, filter and page on. It used to be applied in Python, which meant loading the
@@ -312,49 +423,16 @@ def list_products(
     totals = inventory.stock_totals()
     on_hand = func.coalesce(totals.c.on_hand, 0)
 
-    def matching() -> Select:
-        """Everything the search, taxonomy, range and stock filters keep. Not the bucket filter."""
-        stmt = select(Product).outerjoin(totals, totals.c.product_id == Product.id)
-        stmt = _apply_filters(
-            stmt, search, game, product_type, include_archived, hidden, set_id
-        )
-        # A product with no unit value fails either bound: a range is a claim about a
-        # price, and "unknown" is not inside any of them.
-        unit = _unit_value_cents(bucket)
-        if priced == PRICED_YES:
-            stmt = stmt.where(unit.is_not(None))
-        elif priced == PRICED_NO:
-            stmt = stmt.where(unit.is_(None))
-        if min_unit_value is not None:
-            stmt = stmt.where(unit >= min_unit_value)
-        if max_unit_value is not None:
-            stmt = stmt.where(unit <= max_unit_value)
-        if min_quantity is not None:
-            stmt = stmt.where(on_hand >= min_quantity)
-        if max_quantity is not None:
-            stmt = stmt.where(on_hand <= max_quantity)
-        if stock == STOCK_IN:
-            # Deliberately `!= 0`, so negative stock stays visible. An oversell means the
-            # ledger disagrees with the shelf, and this list is where that gets fixed.
-            return stmt.where(on_hand != 0)
-        if stock == STOCK_OUT:
-            return stmt.where(on_hand == 0)
-        return stmt
-
     # Counted before the bucket filter narrows anything, so a tab's count says what
     # pressing it would show rather than what is already on screen.
     counted = db.execute(
         select(*[func.coalesce(func.sum(totals.c[name]), 0) for name in BUCKETS]).where(
-            totals.c.product_id.in_(matching().with_only_columns(Product.id))
+            totals.c.product_id.in_(filters.matching(totals).with_only_columns(Product.id))
         )
     ).one()
     bucket_totals = {name: int(value) for name, value in zip(BUCKETS, counted)}
 
-    narrowed = matching()
-    if bucket is not None:
-        # Zero in a bucket means not there, so a product with 3 in the Vault and none in
-        # the Store is absent from the Store view.
-        narrowed = narrowed.where(func.coalesce(totals.c[bucket], 0) > 0)
+    narrowed = filters.narrowed(totals)
 
     total = db.scalar(
         select(func.count()).select_from(narrowed.with_only_columns(Product.id).subquery())
