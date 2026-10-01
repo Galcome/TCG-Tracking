@@ -1106,6 +1106,13 @@ export function createApi(request: ApiRequest) { return {
   createPurchase: (purchase: NewPurchase) =>
     request<unknown>('/api/v1/purchases', { method: 'POST', body: JSON.stringify(purchase) }),
 
+  /** One cost per unit; the server splits the purchase into a lot per distinct price. */
+  setPurchaseUnitCosts: (id: string, unitCosts: string[]) =>
+    request<unknown>(`/api/v1/purchases/${id}/unit-costs`, {
+      method: 'POST',
+      body: JSON.stringify({ unit_costs: unitCosts }),
+    }),
+
   createSale: (sale: NewSale) =>
     request<unknown>('/api/v1/sales', { method: 'POST', body: JSON.stringify(sale) }),
 

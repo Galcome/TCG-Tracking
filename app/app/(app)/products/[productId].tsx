@@ -13,14 +13,10 @@ import { ProductLifecycle } from '../../../components/product-lifecycle';
 import { RecordValuationDialog } from '../../../components/valuation-form';
 import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
-import type { Transaction } from '../../../lib/api';
+import { EditCostDialog } from '../../../components/cost-form';
+import { openPurchases } from '../../../lib/cost-drafts';
 import { money } from '../../../lib/format';
 import { canCrack, canRip } from '../../../lib/product-types';
-/** Active purchases, which are the only rows whose cost can still be corrected. One of them
- *  means "edit the cost" is unambiguous; several means the caller must pick a lot. */
-function openPurchases(product: { history: Transaction[] }): Transaction[] {
-  return product.history.filter((entry) => entry.kind === 'purchase' && entry.status === 'active');
-}
 
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
@@ -28,6 +24,7 @@ export default function ProductDetail() {
   const [form, setForm] = useState<Omit<ProductFormsProps, 'onClose' | 'product'> | null>(null);
   const [selling, setSelling] = useState(false);
   const [valuing, setValuing] = useState(false);
+  const [costing, setCosting] = useState(false);
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
   return <Page title={p?.name ?? 'Product'}>
@@ -38,7 +35,7 @@ export default function ProductDetail() {
       <Row>{(['inventory', 'store', 'vault'] as const).map(bucket => <View key={bucket} style={{ padding: 8, borderRadius: 8, backgroundColor: colors.raised }}><Text style={{ color: colors[bucket], fontSize: 14 }}>{bucket === 'inventory' ? 'Inventory' : bucket === 'store' ? 'Store' : 'Vault'} {p.stats.by_bucket[bucket]}</Text></View>)}</Row>
       <Copy>On hand {p.stats.quantity_on_hand}</Copy>
       <Row><Copy>Remaining cost {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
-      {openPurchases(p).length === 1 ? <Button variant="link" label="Edit what this cost" onPress={() => setForm({ mode: 'transaction', transaction: openPurchases(p)[0] })} /> : null}
+      {openPurchases(p.history).length > 0 ? <Button variant="link" label="Edit what this cost" onPress={() => setCosting(true)} /> : null}
       {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
       <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
       <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
@@ -46,6 +43,7 @@ export default function ProductDetail() {
       <Button label="Record valuation" onPress={() => setValuing(true)} />
       <ProductLifecycle product={p} /></Disclosure>
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
+      {costing && <EditCostDialog product={p} onClose={() => setCosting(false)} />}
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
       {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
       <Card><Copy muted>Market estimate · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No market estimate' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}</Card>

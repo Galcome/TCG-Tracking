@@ -107,6 +107,118 @@ def test_editing_a_purchase_recomputes_the_sale_it_funded(client, product):
     assert updated["cost"] == "250.00", "the sale's cost basis follows the corrected purchase"
 
 
+def unit_costs(client, purchase_id, costs, **extra):
+    return client.post(
+        f"/api/v1/purchases/{purchase_id}/unit-costs", json={"unit_costs": costs, **extra}
+    )
+
+
+def test_units_bought_at_different_prices_become_their_own_lots(client, product):
+    """Five boxes entered as one purchase, corrected to what each one really cost."""
+    purchase = client.post(
+        "/api/v1/purchases", json=purchase_payload(product["id"], quantity=5, amount="0.00")
+    ).json()
+
+    response = unit_costs(
+        client,
+        purchase["id"],
+        ["100.00", "120.00", "100.00", "90.00", "120.00"],
+        reason="priced from receipts",
+    )
+    assert response.status_code == 200, response.text
+    lots = response.json()
+
+    assert [(lot["quantity"], lot["amount"]) for lot in lots] == [
+        (2, "200.00"),
+        (2, "240.00"),
+        (1, "90.00"),
+    ]
+    assert lots[0]["id"] == purchase["id"], "the first price keeps the original row"
+    assert {lot["purchase_date"] for lot in lots} == {"2026-01-10"}
+
+    stats = client.get(f"/api/v1/products/{product['id']}").json()["stats"]
+    assert stats["quantity_on_hand"] == 5
+    assert stats["total_invested"] == "530.00"
+
+
+def test_one_price_for_every_unit_keeps_a_single_purchase(client, product):
+    purchase = client.post(
+        "/api/v1/purchases", json=purchase_payload(product["id"], quantity=3, amount="0.00")
+    ).json()
+
+    lots = unit_costs(client, purchase["id"], ["50.00", "50.00", "50.00"]).json()
+
+    assert [(lot["id"], lot["quantity"], lot["amount"]) for lot in lots] == [
+        (purchase["id"], 3, "150.00")
+    ]
+
+
+def test_shipping_tax_and_fees_follow_the_units(client, product):
+    purchase = client.post(
+        "/api/v1/purchases",
+        json=purchase_payload(
+            product["id"], quantity=3, amount="300.00", shipping="9.00", tax="3.00", fees="0.10"
+        ),
+    ).json()
+
+    lots = unit_costs(client, purchase["id"], ["100.00", "100.00", "130.00"]).json()
+
+    assert [(lot["shipping"], lot["tax"], lot["fees"]) for lot in lots] == [
+        ("6.00", "2.00", "0.07"),
+        ("3.00", "1.00", "0.03"),
+    ]
+    stats = client.get(f"/api/v1/products/{product['id']}").json()["stats"]
+    assert stats["total_invested"] == "342.10", "nothing paid is lost in the split"
+
+
+def test_a_sale_takes_the_cost_of_the_lot_it_came_from(client, product):
+    purchase = client.post(
+        "/api/v1/purchases", json=purchase_payload(product["id"], quantity=2, amount="0.00")
+    ).json()
+    unit_costs(client, purchase["id"], ["80.00", "140.00"])
+
+    sale = client.post("/api/v1/sales", json=sale_payload(product["id"])).json()
+
+    assert sale["cost_basis"] == "80.00", "FIFO hands over a real box, not the average"
+
+
+def test_unit_costs_must_cover_every_unit(client, product):
+    purchase = client.post("/api/v1/purchases", json=purchase_payload(product["id"])).json()
+
+    response = unit_costs(client, purchase["id"], ["100.00"])
+
+    assert response.status_code == 422
+    assert "2 units" in response.json()["detail"]
+
+
+def test_a_voided_purchase_cannot_be_priced_by_unit(client, product):
+    purchase = client.post("/api/v1/purchases", json=purchase_payload(product["id"])).json()
+    client.post(f"/api/v1/purchases/{purchase['id']}/void", json={"reason": "x"})
+
+    assert unit_costs(client, purchase["id"], ["1.00", "2.00"]).status_code == 409
+
+
+def test_stock_opened_from_a_case_cannot_be_priced_by_unit(client, make_product):
+    """Its cost is the case's cost; splitting it would cut it loose from the crack."""
+    case = make_product("Unit Cost Case")
+    box = make_product("Unit Cost Box")
+    client.post("/api/v1/purchases", json=purchase_payload(case["id"], quantity=1))
+    cracked = client.post(
+        "/api/v1/transformations/crack",
+        json={"product_id": case["id"], "outputs": [{"product_id": box["id"], "quantity": 6}]},
+    )
+    assert cracked.status_code == 201, cracked.text
+    derived = next(
+        entry
+        for entry in client.get(f"/api/v1/products/{box['id']}").json()["history"]
+        if entry["kind"] == "purchase"
+    )
+
+    response = unit_costs(client, derived["id"], ["1.00"] * 6)
+
+    assert response.status_code == 409
+
+
 def test_voiding_a_purchase_requires_a_reason(client, product):
     purchase = client.post("/api/v1/purchases", json=purchase_payload(product["id"])).json()
     assert client.post(f"/api/v1/purchases/{purchase['id']}/void", json={}).status_code == 422
