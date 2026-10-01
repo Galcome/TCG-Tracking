@@ -35,15 +35,31 @@ def test_the_calendar_is_seeded_and_offered(client):
     assert "Mega Evolution: Pitch Black Night" in names(client, limit=30)
 
 
-def test_a_set_stays_hidden_until_its_release_date(client, db, game_id):
+def test_a_far_off_set_stays_hidden(client, db, game_id):
     """The whole reason the calendar needs no maintenance: sets reveal themselves."""
     future = CardSet(
-        game_id=game_id, name="Not Out Yet", released_on=TODAY + timedelta(days=30)
+        game_id=game_id,
+        name="Not Out Yet",
+        released_on=TODAY + timedelta(days=sets.UPCOMING_DAYS + 1),
     )
     db.add(future)
     db.flush()
 
     assert "Not Out Yet" not in names(client, limit=30)
+
+
+def test_an_upcoming_set_is_offered_before_release_day(client, db, game_id):
+    """Pre-orders are entered weeks ahead. "Delta Reign isn't in the list" was this."""
+    upcoming = CardSet(
+        game_id=game_id,
+        name="Out Next Month",
+        released_on=TODAY + timedelta(days=sets.UPCOMING_DAYS),
+    )
+    db.add(upcoming)
+    db.flush()
+
+    assert "Out Next Month" in names(client, limit=30)
+    assert "Out Next Month" in names(client, q="next month")
 
 
 def test_a_set_appears_on_the_day_itself(client, db, game_id):
@@ -57,7 +73,9 @@ def test_a_set_appears_on_the_day_itself(client, db, game_id):
 def test_a_pre_order_makes_an_unreleased_set_visible(client, db, game_id, product_type_id):
     """Cases get bought before release day. Once something uses a set, it is real."""
     future = CardSet(
-        game_id=game_id, name="Pre Ordered", released_on=TODAY + timedelta(days=30)
+        game_id=game_id,
+        name="Pre Ordered",
+        released_on=TODAY + timedelta(days=sets.UPCOMING_DAYS + 30),
     )
     db.add(future)
     db.flush()
@@ -99,9 +117,25 @@ def test_a_fresh_release_leads_even_over_used_sets(db, game_id, make_product):
     """Launch week is when somebody enters boxes of a set nobody has bought yet."""
     make_product("Something Real", set_name="Actually Bought")
 
-    assert suggested(db, game_id, date(2026, 9, 19))[:2] == [
+    assert suggested(db, game_id, date(2026, 9, 19))[:3] == [
         "30th Celebration",
+        "Delta Reign",
         "Actually Bought",
+    ]
+
+
+def test_an_upcoming_set_follows_fresh_releases_soonest_first(db, game_id):
+    for name, days in (("Further Out", 40), ("Sooner", 20)):
+        db.add(
+            CardSet(game_id=game_id, name=name, released_on=date(2030, 1, 1) + timedelta(days))
+        )
+    db.add(CardSet(game_id=game_id, name="Just Released", released_on=date(2030, 1, 1)))
+    db.flush()
+
+    assert suggested(db, game_id, date(2030, 1, 1))[:3] == [
+        "Just Released",
+        "Sooner",
+        "Further Out",
     ]
 
 

@@ -7,7 +7,9 @@ before anyone has bought it.
 The calendar is kept current by the daily catalog sync (`set_sync`), so a set released in
 the last `NEW_RELEASE_DAYS` leads even over used sets: launch week is when somebody enters
 boxes of it for the first time, and burying it under last month's set is how "the new set
-isn't in the list" happens. Past that window the used sets lead again, so a sync that stops
+isn't in the list" happens. A set releasing in the next `UPCOMING_DAYS` follows straight
+after, because pre-orders are entered before release day. Past those windows the used sets
+lead again, so a sync that stops
 running degrades to what the group really buys rather than to a stale guess.
 """
 
@@ -37,6 +39,10 @@ DEFAULT_SUGGESTION_LIMIT = 8
 #: A set released this recently leads the list even over what the group already buys.
 #: Launch week is exactly when somebody is entering boxes of it for the first time.
 NEW_RELEASE_DAYS = 60
+
+#: How far ahead of release day a set is already offered. Pre-orders open about two months
+#: out, which is also when the catalog first lists the set.
+UPCOMING_DAYS = 90
 
 
 def resolve(
@@ -83,11 +89,13 @@ def suggestions(
 ) -> list[tuple[CardSet, int]]:
     """Sets worth offering for this game, best first, with how many products use each.
 
-    A set is offered when it has been released, or when something already uses it. That
-    second clause is what makes pre-orders work: a case bought before release day links to
-    the seeded set, and the set stops hiding the moment it is real to somebody.
+    A set is offered when it has been released, when it releases within `UPCOMING_DAYS`,
+    or when something already uses it. The window is what makes pre-orders one tap: a case
+    bought weeks before release day finds its set in the list. Anything further out stays
+    hidden until somebody uses it, so a far-off guess never crowds out real sets.
     """
     when = today or date.today()
+    horizon = when + timedelta(days=UPCOMING_DAYS)
     search = query.strip()
 
     uses = func.count(Product.id)
@@ -99,7 +107,7 @@ def suggestions(
         .where(
             CardSet.game_id == game_id,
             (CardSet.released_on.is_(None))
-            | (CardSet.released_on <= when)
+            | (CardSet.released_on <= horizon)
             | (Product.id.is_not(None)),
         )
         .group_by(CardSet.id)
@@ -112,13 +120,15 @@ def suggestions(
             | (func.word_similarity(search, CardSet.name) >= SIMILARITY_THRESHOLD)
         )
 
-    # Fresh releases lead, newest first. Then used sets, most recent first; the calendar
-    # fills whatever is left, newest release first. `nullslast` on the aggregate is what
-    # puts never-used sets below.
+    # Fresh releases lead, newest first, then what is about to release, soonest first. Then
+    # used sets, most recent first; the calendar fills whatever is left, newest release
+    # first. `nullslast` on the aggregate is what puts never-used sets below.
     recent = CardSet.released_on.between(when - timedelta(days=NEW_RELEASE_DAYS), when)
+    upcoming = CardSet.released_on.between(when + timedelta(days=1), horizon)
     statement = statement.order_by(
-        case((recent, 0), else_=1),
+        case((recent, 0), (upcoming, 1), else_=2),
         case((recent, CardSet.released_on)).desc().nullslast(),
+        case((upcoming, CardSet.released_on)).asc().nullslast(),
         last_used.desc().nullslast(),
         CardSet.released_on.desc().nullslast(),
         CardSet.name,
