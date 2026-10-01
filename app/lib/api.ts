@@ -257,7 +257,7 @@ export interface Dashboard {
   expenses_by_category: { category: ExpenseCategory; amount: string }[]
   /** Realized trading profit less overhead — the headline figure. */
   net_profit: string
-  /** Market value of priced stock only, as of now. Display-only, never cost or profit. */
+  /** Value of priced stock only, as of now: market quote, else the latest recorded valuation. Display-only, never cost or profit. */
   market_value: string
   /** FIFO cost of those same priced units. */
   priced_cost: string

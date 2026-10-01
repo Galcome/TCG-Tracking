@@ -1,8 +1,9 @@
 """Home's "what is it worth": market value of priced stock against that stock's cost.
 
-Only units with a usable quote count, and their FIFO cost is the comparison, so a shelf
-that is half priced never reads as a loss (unpriced at zero) or as a guess (unpriced at
-cost). Coverage is reported alongside so the figure is never mistaken for the whole shelf.
+Only units with a usable quote or a recorded valuation count, and their FIFO cost is the
+comparison, so a shelf that is half priced never reads as a loss (unpriced at zero) or as
+a guess (unpriced at cost). Coverage is reported alongside so the figure is never mistaken
+for the whole shelf.
 """
 
 import uuid
@@ -64,6 +65,39 @@ def test_value_covers_priced_units_only_and_compares_their_own_cost(client, db, 
     assert body["priced_cost"] == "80.00"
     assert body["unrealized_gain"] == "20.00"
     assert body["inventory_at_cost"] == "104.00"
+
+
+def value(client, product, amount, captured_on):
+    response = client.post(
+        "/api/v1/valuations",
+        json={"product_id": product["id"], "value": amount, "captured_on": captured_on},
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_stock_nothing_quotes_counts_at_its_latest_recorded_value(client, db, make_product):
+    slab = stock(client, make_product, "Graded Slab", 2, "100.00")
+    value(client, slab, "400.00", "2026-01-01")
+    value(client, slab, "500.00", "2026-06-01")
+    dead = stock(client, make_product, "Dead Quote Pack", 1, "10.00")
+    quote(client, db, dead, "8", None, status="unavailable")
+    value(client, dead, "30.00", "2026-06-01")
+    both = stock(client, make_product, "Quoted And Valued", 1, "20.00")
+    quote(client, db, both, "9", 2500)
+    value(client, both, "999.00", "2026-06-01")
+    hidden = stock(client, make_product, "Hidden Slab", 1, "5.00")
+    value(client, hidden, "70.00", "2026-06-01")
+    assert client.patch(
+        f"/api/v1/products/{hidden['id']}", json={"is_hidden": True}
+    ).status_code == 200
+
+    body = client.get("/api/v1/dashboard").json()
+
+    assert body["units_in_stock"] == 4
+    assert body["priced_units"] == 4
+    assert body["stale_units"] == 0, "a recorded value is not a stale quote"
+    assert body["market_value"] == "1055.00", "2 x 500 + 30 + the live 25, not 999"
+    assert body["priced_cost"] == "130.00"
 
 
 def test_an_unpriced_shelf_reports_nothing_rather_than_a_loss(client, make_product):

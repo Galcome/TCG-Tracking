@@ -30,6 +30,7 @@ from src.models.money import (
     MoneyMovement,
     MoneyPosting,
 )
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
 from src.services import vault
@@ -109,15 +110,18 @@ class Dashboard:
     #: Lifetime overhead paid in money (any account but store credit), for the cash balance.
     expenses_paid_cents: int = 0
 
-    #: Market value of the stock that has a usable quote, as of now. Only priced units
-    #: count: valuing an unpriced box at zero would read as a loss, and at cost would
-    #: pass a guess off as a quote. `priced_units` of `units_in_stock` says how much of the
-    #: shelf this covers.
+    #: What the stock is worth as of now: the provider quote where there is a usable one,
+    #: otherwise the latest recorded valuation - graded cards and vintage packs have no
+    #: quote to refresh, and leaving them out understated the shelf. Only units with
+    #: either count: valuing an unpriced box at zero would read as a loss, and at cost
+    #: would pass a guess off as a price. `priced_units` of `units_in_stock` says how much
+    #: of the shelf this covers.
     market_value_cents: int = 0
     #: FIFO remaining cost of those same priced units, so the gain compares like with like.
     priced_cost_cents: int = 0
     priced_units: int = 0
-    #: How many of the priced units carry a quote older than the freshness window.
+    #: How many of the priced units carry a provider quote older than the freshness
+    #: window. Recorded valuations are not counted: there is no quote to go stale.
     stale_units: int = 0
 
     @property
@@ -377,6 +381,16 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
     # whether or not anyone is looking at the product.
     hidden = set(db.scalars(select(Product.id).where(Product.is_hidden.is_(True))))
     estimates = current_estimates(db, today=today)
+    # The latest recorded valuation per product, for stock no provider quotes: graded
+    # cards, vintage packs. Ascending, so the newest one is what is left in the dict.
+    recorded: dict[uuid.UUID, int] = {
+        product_id: int(value)
+        for product_id, value in db.execute(
+            select(PriceSnapshot.product_id, PriceSnapshot.value_cents).order_by(
+                PriceSnapshot.captured_on.asc(), PriceSnapshot.created_at.asc()
+            )
+        )
+    }
     for product_id, stats in product_stats(db).items():
         result.cost_written_off_cents += stats.cost_written_off_cents
         if stats.quantity_on_hand < 0:
@@ -385,18 +399,22 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
             continue
         result.units_in_stock += max(stats.quantity_on_hand, 0)
         result.inventory_at_cost_cents += stats.remaining_cost_cents
+        if stats.quantity_on_hand <= 0:
+            continue
         estimate = estimates.get(product_id)
-        if (
-            stats.quantity_on_hand > 0
-            and estimate is not None
+        quoted = (
+            estimate is not None
             and estimate.value_cents is not None
             and estimate.status != QUOTE_UNAVAILABLE
-        ):
-            result.market_value_cents += estimate.value_cents * stats.quantity_on_hand
-            result.priced_cost_cents += stats.remaining_cost_cents
-            result.priced_units += stats.quantity_on_hand
-            if estimate.status != QUOTE_FRESH:
-                result.stale_units += stats.quantity_on_hand
+        )
+        unit_value = estimate.value_cents if quoted else recorded.get(product_id)
+        if unit_value is None:
+            continue
+        result.market_value_cents += unit_value * stats.quantity_on_hand
+        result.priced_cost_cents += stats.remaining_cost_cents
+        result.priced_units += stats.quantity_on_hand
+        if quoted and estimate.status != QUOTE_FRESH:
+            result.stale_units += stats.quantity_on_hand
 
     return result
 
