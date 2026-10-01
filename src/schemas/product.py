@@ -16,7 +16,7 @@ NAME_MAX_LENGTH = 200
 
 # Fields on ProductUpdate that back NOT NULL columns. Omitting them leaves the value
 # alone; sending an explicit null is invalid input, not a request to clear them.
-NON_NULLABLE_UPDATE_FIELDS = ("name", "game_id", "product_type_id", "is_archived")
+NON_NULLABLE_UPDATE_FIELDS = ("name", "game_id", "product_type_id", "is_archived", "is_hidden")
 
 
 class ProductBase(BaseModel):
@@ -106,6 +106,7 @@ class ProductUpdate(ProductBase):
     game_id: uuid.UUID | None = None
     product_type_id: uuid.UUID | None = None
     is_archived: bool | None = None
+    is_hidden: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -192,6 +193,7 @@ class ProductRead(ProductBase):
     #: The set record behind `set_name`. Null when the product has no set.
     set_id: uuid.UUID | None
     is_archived: bool
+    is_hidden: bool
     created_by_member_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime

@@ -82,3 +82,22 @@ def test_value_is_as_of_now_whatever_the_period(client, db, make_product):
     for period in ("all", "30d"):
         body = client.get("/api/v1/dashboard", params={"period": period}).json()
         assert body["unrealized_gain"] == "-2.00"
+
+
+def test_hidden_stock_leaves_the_shelf_figures_but_not_the_money(client, db, make_product):
+    kept = stock(client, make_product, "Shown Box", 2, "60.00")
+    quote(client, db, kept, "6", 4500)
+    bulk = stock(client, make_product, "Hidden Bulk", 30, "15.00")
+    quote(client, db, bulk, "7", 100)
+    assert client.patch(
+        f"/api/v1/products/{bulk['id']}", json={"is_hidden": True}
+    ).status_code == 200
+
+    body = client.get("/api/v1/dashboard").json()
+
+    assert body["units_in_stock"] == 2
+    assert body["inventory_at_cost"] == "60.00"
+    assert body["priced_units"] == 2
+    assert body["market_value"] == "90.00"
+    assert body["priced_cost"] == "60.00"
+    assert body["total_invested"] == "75.00", "what was spent is still what was spent"

@@ -13,7 +13,7 @@ export function RipPickerDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<Product | null>(null);
   const candidates = useQuery({
     queryKey: ['products', 'rip-picker', search],
-    queryFn: () => api.products({ q: search || undefined, stock: 'in', limit: 30 }),
+    queryFn: () => api.products({ q: search || undefined, stock: 'in', hidden: 'include', limit: 30 }),
     enabled: !picked,
   });
   if (picked) return <RipDialog product={picked} onClose={onClose} />;

@@ -139,7 +139,7 @@ export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
   const candidates = useQuery({
     queryKey: ['products', 'crack-candidates', gameSlug],
     enabled: Boolean(words && gameSlug),
-    queryFn: () => api.products({ game: gameSlug!, limit: 100, offset: 0 }),
+    queryFn: () => api.products({ game: gameSlug!, hidden: 'include', limit: 100, offset: 0 }),
   })
   const existingOptions = childOptions(candidates.data?.items ?? [], product, product.set_name)
   const available = product.stats.by_bucket[fromBucket] ?? 0

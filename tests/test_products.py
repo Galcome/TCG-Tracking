@@ -140,7 +140,9 @@ def test_update_rejects_a_blank_name(client, make_product):
     assert client.patch(f"/api/v1/products/{created['id']}", json={"name": " "}).status_code == 422
 
 
-@pytest.mark.parametrize("field", ["name", "game_id", "product_type_id", "is_archived"])
+@pytest.mark.parametrize(
+    "field", ["name", "game_id", "product_type_id", "is_archived", "is_hidden"]
+)
 def test_update_refuses_to_null_a_required_field(client, make_product, field: str):
     """These back NOT NULL columns; an explicit null must be a 422, not a 500."""
     created = make_product()
@@ -681,3 +683,97 @@ def test_unrealized_sorts_rank_gain_over_cost_and_sink_unvalued(client, make_pro
         "Gain Winner",
         "Gain Unvalued",
     ]
+
+
+# ----------------------------------------------------------------------- hiding
+
+
+def test_a_hidden_product_leaves_the_list_and_the_bucket_counts(client, make_product):
+    kept = make_product("Hide Kept")
+    bulk = make_product("Hide Bulk")
+    _stock(client, kept["id"], 2)
+    _stock(client, bulk["id"], 40)
+
+    assert bulk["is_hidden"] is False
+    hidden = client.patch(f"/api/v1/products/{bulk['id']}", json={"is_hidden": True})
+    assert hidden.json()["is_hidden"] is True
+
+    page = client.get("/api/v1/products", params={"q": "Hide"}).json()
+    assert [item["name"] for item in page["items"]] == ["Hide Kept"]
+    assert page["total"] == 1
+    assert page["bucket_totals"]["inventory"] == 2
+
+    assert _names(client, q="Hide", hidden="only") == ["Hide Bulk"]
+    assert _names(client, q="Hide", hidden="include") == ["Hide Bulk", "Hide Kept"]
+
+    client.patch(f"/api/v1/products/{bulk['id']}", json={"is_hidden": False})
+    assert _names(client, q="Hide") == ["Hide Bulk", "Hide Kept"]
+
+
+def test_an_unknown_hidden_mode_is_refused(client):
+    assert client.get("/api/v1/products", params={"hidden": "sometimes"}).status_code == 422
+
+
+# ------------------------------------------------------------ ranges and filters
+
+
+def test_unit_value_range_keeps_only_priced_products_inside_it(client, make_product):
+    for name, amount in (("Range Cheap", "4.00"), ("Range Mid", "10.00"), ("Range Dear", "80.00")):
+        product = make_product(name)
+        _stock(client, product["id"], 1)
+        _value(client, product["id"], amount)
+    unvalued = make_product("Range Unvalued")
+    _stock(client, unvalued["id"], 1)
+
+    assert _names(client, q="Range", max_unit_value="10.00") == ["Range Cheap", "Range Mid"]
+    assert _names(client, q="Range", min_unit_value="10.01") == ["Range Dear"]
+    assert _names(client, q="Range", min_unit_value="5", max_unit_value="50") == ["Range Mid"]
+    assert _names(client, q="Range", priced="no") == ["Range Unvalued"]
+    assert _names(client, q="Range", priced="yes", sort="unit_value_asc") == [
+        "Range Cheap",
+        "Range Mid",
+        "Range Dear",
+    ]
+    assert _names(client, q="Range", sort="unit_value_asc")[-1] == "Range Unvalued"
+
+
+def test_a_malformed_unit_value_bound_is_refused(client):
+    assert client.get("/api/v1/products", params={"min_unit_value": "cheap"}).status_code == 422
+    assert client.get("/api/v1/products", params={"max_unit_value": "-1"}).status_code == 422
+
+
+def test_quantity_range_reads_stock_on_hand(client, make_product):
+    for name, quantity in (("Count One", 1), ("Count Four", 4), ("Count Nine", 9)):
+        _stock(client, make_product(name)["id"], quantity)
+
+    assert _names(client, q="Count", min_quantity=4) == ["Count Four", "Count Nine"]
+    assert _names(client, q="Count", max_quantity=4) == ["Count Four", "Count One"]
+    assert _names(client, q="Count", min_quantity=2, max_quantity=5) == ["Count Four"]
+    assert _names(client, q="Count", sort="quantity_asc") == [
+        "Count One",
+        "Count Four",
+        "Count Nine",
+    ]
+
+
+def test_filter_by_set(client, make_product):
+    fabled = make_product("Set Fabled Box", set_name="Fabled")
+    make_product("Set Other Box", set_name="Archazia's Island")
+    make_product("Set Loose Box")
+
+    assert _names(client, q="Set", set_id=fabled["set_id"]) == ["Set Fabled Box"]
+
+
+def test_cost_profit_and_age_sort_both_ways(client, make_product):
+    cheap = make_product("Way Cheap")
+    dear = make_product("Way Dear")
+    _buy(client, cheap["id"], 1, "5.00")
+    _buy(client, dear["id"], 2, "600.00")
+    sold = client.post(
+        "/api/v1/sales", json={"product_id": dear["id"], "quantity": 1, "amount": "900.00"}
+    )
+    assert sold.status_code == 201, sold.text
+
+    assert _names(client, q="Way", sort="cost_asc") == ["Way Cheap", "Way Dear"]
+    assert _names(client, q="Way", sort="profit_asc") == ["Way Cheap", "Way Dear"]
+    assert _names(client, q="Way", sort="oldest") == ["Way Cheap", "Way Dear"]
