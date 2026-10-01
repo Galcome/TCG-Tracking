@@ -7,6 +7,7 @@ import { useApi } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type ProductSort, type VaultHolding } from '../../lib/api';
 import { ProductForms } from '../../components/product-forms';
+import { EditCostDialog } from '../../components/cost-form';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { StockCard } from '../../components/stock-card';
 import { RipDialog } from '../../components/rip-form';
@@ -45,6 +46,7 @@ export default function Inventory() {
   const [selling, setSelling] = useState<Product | null>(null);
   const [ripping, setRipping] = useState<Product | null>(null);
   const [valuing, setValuing] = useState<Product | null>(null);
+  const [costing, setCosting] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
   const games = useQuery({ queryKey: ['games'], queryFn: api.games });
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
@@ -62,6 +64,7 @@ export default function Inventory() {
     {isDesktop ? <Button label="Add product" onPress={() => setAdding(true)} /> : null}
     {adding && <ProductForms mode="add" initialName={products.data?.items.length === 0 ? q.trim() : undefined} onClose={() => setAdding(false)} />}
     {operation ? <ProductForms product={operation.product} mode={operation.mode} onClose={() => setOperation(null)} /> : null}
+    {costing ? <EditCostDialog key={costing.id} product={costing} onClose={() => setCosting(null)} /> : null}
     {selling ? <RecordSaleDialog product={selling} onClose={() => setSelling(null)} /> : null}
     {valuing ? <RecordValuationDialog key={valuing.id} product={{ id: valuing.id, name: valuing.name }} onClose={() => setValuing(null)} /> : null}
     {ripping ? <RipDialog product={ripping} initialBucket={bucket || undefined} onClose={() => setRipping(null)} /> : null}
@@ -91,7 +94,8 @@ export default function Inventory() {
       onValue={bucket === 'vault' ? () => setValuing(p) : undefined}
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
-      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined} />)}
+      onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
+      onEditCost={() => setCosting(p)} />)}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}
   </Page>;

@@ -1,4 +1,4 @@
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { colors } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type VaultHolding } from '../lib/api';
@@ -8,12 +8,23 @@ import { GameIdentity } from './game-identity';
 import { Button, Card, Copy, Row, Signed } from './ui';
 import { VaultDetails, VaultSummary } from './vault-valuation';
 
-// Edit lives on the product page: it is rare from a list, and a fourth equal-weight button
-// crowded the actions that are not. On the Vault tab the row carries the Vault holding, so
-// manual worth and appreciation replace the market position: the Vault is valued, not priced.
-export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell, onMove, onRip, onValue }: {
+// The app ships no icon font, so the two edit shortcuts are glyphs named for screen readers.
+function IconButton({ glyph, label, onPress }: { glyph: string; label: string; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={4}
+    style={({ pressed }) => ({ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.raised, opacity: pressed ? 0.7 : 1 })}>
+    <Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{glyph}</Text>
+  </Pressable>;
+}
+
+// Editing is rare from a list, so it is two small icons rather than a fourth equal-weight
+// button: one opens the product page, one opens the cost form in place, because imported
+// stock arrives at $0.00 and the correction must not be two screens away.
+// On the Vault tab the row carries the Vault holding, so manual worth and appreciation
+// replace the market position: the Vault is valued, not priced.
+export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell, onMove, onRip, onValue, onEditCost }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
   onDetails: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
+  onEditCost?: () => void;
 }) {
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
@@ -28,6 +39,9 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell,
       </View><View style={{ minWidth: 80, alignItems: 'center' }}>
         <Copy>{bucket ? p.stats.by_bucket[bucket] : p.stats.quantity_on_hand}</Copy>
         <Copy muted>{bucket ? 'In ' + BUCKET_LABELS[bucket] : 'In stock'}</Copy>
+      </View><View style={{ flexDirection: 'row', gap: 8 }}>
+        <IconButton glyph="✎" label="Edit product" onPress={onDetails} />
+        {onEditCost ? <IconButton glyph="$" label="Edit cost" onPress={onEditCost} /> : null}
       </View></Row>
       <Row>{BUCKETS.map(b => <Text key={b} style={{ fontFamily: fonts.medium, fontSize: 12, color: colors[b], backgroundColor: colors.raised, padding: 8, borderRadius: 8 }}>{BUCKET_LABELS[b]} {p.stats.by_bucket[b]}</Text>)}</Row>
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}

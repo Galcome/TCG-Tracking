@@ -347,6 +347,44 @@ def test_editing_a_purchase_that_never_had_funding_does_not_invent_any(client, m
     assert movements(client) == []
 
 
+def test_pricing_units_one_by_one_keeps_who_paid(client, make_product):
+    """Each new lot is funded by the same people in the same proportions as the original."""
+    product = make_product()
+    mine = me(client)["id"]
+    shared = joint(client)["id"]
+    purchase = buy(
+        client,
+        product["id"],
+        "200.00",
+        quantity=2,
+        funding=[
+            {"account_id": mine, "amount": "150.00"},
+            {"account_id": shared, "amount": "50.00"},
+        ],
+    )
+
+    response = client.post(
+        f"/api/v1/purchases/{purchase['id']}/unit-costs",
+        json={"unit_costs": ["100.00", "300.00"]},
+    )
+    assert response.status_code == 200, response.text
+
+    assert me(client)["balance"] == "300.00"
+    assert joint(client)["balance"] == "-100.00"
+
+
+def test_pricing_units_of_an_unfunded_purchase_does_not_invent_a_payer(client, make_product):
+    product = make_product()
+    purchase = buy(client, product["id"], "0.00", quantity=2, funding=[])
+
+    client.post(
+        f"/api/v1/purchases/{purchase['id']}/unit-costs",
+        json={"unit_costs": ["100.00", "300.00"]},
+    )
+
+    assert movements(client) == []
+
+
 def test_voiding_a_purchase_voids_the_money_that_paid_for_it(client, make_product):
     product = make_product()
     purchase = buy(client, product["id"], "600.00")

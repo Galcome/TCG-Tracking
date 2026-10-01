@@ -96,6 +96,18 @@ class PurchaseUpdate(BaseModel):
         return self
 
 
+#: Units that can be priced one by one in a single request. A form with more rows than
+#: this is not something a person fills in; a bulk lot is priced with one total instead.
+MAX_UNIT_COSTS = 500
+
+
+class PurchaseUnitCosts(BaseModel):
+    """What each unit of a purchase cost before shipping, tax and fees, one entry per unit."""
+
+    unit_costs: list[MoneyIn] = Field(min_length=1, max_length=MAX_UNIT_COSTS)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class PurchaseRead(BaseModel):
     model_config = _READ_CONFIG
 

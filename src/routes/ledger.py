@@ -30,6 +30,7 @@ from src.schemas.ledger import (
     MoveRead,
     PurchaseCreate,
     PurchaseRead,
+    PurchaseUnitCosts,
     PurchaseUpdate,
     SaleCreate,
     SaleLine,
@@ -241,13 +242,7 @@ def create_purchase(
     return purchase
 
 
-@router.patch("/purchases/{purchase_id}", response_model=PurchaseRead)
-def update_purchase(
-    purchase_id: uuid.UUID,
-    payload: PurchaseUpdate,
-    member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session, scope="function"),
-) -> Purchase:
+def _lock_active_purchase(db: Session, purchase_id: uuid.UUID) -> Purchase:
     purchase = _require_active(db, Purchase, purchase_id, "Purchase")
     # Match the generic void path's Product -> Purchase order. Refresh after the lock so
     # a concurrent void cannot let this stale request mutate an inactive purchase.
@@ -258,6 +253,17 @@ def update_purchase(
             status_code=status.HTTP_409_CONFLICT,
             detail="This purchase has been voided and can no longer be changed",
         )
+    return purchase
+
+
+@router.patch("/purchases/{purchase_id}", response_model=PurchaseRead)
+def update_purchase(
+    purchase_id: uuid.UUID,
+    payload: PurchaseUpdate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> Purchase:
+    purchase = _lock_active_purchase(db, purchase_id)
     changes = payload.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     changes.pop("funding", None)
@@ -293,6 +299,93 @@ def update_purchase(
         reason=reason,
     )
     return purchase
+
+
+@router.post("/purchases/{purchase_id}/unit-costs", response_model=list[PurchaseRead])
+def set_purchase_unit_costs(
+    purchase_id: uuid.UUID,
+    payload: PurchaseUnitCosts,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> list[Purchase]:
+    """Price a purchase unit by unit, splitting it into one lot per distinct price.
+
+    Five boxes entered as one purchase but bought at five prices become five lots, so FIFO
+    hands each sale the cost of a real box instead of the average. Units at the same price
+    stay together; the first price keeps the original row and its history.
+    """
+    purchase = _lock_active_purchase(db, purchase_id)
+    if purchase.is_derived:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This stock's cost comes from what it was opened from and cannot be split",
+        )
+    if len(payload.unit_costs) != purchase.quantity:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"This purchase has {purchase.quantity} units; give one cost for each",
+        )
+
+    # dict keeps first-seen order, so the lots come out in the order the prices were typed.
+    lots: dict[int, int] = {}
+    for unit_cost in payload.unit_costs:
+        lots[unit_cost] = lots.get(unit_cost, 0) + 1
+    counts = list(lots.values())
+
+    audited = ["quantity", "gross_amount_cents", "shipping_cents", "tax_cents", "fees_cents"]
+    before = ledger.snapshot(purchase, audited)
+    # Shipping, tax and fees were paid on the whole purchase, so they follow the units.
+    extras = {
+        column: money_service.proportional_split(counts, getattr(purchase, column))
+        for column in ("shipping_cents", "tax_cents", "fees_cents")
+    }
+    payers = money_service.funding_weights(db, purchase.id)
+
+    records: list[Purchase] = []
+    for index, (unit_cost, count) in enumerate(lots.items()):
+        record = purchase
+        if index > 0:
+            record = Purchase(
+                product_id=purchase.product_id,
+                purchase_date=purchase.purchase_date,
+                purchased_by_member_id=purchase.purchased_by_member_id,
+                source=purchase.source,
+                bucket=purchase.bucket,
+                notes=purchase.notes,
+                currency=purchase.currency,
+                created_by_member_id=member.id,
+            )
+            db.add(record)
+        record.quantity = count
+        record.gross_amount_cents = unit_cost * count
+        for column, shares in extras.items():
+            setattr(record, column, shares[index])
+        records.append(record)
+    db.flush()
+    ledger.recompute_product(db, purchase.product_id)
+
+    for record in records:
+        if record is purchase:
+            funding = None
+        elif payers is None:
+            funding = []
+        else:
+            amounts = money_service.proportional_split(
+                [weight for _, weight in payers], record.landed_cost_cents
+            )
+            funding = [(account_id, amount) for (account_id, _), amount in zip(payers, amounts)]
+        money_service.sync_funding(db, record, funding=funding, member_id=member.id)
+        ledger.record_audit(
+            db,
+            entity_type="purchase",
+            entity_id=record.id,
+            action="update" if record is purchase else "create",
+            member_id=member.id,
+            before=before if record is purchase else None,
+            after=ledger.snapshot(record, audited),
+            reason=payload.reason,
+        )
+    return records
 
 
 @router.post("/purchases/{purchase_id}/void", response_model=PurchaseRead)

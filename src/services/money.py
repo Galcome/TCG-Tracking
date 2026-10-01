@@ -259,6 +259,18 @@ def _legs_of(db: Session, movement: MoneyMovement) -> list[MoneyPosting]:
 # ---------------------------------------------------------------- funding and proceeds
 
 
+def funding_weights(db: Session, purchase_id: uuid.UUID) -> list[tuple[uuid.UUID, int]] | None:
+    """Who paid for a purchase and in what proportion, or None when nothing was recorded.
+
+    For carrying "who paid" onto lots split out of that purchase: the same accounts fund
+    them in the same proportions, rather than the split inventing a payer.
+    """
+    movement = _derived_movement(db, purchase_id=purchase_id)
+    if movement is None:
+        return None
+    return [(posting.account_id, abs(posting.delta_cents)) for posting in _legs_of(db, movement)]
+
+
 def sync_funding(
     db: Session,
     purchase: Purchase,
