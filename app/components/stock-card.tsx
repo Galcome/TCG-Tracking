@@ -9,11 +9,14 @@ import { Button, Card, Copy, Row, Signed } from './ui';
 import { VaultDetails, VaultSummary } from './vault-valuation';
 
 // Edit lives on the product page: it is rare from a list, and a fourth equal-weight button
-// crowded the actions that are not. On the Vault tab the row carries the Vault holding, so
-// manual worth and appreciation replace the market position: the Vault is valued, not priced.
-export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell, onMove, onRip, onValue }: {
+// crowded the actions that are not. Cost is the exception, as a link beside the figure it
+// changes: imported stock arrives at $0.00 and nobody found the correction two screens away.
+// On the Vault tab the row carries the Vault holding, so manual worth and appreciation
+// replace the market position: the Vault is valued, not priced.
+export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell, onMove, onRip, onValue, onEditCost }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
   onDetails: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
+  onEditCost?: () => void;
 }) {
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
@@ -35,6 +38,7 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell,
     <View style={{ flexGrow: 1, flexBasis: dense ? 250 : undefined, gap: 6 }}>
       {vault ? <VaultSummary holding={vault} /> : <>
       <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
+      {onEditCost && !noStock ? <Button variant="link" label="Edit cost" onPress={onEditCost} /> : null}
       {position ? <Row><Copy>{bucket && p.stats.by_bucket[bucket] !== p.stats.quantity_on_hand ? `Value of all ${p.stats.quantity_on_hand}` : 'Value'} {money(position.value)}</Copy><Copy>Unrealized <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy></Row> : null}
       {position ? <Copy muted>{money(p.market_estimate?.value)} / unit{p.market_estimate?.status === 'stale' ? ' · stale' : ''}</Copy> : null}
       {!position && !noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}</>}
