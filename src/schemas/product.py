@@ -126,6 +126,16 @@ class ProductUpdate(ProductBase):
         return self
 
 
+class VisibilityChange(BaseModel):
+    """Hide or unhide every product the accompanying stock filters match."""
+
+    is_hidden: bool
+
+
+class VisibilityChanged(BaseModel):
+    changed: int
+
+
 class ProductStatsRead(BaseModel):
     """Everything derived from the ledger. Never stored, always recomputed.
 

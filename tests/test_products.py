@@ -714,6 +714,43 @@ def test_an_unknown_hidden_mode_is_refused(client):
     assert client.get("/api/v1/products", params={"hidden": "sometimes"}).status_code == 422
 
 
+def _set_visibility(client, is_hidden: bool, **params) -> int:
+    response = client.post(
+        "/api/v1/products/visibility", params=params, json={"is_hidden": is_hidden}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["changed"]
+
+
+def test_hiding_in_bulk_takes_everything_the_filters_match(client, make_product):
+    for name, amount in (("Sweep Cheap", "4.00"), ("Sweep Mid", "10.00"), ("Sweep Dear", "80.00")):
+        product = make_product(name)
+        _stock(client, product["id"], 1)
+        _value(client, product["id"], amount)
+    _stock(client, make_product("Sweep Unvalued")["id"], 1)
+
+    assert _set_visibility(client, True, q="Sweep", stock="in", max_unit_value="10") == 2
+    assert _names(client, q="Sweep") == ["Sweep Dear", "Sweep Unvalued"]
+    assert _names(client, q="Sweep", hidden="only") == ["Sweep Cheap", "Sweep Mid"]
+    # Already hidden, so nothing is left for the same request to change.
+    assert _set_visibility(client, True, q="Sweep", hidden="include", max_unit_value="10") == 0
+
+    assert _set_visibility(client, False, q="Sweep", hidden="only") == 2
+    assert len(_names(client, q="Sweep")) == 4
+
+
+def test_hiding_in_bulk_stays_inside_the_bucket_tab(client, make_product):
+    _stock(client, make_product("Tab Shelf")["id"], 3)
+    _stock(client, make_product("Tab Vaulted")["id"], 3, bucket="vault")
+
+    assert _set_visibility(client, True, q="Tab", bucket="vault") == 1
+    assert _names(client, q="Tab") == ["Tab Shelf"]
+
+
+def test_bulk_visibility_needs_a_direction(client):
+    assert client.post("/api/v1/products/visibility", json={}).status_code == 422
+
+
 # ------------------------------------------------------------ ranges and filters
 
 

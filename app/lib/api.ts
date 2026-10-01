@@ -1047,6 +1047,26 @@ export function createApi(request: ApiRequest) { return {
     offset?: number
   }) => request<ProductPage>(`/api/v1/products${query(params)}`),
 
+  /** Hides or unhides everything a stock view holds: the list's filters, not its page. */
+  setProductsHidden: (filters: {
+    q?: string
+    game?: string
+    product_type?: string
+    stock?: string
+    bucket?: string
+    include_archived?: boolean
+    hidden?: 'exclude' | 'include' | 'only'
+    priced?: 'yes' | 'no'
+    min_unit_value?: string
+    max_unit_value?: string
+    min_quantity?: number
+    max_quantity?: number
+  }, is_hidden: boolean) =>
+    request<{ changed: number }>(`/api/v1/products/visibility${query(filters)}`, {
+      method: 'POST',
+      body: JSON.stringify({ is_hidden }),
+    }),
+
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),
 
   productCandidates: (input: {
