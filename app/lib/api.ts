@@ -1062,9 +1062,16 @@ export function createApi(request: ApiRequest) { return {
     min_quantity?: number
     max_quantity?: number
   }, is_hidden: boolean) =>
-    request<{ changed: number }>(`/api/v1/products/visibility${query(filters)}`, {
+    request<{ changed: number; product_ids: string[] }>(`/api/v1/products/visibility${query(filters)}`, {
       method: 'POST',
       body: JSON.stringify({ is_hidden }),
+    }),
+
+  /** Puts back exactly the products a bulk change moved, whatever the filters now say. */
+  setProductIdsHidden: (product_ids: string[], is_hidden: boolean) =>
+    request<{ changed: number; product_ids: string[] }>('/api/v1/products/visibility', {
+      method: 'POST',
+      body: JSON.stringify({ is_hidden, product_ids }),
     }),
 
   product: (id: string) => request<ProductDetail>(`/api/v1/products/${id}`),

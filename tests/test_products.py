@@ -747,6 +747,28 @@ def test_hiding_in_bulk_stays_inside_the_bucket_tab(client, make_product):
     assert _names(client, q="Tab") == ["Tab Shelf"]
 
 
+def test_a_bulk_hide_can_be_undone_without_touching_what_was_already_hidden(client, make_product):
+    before = make_product("Undo Before")
+    _stock(client, before["id"], 1)
+    _stock(client, make_product("Undo First")["id"], 1)
+    _stock(client, make_product("Undo Second")["id"], 1)
+    client.patch(f"/api/v1/products/{before['id']}", json={"is_hidden": True})
+
+    hidden = client.post(
+        "/api/v1/products/visibility", params={"q": "Undo"}, json={"is_hidden": True}
+    ).json()
+    assert hidden["changed"] == 2
+    assert _names(client, q="Undo") == []
+
+    undone = client.post(
+        "/api/v1/products/visibility",
+        json={"is_hidden": False, "product_ids": hidden["product_ids"]},
+    ).json()
+    assert undone["changed"] == 2
+    assert _names(client, q="Undo") == ["Undo First", "Undo Second"]
+    assert _names(client, q="Undo", hidden="only") == ["Undo Before"]
+
+
 def test_bulk_visibility_needs_a_direction(client):
     assert client.post("/api/v1/products/visibility", json={}).status_code == 422
 

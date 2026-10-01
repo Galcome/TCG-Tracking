@@ -384,15 +384,19 @@ def set_visibility(
     Takes the list's own filters rather than a set of ids, so "everything under $10" is one
     request however many pages it runs to, and it changes exactly what the screen counted.
     """
-    totals = inventory.stock_totals()
-    targets = filters.narrowed(totals).with_only_columns(Product.id)
-    changed = db.execute(
+    if payload.product_ids is not None:
+        targets = payload.product_ids
+    else:
+        totals = inventory.stock_totals()
+        targets = filters.narrowed(totals).with_only_columns(Product.id)
+    changed = db.scalars(
         update(Product)
         .where(Product.id.in_(targets), Product.is_hidden.is_(not payload.is_hidden))
         .values(is_hidden=payload.is_hidden)
+        .returning(Product.id)
         .execution_options(synchronize_session=False)
-    )
-    return VisibilityChanged(changed=changed.rowcount)
+    ).all()
+    return VisibilityChanged(changed=len(changed), product_ids=changed)
 
 
 @router.get("", response_model=ProductList)
