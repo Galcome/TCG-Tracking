@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import { useApi } from '../context/AppContext'
+import { todayIso } from '../lib/format'
 import { Button, Copy, ErrorNotice, Field, Loading, Row } from './ui'
 
 /**
@@ -38,6 +39,7 @@ export function SetField({ game, value, onChange, autoFocus = false }: {
   // Keep the routine path compact on a phone. The complete API result remains available after
   // the user narrows the query; showing twenty full-width controls before Quantity is too much.
   const visibleSuggestions = exactMatch ? [] : suggestions.slice(0, 5)
+  const today = todayIso()
 
   return (
     <>
@@ -64,7 +66,7 @@ export function SetField({ game, value, onChange, autoFocus = false }: {
           {visibleSuggestions.map((set) => (
             <Row key={set.id}>
               <Button label={set.name} onPress={() => onChange(set.name)} />
-              <Copy muted>{set.uses > 0 ? 'Recent' : 'New'}</Copy>
+              <Copy muted>{set.uses > 0 ? 'Recent' : set.released_on && set.released_on > today ? 'Upcoming' : 'New'}</Copy>
             </Row>
           ))}
         </>
