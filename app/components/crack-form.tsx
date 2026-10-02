@@ -12,6 +12,7 @@ import {
   type Product,
   type ProductDetail,
   type Taxonomy,
+  type Transformation,
 } from '../lib/api'
 import {
   EMPTY_CRACK_SPLIT,
@@ -33,10 +34,13 @@ import { DateField } from './date-field'
 export interface CrackCaseDialogProps {
   product: ProductDetail
   onClose: () => void
+  /** A recorded crack being corrected: saving replaces it instead of cracking again. */
+  editing?: Transformation
 }
 
 interface CrackSheetProps {
   title: string
+  submitLabel?: string
   onClose: () => void
   onSubmit: () => void
   busy: boolean
@@ -45,14 +49,14 @@ interface CrackSheetProps {
   children: React.ReactNode
 }
 
-function CrackSheet({ title, onClose, onSubmit, busy, error, validation, children }: CrackSheetProps) {
+function CrackSheet({ title, submitLabel = 'Crack it open', onClose, onSubmit, busy, error, validation, children }: CrackSheetProps) {
   const firstError = Object.values(validation ?? {}).find((message): message is string => Boolean(message))
   return (
     <Sheet title={title} open onClose={onClose} dismissDisabled={busy}>
       {children}
       {firstError ? <ErrorNotice error={new Error(firstError)} /> : null}
       {error ? <ErrorNotice error={error} /> : null}
-      <Button label={busy ? 'Saving…' : 'Crack it open'} onPress={onSubmit} disabled={busy} />
+      <Button label={busy ? 'Saving…' : submitLabel} onPress={onSubmit} disabled={busy} />
     </Sheet>
   )
 }
@@ -87,29 +91,59 @@ function childOptions(candidates: Product[], source: ProductDetail, setName: str
   ]
 }
 
-export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
+/** What a recorded crack put where, as the split fields show it. */
+function recordedSplit(editing: Transformation): CrackSplit {
+  const split = { ...EMPTY_CRACK_SPLIT }
+  for (const output of editing.outputs) {
+    split[output.bucket] = String(Number(split[output.bucket] || '0') + output.quantity)
+  }
+  return split
+}
+
+function recordedChildrenPerSource(editing: Transformation): string {
+  const total = editing.outputs.reduce((sum, output) => sum + output.quantity, 0)
+  return editing.source_quantity > 0 && total % editing.source_quantity === 0
+    ? String(total / editing.source_quantity)
+    : ''
+}
+
+export function CrackCaseDialog({ product: recorded, onClose, editing }: CrackCaseDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
+  // Correcting a crack puts back what it opened first, so that stock counts as on hand here.
+  const product = useMemo<ProductDetail>(() => editing
+    ? {
+        ...recorded,
+        stats: {
+          ...recorded.stats,
+          by_bucket: {
+            ...recorded.stats.by_bucket,
+            [editing.source_bucket]: (recorded.stats.by_bucket[editing.source_bucket] ?? 0) + editing.source_quantity,
+          },
+        },
+      }
+    : recorded, [editing, recorded])
   const words = crackWords(product.product_type.slug)
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes, enabled: Boolean(words) })
   const games = useQuery({ queryKey: ['games'], queryFn: api.games, enabled: Boolean(words) })
 
   const [fromBucket, setFromBucket] = useState<Bucket>(
-    BUCKETS.find((bucket) => (product.stats.by_bucket[bucket] ?? 0) > 0) ?? 'inventory',
+    editing?.source_bucket ?? BUCKETS.find((bucket) => (product.stats.by_bucket[bucket] ?? 0) > 0) ?? 'inventory',
   )
-  const [sourceQuantity, setSourceQuantity] = useState('1')
-  const [childrenPerSource, setChildrenPerSource] = useState('')
-  const [childrenTouched, setChildrenTouched] = useState(false)
-  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const [sourceQuantity, setSourceQuantity] = useState(editing ? String(editing.source_quantity) : '1')
+  const [childrenPerSource, setChildrenPerSource] = useState(editing ? recordedChildrenPerSource(editing) : '')
+  const [childrenTouched, setChildrenTouched] = useState(Boolean(editing))
+  const [occurredOn, setOccurredOn] = useState(editing?.occurred_on ?? todayIso())
   const [gameId, setGameId] = useState(product.game.id)
   const initialLanguage = product.language ?? 'English'
   const [language, setLanguage] = useState(initialLanguage)
   const [customLanguage, setCustomLanguage] = useState(!LANGUAGES.includes(initialLanguage as (typeof LANGUAGES)[number]))
-  const [existingChildId, setExistingChildId] = useState('')
+  const recordedChild = editing?.outputs[0]
+  const [existingChildId, setExistingChildId] = useState(recordedChild?.product_id ?? '')
   const [childName, setChildName] = useState('')
   const [childNameTouched, setChildNameTouched] = useState(false)
   const [childTypeId, setChildTypeId] = useState('')
-  const [split, setSplit] = useState<CrackSplit>(EMPTY_CRACK_SPLIT)
+  const [split, setSplit] = useState<CrackSplit>(() => (editing ? recordedSplit(editing) : EMPTY_CRACK_SPLIT))
   const [validation, setValidation] = useState<CrackValidation>({})
   const [createdChildName, setCreatedChildName] = useState<string | null>(null)
   const [createdChildIdState, setCreatedChildIdState] = useState<string | null>(null)
@@ -141,7 +175,11 @@ export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
     enabled: Boolean(words && gameSlug),
     queryFn: () => api.products({ game: gameSlug!, hidden: 'include', limit: 100, offset: 0 }),
   })
-  const existingOptions = childOptions(candidates.data?.items ?? [], product, product.set_name)
+  const listedOptions = childOptions(candidates.data?.items ?? [], product, product.set_name)
+  // The recorded child stays choosable even when the candidate list has not loaded it.
+  const existingOptions = recordedChild && !listedOptions.some((item) => item.value === recordedChild.product_id)
+    ? [...listedOptions, option(recordedChild.product_id, recordedChild.product_name)]
+    : listedOptions
   const available = product.stats.by_bucket[fromBucket] ?? 0
   const total = crackTotal(sourceQuantity, effectiveChildrenPerSource)
   const allocated = crackSplitTotal(split)
@@ -181,7 +219,7 @@ export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
       }
       const payload = buildCrackPayload(submitted, childProductId, product)
       if (!payload) throw new Error('Complete the crack fields before saving.')
-      return api.crackCase(payload)
+      return editing ? api.correctCrack(editing.id, payload) : api.crackCase(payload)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries()
@@ -219,7 +257,8 @@ export function CrackCaseDialog({ product, onClose }: CrackCaseDialogProps) {
 
   return (
     <CrackSheet
-      title={`Crack open — ${product.name}`}
+      title={`${editing ? 'Edit crack' : 'Crack open'} — ${product.name}`}
+      submitLabel={editing ? 'Save changes' : undefined}
       onClose={onClose}
       onSubmit={submit}
       busy={run.isPending}

@@ -4,7 +4,8 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
@@ -418,6 +419,21 @@ class ValuationRequest(BaseModel):
     notes: str | None = None
 
 
+class ValuationUpdate(BaseModel):
+    """A correction to a recorded valuation. Only what is sent changes."""
+
+    value: MoneyIn | None = None
+    captured_on: date | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "ValuationUpdate":
+        for name in ("value", "captured_on"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
 class ValuationRead(BaseModel):
     model_config = _CONFIG
 
@@ -426,6 +442,7 @@ class ValuationRead(BaseModel):
     value: MoneyOut = Field(validation_alias="value_cents")
     captured_on: date
     source: str
+    notes: str | None = None
 
 
 class VaultHoldingRead(BaseModel):
@@ -488,6 +505,64 @@ def record_valuation(
     db.add(snapshot)
     db.flush()
     return ValuationRead.model_validate(snapshot, from_attributes=True)
+
+
+@router.get("/valuations", response_model=list[ValuationRead])
+def list_valuations(
+    product_id: uuid.UUID = Query(),
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> list[ValuationRead]:
+    """Every valuation recorded for one product, newest first."""
+    rows = db.scalars(
+        select(PriceSnapshot)
+        .where(PriceSnapshot.product_id == product_id)
+        .order_by(PriceSnapshot.captured_on.desc(), PriceSnapshot.created_at.desc())
+    ).all()
+    return [ValuationRead.model_validate(row, from_attributes=True) for row in rows]
+
+
+def _require_valuation(db: Session, valuation_id: uuid.UUID) -> PriceSnapshot:
+    snapshot = db.get(PriceSnapshot, valuation_id)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Valuation not found")
+    return snapshot
+
+
+@router.patch("/valuations/{valuation_id}", response_model=ValuationRead)
+def update_valuation(
+    valuation_id: uuid.UUID,
+    payload: ValuationUpdate,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> ValuationRead:
+    """Correct a valuation. It is an estimate, so a wrong one is simply fixed in place."""
+    snapshot = _require_valuation(db, valuation_id)
+    changes = payload.model_dump(exclude_unset=True)
+    if "value" in changes:
+        snapshot.value_cents = changes["value"]
+    if "captured_on" in changes:
+        snapshot.captured_on = changes["captured_on"]
+    if "notes" in changes:
+        snapshot.notes = (changes["notes"] or "").strip() or None
+    db.flush()
+    return ValuationRead.model_validate(snapshot, from_attributes=True)
+
+
+@router.delete("/valuations/{valuation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_valuation(
+    valuation_id: uuid.UUID,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> None:
+    """Remove a valuation that should never have been recorded.
+
+    Deleted outright rather than voided: an estimate carries no money, so there is nothing
+    for an audit trail to reconcile, and a wrong one left behind would keep being the value
+    shown.
+    """
+    db.delete(_require_valuation(db, valuation_id))
+    db.flush()
 
 
 @router.get("/reports/vault", response_model=list[VaultHoldingRead])

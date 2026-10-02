@@ -407,6 +407,30 @@ class MoveCreate(BaseModel):
         return self
 
 
+class MoveUpdate(BaseModel):
+    """Corrections to a move. Only what is sent changes."""
+
+    quantity: int | None = Field(default=None, gt=0, le=MAX_QUANTITY)
+    from_bucket: str | None = Field(default=None, pattern=f"^({'|'.join(BUCKETS)})$")
+    to_bucket: str | None = Field(default=None, pattern=f"^({'|'.join(BUCKETS)})$")
+    moved_on: date | None = None
+    notes: str | None = None
+    #: Recorded on the audit entry, not on the move.
+    audit_reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "MoveUpdate":
+        for name in ("quantity", "from_bucket", "to_bucket", "moved_on"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
 class MoveRead(BaseModel):
     model_config = _READ_CONFIG
 

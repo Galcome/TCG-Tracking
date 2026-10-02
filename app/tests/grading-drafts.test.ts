@@ -5,15 +5,19 @@ import {
   buildGradedProductPayload,
   buildReturnFromGradingPayload,
   buildSendToGradingPayload,
+  buildSubmissionChanges,
   buildVoidGradingPayload,
   firstGradingValidationError,
+  validateEditSubmissionDraft,
   validateGradedProductDraft,
   validateReturnFromGradingDraft,
   validateSendToGradingDraft,
   validateVoidGradingDraft,
+  type EditSubmissionDraft,
   type ReturnFromGradingDraft,
   type SendToGradingDraft,
 } from '../lib/grading-drafts'
+import type { GradingSubmission } from '../lib/api'
 
 const sendDraft: SendToGradingDraft = {
   productId: 'raw-1',
@@ -117,4 +121,63 @@ test('inline graded child carries identity but never creates an initial purchase
 test('void validation requires a bounded audit reason and trims it for the server', () => {
   assert.equal(validateVoidGradingDraft({ submissionId: 'submission-1', reason: '  ' }).reason, 'Give a reason for cancelling this grading submission.')
   assert.equal(buildVoidGradingPayload({ submissionId: 'submission-1', reason: '  duplicate entry  ' }), 'duplicate entry')
+})
+
+const outSubmission: GradingSubmission = {
+  id: 'submission-1',
+  product_id: 'raw-1',
+  product_name: 'Card',
+  quantity: 2,
+  bucket: 'inventory',
+  grading_company: 'PSA',
+  sent_on: '2026-09-09',
+  fees: '40.00',
+  status: 'out',
+  returned_on: null,
+  grade: null,
+  days_out: 3,
+  notes: null,
+}
+
+const untouchedEdit: EditSubmissionDraft = {
+  quantity: '2',
+  bucket: 'inventory',
+  gradingCompany: 'PSA',
+  sentOn: '2026-09-09',
+  fees: '40.00',
+  grade: '',
+  notes: '',
+}
+
+test('an untouched grading edit changes nothing', () => {
+  assert.deepEqual(validateEditSubmissionDraft(untouchedEdit, outSubmission, 5), {})
+  assert.deepEqual(buildSubmissionChanges(untouchedEdit, outSubmission), {})
+  assert.deepEqual(buildSubmissionChanges({ ...untouchedEdit, fees: '40' }, outSubmission), {})
+})
+
+test('a grading edit sends only what changed while the cards are away', () => {
+  const draft = { ...untouchedEdit, quantity: '3', bucket: 'vault' as const, fees: '', gradingCompany: ' BGS ', sentOn: '2026-09-08', notes: ' two slabs ' }
+  assert.deepEqual(buildSubmissionChanges(draft, outSubmission), {
+    quantity: 3,
+    bucket: 'vault',
+    fees: '0',
+    grading_company: 'BGS',
+    sent_on: '2026-09-08',
+    notes: 'two slabs',
+  })
+})
+
+test('a grading edit cannot send more than the bucket can spare', () => {
+  assert.equal(validateEditSubmissionDraft({ ...untouchedEdit, quantity: '6' }, outSubmission, 5).quantity, 'Only 5 units are in this bucket.')
+  assert.ok(validateEditSubmissionDraft({ ...untouchedEdit, quantity: '0' }, outSubmission, 5).quantity)
+  assert.ok(validateEditSubmissionDraft({ ...untouchedEdit, fees: '1.234' }, outSubmission, 5).fees)
+  assert.ok(validateEditSubmissionDraft({ ...untouchedEdit, sentOn: 'yesterday' }, outSubmission, 5).sentOn)
+})
+
+test('a returned submission only has its labels corrected', () => {
+  const returned: GradingSubmission = { ...outSubmission, status: 'returned', returned_on: '2026-09-20', grade: '9' }
+  const draft = { ...untouchedEdit, quantity: '99', fees: 'nonsense', grade: ' 10 ' }
+  assert.deepEqual(validateEditSubmissionDraft(draft, returned), {})
+  assert.deepEqual(buildSubmissionChanges(draft, returned), { grade: '10' })
+  assert.ok(validateEditSubmissionDraft({ ...draft, grade: 'x'.repeat(21) }, returned).grade)
 })

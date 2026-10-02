@@ -29,6 +29,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from src.models.grading import GRADING_OUT, GradingSubmission
 from src.models.ledger import (
     STATUS_ACTIVE,
     STATUS_VOIDED,
@@ -417,6 +418,18 @@ def void(
             produced.status = STATUS_VOIDED
             produced.void_reason = reason
             touched.add(produced.product_id)
+
+    # A grading return is this transformation. Undoing it puts the card back at the grader
+    # rather than leaving a "returned" submission pointing at stock that no longer exists -
+    # which is also what lets a wrong return be recorded again correctly.
+    submission = db.scalar(
+        select(GradingSubmission).where(GradingSubmission.transformation_id == record.id)
+    )
+    if submission is not None:
+        submission.status = GRADING_OUT
+        submission.returned_on = None
+        submission.grade = None
+        submission.transformation_id = None
 
     db.flush()
     for product_id in touched:

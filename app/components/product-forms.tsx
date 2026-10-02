@@ -678,6 +678,76 @@ function MoveForm({ product, onClose }: { product: Product; onClose: () => void 
   )
 }
 
+function EditMoveForm({ transaction, onClose }: { transaction: Transaction; onClose: () => void }) {
+  const api = useApi()
+  const original = {
+    quantity: Math.abs(transaction.quantity),
+    from: (transaction.from_bucket ?? 'inventory') as Bucket,
+    to: transaction.bucket as Bucket,
+    movedOn: text(transaction.occurred_on),
+    notes: text(transaction.notes),
+  }
+  const [from, setFrom] = useState<Bucket>(original.from)
+  const [to, setTo] = useState<Bucket>(original.to)
+  const [quantity, setQuantity] = useState(String(original.quantity))
+  const [movedOn, setMovedOn] = useState(original.movedOn)
+  const [notes, setNotes] = useState(original.notes)
+  const [validation, setValidation] = useState<DraftValidation>({})
+  const update = useLedgerMutation<Parameters<typeof api.updateMove>[1]>(
+    (changes) => api.updateMove(transaction.id, changes),
+    onClose,
+  )
+
+  function changeFrom(next: Bucket) {
+    setFrom(next)
+    if (next === to) setTo(BUCKETS.find((bucket) => bucket !== next) ?? 'store')
+  }
+
+  function submit() {
+    const errors = validateDraft('move', { productId: transaction.id, quantity, date: movedOn, fromBucket: from, toBucket: to })
+    setValidation(errors)
+    const parsedQuantity = parseIntegerQuantity(quantity, { positive: true })
+    if (firstValidationError(errors) || parsedQuantity === null) return
+
+    const changes: Parameters<typeof api.updateMove>[1] = {}
+    if (parsedQuantity !== original.quantity) changes.quantity = parsedQuantity
+    if (from !== original.from) changes.from_bucket = from
+    if (to !== original.to) changes.to_bucket = to
+    if (movedOn !== original.movedOn) changes.moved_on = movedOn
+    if (notes.trim() !== original.notes) changes.notes = optionalText(notes)
+    if (Object.keys(changes).length === 0) {
+      onClose()
+      return
+    }
+    update.mutate(changes)
+  }
+
+  return (
+    <FormSheet
+      title="Edit move"
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel="Save changes"
+      busy={update.isPending}
+      error={update.error}
+      validation={validation}
+    >
+      <Row>
+        <BucketChoice label="From" value={from} onChange={changeFrom} />
+        <Choice
+          label="To"
+          value={to}
+          options={BUCKETS.filter((bucket) => bucket !== from).map((bucket) => option(bucket, BUCKET_LABELS[bucket]))}
+          onChange={(next) => setTo(next as Bucket)}
+        />
+      </Row>
+      <Field label="How many" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" autoFocus />
+      <DateField label="Date" value={movedOn} onChange={setMovedOn} />
+      <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+    </FormSheet>
+  )
+}
+
 function AdjustForm({ product, onClose }: { product: Product; onClose: () => void }) {
   const api = useApi()
   const [delta, setDelta] = useState('-1')
@@ -733,7 +803,6 @@ function TransactionForm({ transaction, onClose }: { transaction: Transaction; o
   const members = useQuery({ queryKey: ['members'], queryFn: api.members })
   const isPurchase = transaction.kind === 'purchase'
   const isAdjustment = transaction.kind === 'adjustment'
-  const isMove = transaction.kind === 'move'
   const [quantity, setQuantity] = useState(String(isAdjustment ? transaction.quantity : Math.abs(transaction.quantity)))
   const [amount, setAmount] = useState(isPurchase ? text(transaction.base_amount) : text(transaction.amount))
   const [shipping, setShipping] = useState(text(transaction.shipping))
@@ -755,7 +824,6 @@ function TransactionForm({ transaction, onClose }: { transaction: Transaction; o
   }, onClose)
 
   function submit() {
-    if (isMove) return
     const errors = validateDraft('transaction', { transaction, quantity, amount, date: occurredOn, reason: label })
     setValidation(errors)
     if (firstValidationError(errors)) return
@@ -794,14 +862,6 @@ function TransactionForm({ transaction, onClose }: { transaction: Transaction; o
       return
     }
     update.mutate(changes)
-  }
-
-  if (isMove) {
-    return (
-      <FormSheet title="Edit move" onClose={onClose} onSubmit={() => undefined} submitLabel="Save" busy={false} canSubmit={false}>
-        <Copy muted>Move entries are immutable. Void the move and record a new move if the location was wrong.</Copy>
-      </FormSheet>
-    )
   }
 
   return (
@@ -903,7 +963,10 @@ export function ProductForms({ mode, product, transaction, initialName, onClose 
     case 'adjust':
       return product ? <AdjustForm product={product} onClose={onClose} /> : <MissingProduct mode={mode} onClose={onClose} />
     case 'transaction':
-      return transaction ? <TransactionForm transaction={transaction} onClose={onClose} /> : <MissingTransaction mode={mode} onClose={onClose} />
+      if (!transaction) return <MissingTransaction mode={mode} onClose={onClose} />
+      return transaction.kind === 'move'
+        ? <EditMoveForm transaction={transaction} onClose={onClose} />
+        : <TransactionForm transaction={transaction} onClose={onClose} />
     case 'void':
       return transaction ? <VoidForm transaction={transaction} onClose={onClose} /> : <MissingTransaction mode={mode} onClose={onClose} />
     default:

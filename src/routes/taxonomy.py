@@ -4,8 +4,10 @@ Both tables have the same shape and the same rules, so one factory builds both
 routers rather than duplicating six near-identical handlers.
 """
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.database import Base
@@ -53,6 +55,44 @@ def build_router(model: type[Base], label: str) -> APIRouter:
             sort_order=DEFAULT_SORT_ORDER,
         )
         db.add(record)
+        db.flush()
+        return record
+
+    @router.patch("/{record_id}", response_model=TaxonomyRead)
+    def rename(
+        record_id: uuid.UUID,
+        payload: TaxonomyCreate,
+        _: Member = Depends(get_current_member),
+        db: Session = Depends(db_session, scope="function"),
+    ) -> Base:
+        """Rename it. The slug stays, because rules and saved links are keyed on it."""
+        record = db.get(model, record_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"{label} not found"
+            )
+
+        slug = slugify(payload.name)
+        if not slug:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"{label} name must contain at least one letter or number",
+            )
+
+        # Another row already answering to this name, by either spelling of it.
+        clash = db.scalar(
+            select(model).where(
+                model.id != record.id,
+                (model.slug == slug) | (func.lower(model.name) == payload.name.lower()),
+            )
+        )
+        if clash is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{label} '{clash.name}' already exists",
+            )
+
+        record.name = payload.name
         db.flush()
         return record
 

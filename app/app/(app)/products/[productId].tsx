@@ -11,6 +11,7 @@ import { LineageReport } from '../../../components/lineage-report';
 import { PriceSuggestion, PricingControls } from '../../../components/pricing-controls';
 import { ProductLifecycle } from '../../../components/product-lifecycle';
 import { RecordValuationDialog } from '../../../components/valuation-form';
+import { ProductValuations, RenameActions } from '../../../components/product-edits';
 import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
 import { EditCostDialog } from '../../../components/cost-form';
@@ -41,6 +42,8 @@ export default function ProductDetail() {
       <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
           <Button key={action.mode} label={action.label} onPress={() => setForm({ mode: action.mode })} />)}</Row>
       <Button label="Record valuation" onPress={() => setValuing(true)} />
+      <ProductValuations product={p} />
+      <RenameActions product={p} />
       <ProductLifecycle product={p} /></Disclosure>
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
       {costing && <EditCostDialog product={p} onClose={() => setCosting(false)} />}
@@ -54,7 +57,7 @@ export default function ProductDetail() {
       <Disclosure title="Transaction history" defaultOpen={p.history.length > 0}>{p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
         <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>
-          {t.kind !== 'move' && <Button label={'Edit ' + t.kind} onPress={() => setForm({ mode: 'transaction', transaction: t })} />}
+          <Button label={'Edit ' + t.kind} onPress={() => setForm({ mode: 'transaction', transaction: t })} />
           <Button label={'Void ' + t.kind} danger onPress={() => setForm({ mode: 'void', transaction: t })} />
         </Row>}</Card>)}</Disclosure></>}
   </Page>;
