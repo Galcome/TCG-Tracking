@@ -17,6 +17,18 @@ export const FREE_MARKET_PRICING_TYPES = [
   'box-set',
   'collection',
   'deck',
+  'elite-trainer-box',
+  'pokemon-center-elite-trainer-box',
+  'etb-case',
+  'booster-bundle',
+  'collector-booster-box',
+  'premium-collection',
+  'illumineers-trove',
+  'tin',
+  'blister',
+  'gift-set',
+  'prerelease-kit',
+  'secret-lair',
 ] as const
 
 export const EMPTY_PRICING_MAPPING: CatalogMappingDraft = {

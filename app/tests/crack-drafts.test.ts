@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { ProductDetail } from '../lib/api'
+import { contentsSize, type ProductDetail } from '../lib/api'
 import {
   EMPTY_CRACK_SPLIT,
   buildCrackPayload,
@@ -13,7 +13,7 @@ import {
   validateCrackDraft,
   type CrackDraft,
 } from '../lib/crack-drafts'
-import { suggestedProductName } from '../lib/product-types'
+import { opensInto, suggestedProductName } from '../lib/product-types'
 
 const product = {
   id: 'case-1',
@@ -101,4 +101,27 @@ test('crack words and child naming follow the operation and type identity', () =
     assert.deepEqual(crackWords(type), { source: 'container', sources: 'containers', child: 'item', children: 'items' })
   }
   assert.equal(suggestedProductName('Stellar Crown', { id: 'box', name: 'Booster Box', slug: 'booster-box', is_system: true, sort_order: 0 }), 'Stellar Crown Booster Box')
+})
+
+test('the named sealed products open into packs, and an ETB case into ETBs', () => {
+  for (const type of ['elite-trainer-box', 'pokemon-center-elite-trainer-box', 'booster-bundle', 'collector-booster-box', 'illumineers-trove', 'tin', 'blister']) {
+    assert.equal(opensInto(type), 'booster-pack')
+    assert.deepEqual(crackWords(type), { source: 'product', sources: 'products', child: 'pack', children: 'packs' })
+  }
+  assert.equal(opensInto('etb-case'), 'elite-trainer-box')
+  assert.deepEqual(crackWords('etb-case'), { source: 'case', sources: 'cases', child: 'ETB', children: 'ETBs' })
+  assert.equal(opensInto('secret-lair'), undefined)
+})
+
+test('the suggested contents depend on the type and the game', () => {
+  assert.equal(contentsSize('elite-trainer-box', 'pokemon'), 9)
+  assert.equal(contentsSize('pokemon-center-elite-trainer-box', 'pokemon'), 11)
+  assert.equal(contentsSize('booster-bundle', 'pokemon'), 6)
+  assert.equal(contentsSize('booster-bundle', 'magic-the-gathering'), 9)
+  assert.equal(contentsSize('illumineers-trove', 'lorcana'), 8)
+  assert.equal(contentsSize('booster-box', 'lorcana'), 24)
+  assert.equal(contentsSize('booster-box', 'pokemon', 'Japanese'), 30)
+  assert.equal(contentsSize('sealed-case', 'pokemon'), 6)
+  assert.equal(contentsSize('tin', 'pokemon'), undefined)
+  assert.equal(contentsSize('elite-trainer-box', 'lorcana'), undefined)
 })

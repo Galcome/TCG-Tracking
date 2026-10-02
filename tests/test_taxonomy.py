@@ -18,6 +18,26 @@ def test_seeded_games_match_the_brief(client):
     assert slugs[:4] == ["pokemon", "magic-the-gathering", "yu-gi-oh", "lorcana"]
 
 
+def test_sealed_products_have_their_own_types_ahead_of_the_catch_alls(client):
+    slugs = [kind["slug"] for kind in client.get("/api/v1/product-types").json()]
+    for slug in (
+        "elite-trainer-box",
+        "pokemon-center-elite-trainer-box",
+        "etb-case",
+        "booster-bundle",
+        "collector-booster-box",
+        "premium-collection",
+        "illumineers-trove",
+        "tin",
+        "blister",
+        "gift-set",
+        "prerelease-kit",
+        "secret-lair",
+    ):
+        assert slug in slugs
+    assert slugs[-2:] == ["lot", "other"]
+
+
 @pytest.mark.parametrize("route", ROUTES)
 def test_members_can_add_their_own_values(client, route: str):
     response = client.post(route, json={"name": "Weiss Schwarz"})
