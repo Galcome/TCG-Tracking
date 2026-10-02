@@ -98,7 +98,78 @@ export function parseAdjustmentCents(value: string): number | null {
 }
 
 /** The reason stamped on the void half of an edit, so the audit trail says what happened. */
-export const EDIT_VOID_REASON = 'Replaced by a corrected adjustment'
+export const EDIT_VOID_REASON = 'Replaced by a corrected entry'
+
+interface PostedMovement {
+  kind: string
+  legs: { account_id: string; amount: string }[]
+  occurred_on: string | null
+  notes: string | null
+  expense_category?: ExpenseCategory | null
+}
+
+/** A leg's signed cash flow as exact cents, or null when it is not a money string. */
+function legCents(amount: string): bigint | null {
+  const raw = amount.trim()
+  const negative = raw.startsWith('-')
+  const magnitude = decimalCents(negative ? raw.slice(1) : raw)
+  if (magnitude === null) return null
+  return negative ? -magnitude : magnitude
+}
+
+function dollars(cents: bigint): string {
+  return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
+}
+
+/** What the expense form needs to show a posted expense again. */
+export interface ExpenseEdit {
+  category: ExpenseCategory
+  amount: string
+  occurredOn: string
+  notes: string
+  /** The one account that paid, or blank when it was split. */
+  paidFrom: string
+  split: { accountId: string; amount: string }[] | null
+}
+
+/**
+ * Re-open a posted expense as the form that produced it. Every leg of an expense is money
+ * leaving an account, so anything else is not a shape this form can honestly reproduce.
+ */
+export function expenseEditFromMovement(movement: PostedMovement, today: string): ExpenseEdit | null {
+  if (movement.kind !== 'expense' || !movement.expense_category || movement.legs.length === 0) return null
+  const paid: { accountId: string; cents: bigint }[] = []
+  for (const leg of movement.legs) {
+    const cents = legCents(leg.amount)
+    if (cents === null || cents >= 0n) return null
+    paid.push({ accountId: leg.account_id, cents: -cents })
+  }
+  const total = paid.reduce((sum, leg) => sum + leg.cents, 0n)
+  return {
+    category: movement.expense_category,
+    amount: dollars(total),
+    occurredOn: movement.occurred_on ?? today,
+    notes: movement.notes ?? '',
+    paidFrom: paid.length === 1 ? paid[0].accountId : '',
+    split: paid.length === 1 ? null : paid.map((leg) => ({ accountId: leg.accountId, amount: dollars(leg.cents) })),
+  }
+}
+
+/** Re-open a posted transfer: the leg that lost money is the source, the other the destination. */
+export function transferDraftFromMovement(movement: PostedMovement, today: string): TransferDraft | null {
+  if (movement.kind !== 'transfer' || movement.legs.length !== 2) return null
+  const flows = movement.legs.map((leg) => ({ accountId: leg.account_id, cents: legCents(leg.amount) }))
+  const from = flows.find((leg) => leg.cents !== null && leg.cents < 0n)
+  const to = flows.find((leg) => leg.cents !== null && leg.cents > 0n)
+  if (!from || !to || from.cents !== -to.cents!) return null
+  return {
+    fromAccountId: from.accountId,
+    toAccountId: to.accountId,
+    amount: dollars(to.cents!),
+    occurredOn: movement.occurred_on ?? today,
+    notes: movement.notes ?? '',
+  }
+}
 
 /**
  * Re-open a posted adjustment as the draft that produced it.
@@ -122,15 +193,14 @@ export function adjustmentDraftFromMovement(
 ): BalanceAdjustmentDraft | null {
   if (movement.kind !== 'adjustment' || movement.legs.length !== 1) return null
   const [leg] = movement.legs
-  const raw = leg.amount.trim()
-  const negative = raw.startsWith('-')
-  const magnitude = decimalCents(negative ? raw.slice(1) : raw)
-  if (magnitude === null || magnitude === 0n) return null
+  const cents = legCents(leg.amount)
+  if (cents === null || cents === 0n) return null
+  const negative = cents < 0n
   const down = negative !== isLiability
   return {
     accountId: leg.account_id,
     direction: down ? 'down' : 'up',
-    amount: `${magnitude / 100n}.${String(magnitude % 100n).padStart(2, '0')}`,
+    amount: dollars(negative ? -cents : cents),
     occurredOn: movement.occurred_on ?? today,
     notes: movement.notes ?? '',
   }

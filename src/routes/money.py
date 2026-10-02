@@ -461,8 +461,8 @@ def create_expense(
     pocket, the business now owes them; paid with store credit, the credit goes down and
     cash does not.
 
-    Not editable: a wrong expense is voided and entered again, as a transfer is, so the
-    trail shows both.
+    Never changed in place: the app's Edit voids a wrong expense and posts the corrected
+    one, as it does for a transfer, so the trail shows both.
     """
     if payload.paid_from is None:
         money.ensure_accounts(db)
