@@ -7,9 +7,11 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   buildTransferPayload,
+  expenseEditFromMovement,
   parseAdjustmentCents,
   positiveMoney,
   storeCreditMeaning,
+  transferDraftFromMovement,
   validateBalanceAdjustmentDraft,
   validateExpenseDraft,
   validateTransferDraft,
@@ -169,4 +171,79 @@ test('an undated adjustment re-opens on today rather than blank', () => {
   const draft = adjustmentDraftFromMovement(adjustment('5.00', { occurred_on: null, notes: null }), false, date)
   assert.equal(draft?.occurredOn, date)
   assert.equal(draft?.notes, '')
+})
+
+const expense = (legs: { account_id: string; amount: string }[], overrides: Record<string, unknown> = {}) => ({
+  kind: 'expense',
+  expense_category: 'supplies' as const,
+  legs,
+  occurred_on: date,
+  notes: 'Sleeves',
+  ...overrides,
+})
+
+test('a posted expense re-opens with what was typed, whoever paid', () => {
+  assert.deepEqual(expenseEditFromMovement(expense([{ account_id: 'joseph', amount: '-41.00' }]), date), {
+    category: 'supplies',
+    amount: '41.00',
+    occurredOn: date,
+    notes: 'Sleeves',
+    paidFrom: 'joseph',
+    split: null,
+  })
+  const shared = expenseEditFromMovement(
+    expense([{ account_id: 'joint', amount: '-30.50' }, { account_id: 'joseph', amount: '-10.50' }], { occurred_on: null, notes: null }),
+    date,
+  )
+  assert.equal(shared?.amount, '41.00')
+  assert.equal(shared?.paidFrom, '')
+  assert.deepEqual(shared?.split, [{ accountId: 'joint', amount: '30.50' }, { accountId: 'joseph', amount: '10.50' }])
+  assert.equal(shared?.occurredOn, date)
+  assert.equal(shared?.notes, '')
+})
+
+test('only a real expense can be re-opened as one', () => {
+  assert.equal(expenseEditFromMovement(expense([{ account_id: 'a', amount: '-5.00' }], { kind: 'transfer' }), date), null)
+  assert.equal(expenseEditFromMovement(expense([{ account_id: 'a', amount: '-5.00' }], { expense_category: null }), date), null)
+  assert.equal(expenseEditFromMovement(expense([]), date), null)
+  assert.equal(expenseEditFromMovement(expense([{ account_id: 'a', amount: '5.00' }]), date), null)
+  assert.equal(expenseEditFromMovement(expense([{ account_id: 'a', amount: 'oops' }]), date), null)
+})
+
+const transfer = (legs: { account_id: string; amount: string }[], overrides: Record<string, unknown> = {}) => ({
+  kind: 'transfer',
+  legs,
+  occurred_on: date,
+  notes: 'Paying Jason back',
+  ...overrides,
+})
+
+test('a posted transfer re-opens from the account that lost the money to the one that gained it', () => {
+  const draft = transferDraftFromMovement(
+    transfer([{ account_id: 'jason', amount: '250.00' }, { account_id: 'joint', amount: '-250.00' }]),
+    date,
+  )
+  assert.deepEqual(draft, {
+    fromAccountId: 'joint',
+    toAccountId: 'jason',
+    amount: '250.00',
+    occurredOn: date,
+    notes: 'Paying Jason back',
+  })
+  assert.deepEqual(buildTransferPayload(draft!), {
+    from_account_id: 'joint',
+    to_account_id: 'jason',
+    amount: '250.00',
+    occurred_on: date,
+    notes: 'Paying Jason back',
+  })
+})
+
+test('only a balanced two-leg transfer can be re-opened', () => {
+  const legs = [{ account_id: 'a', amount: '-5.00' }, { account_id: 'b', amount: '5.00' }]
+  assert.equal(transferDraftFromMovement(transfer(legs, { kind: 'expense' }), date), null)
+  assert.equal(transferDraftFromMovement(transfer([legs[0]]), date), null)
+  assert.equal(transferDraftFromMovement(transfer([legs[0], { account_id: 'b', amount: '4.00' }]), date), null)
+  assert.equal(transferDraftFromMovement(transfer([legs[0], { account_id: 'b', amount: '-5.00' }]), date), null)
+  assert.equal(transferDraftFromMovement(transfer(legs, { occurred_on: null, notes: null }), date)?.occurredOn, date)
 })

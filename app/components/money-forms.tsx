@@ -15,6 +15,8 @@ import {
   EDIT_VOID_REASON,
   type BalanceAdjustmentDraft,
   type BalanceAdjustmentPayload,
+  type ExpenseEdit,
+  type ExpensePayload,
   type MoneyAdjustmentDirection,
   type MoneyValidation,
   type TransferDraft,
@@ -80,24 +82,58 @@ function useMoneyMutation<T>(run: (input: T) => Promise<unknown>, onClose: () =>
   })
 }
 
+/**
+ * Editing a posted movement voids it and posts the replacement, so the ledger keeps both
+ * rows - movements are never edited in place, by design.
+ *
+ * The void half can succeed while the repost fails. Remembering it means a retry posts the
+ * correction rather than voiding a second time.
+ */
+function useReplacement(replacingId: string | undefined) {
+  const api = useApi()
+  const [voided, setVoided] = useState(false)
+  async function voidOriginal() {
+    if (!replacingId || voided) return
+    await api.voidMovement(replacingId, EDIT_VOID_REASON)
+    setVoided(true)
+  }
+  return { voided, voidOriginal }
+}
+
+function ReplacementNote({ stranded }: { stranded: boolean }) {
+  return (
+    <Copy muted>
+      {stranded
+        ? 'The original was voided but the correction did not save. Save again to post it.'
+        : 'Saving voids the original and posts this in its place. Both rows stay on the ledger.'}
+    </Copy>
+  )
+}
+
 export interface TransferDialogProps {
   accounts: Account[]
   from?: string
   onClose: () => void
+  /** The posted transfer this one corrects. */
+  replacing?: { id: string; draft: TransferDraft }
 }
 
-export function TransferDialog({ accounts, from, onClose }: TransferDialogProps) {
+export function TransferDialog({ accounts, from, onClose, replacing }: TransferDialogProps) {
   const api = useApi()
-  const initialFrom = from ?? accounts[0]?.id ?? ''
+  const initialFrom = replacing?.draft.fromAccountId ?? from ?? accounts[0]?.id ?? ''
   const [source, setSource] = useState(initialFrom)
   const [destination, setDestination] = useState(
-    accounts.find((account) => account.id !== initialFrom)?.id ?? '',
+    replacing?.draft.toAccountId ?? accounts.find((account) => account.id !== initialFrom)?.id ?? '',
   )
-  const [amount, setAmount] = useState('')
-  const [occurredOn, setOccurredOn] = useState(todayIso())
-  const [notes, setNotes] = useState('')
+  const [amount, setAmount] = useState(replacing?.draft.amount ?? '')
+  const [occurredOn, setOccurredOn] = useState(replacing?.draft.occurredOn ?? todayIso())
+  const [notes, setNotes] = useState(replacing?.draft.notes ?? '')
   const [validation, setValidation] = useState<MoneyValidation>({})
-  const mutation = useMoneyMutation(api.createTransfer, onClose)
+  const replacement = useReplacement(replacing?.id)
+  const mutation = useMoneyMutation(async (payload: Parameters<typeof api.createTransfer>[0]) => {
+    await replacement.voidOriginal()
+    return api.createTransfer(payload)
+  }, onClose)
 
   const draft = useMemo<TransferDraft>(() => ({
     fromAccountId: source,
@@ -117,14 +153,15 @@ export function TransferDialog({ accounts, from, onClose }: TransferDialogProps)
 
   return (
     <MoneySheet
-      title="Move money"
+      title={replacing ? 'Edit transfer' : 'Move money'}
       onClose={onClose}
       onSubmit={submit}
       busy={mutation.isPending}
-      submitLabel="Move it"
+      submitLabel={replacing ? 'Save correction' : 'Move it'}
       error={mutation.error}
       validation={validation}
     >
+      {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
       <Row>
         <Choice label="Out of" value={source} options={accounts.map(accountOption)} onChange={setSource} />
         <Choice label="Into" value={destination} options={accounts.map(accountOption)} onChange={setDestination} />
@@ -175,14 +212,9 @@ export function BalanceAdjustmentDialog({ account, onClose, replacing }: Balance
   const [occurredOn, setOccurredOn] = useState(replacing?.draft.occurredOn ?? todayIso())
   const [notes, setNotes] = useState(replacing?.draft.notes ?? '')
   const [validation, setValidation] = useState<MoneyValidation>({})
-  // The void half can succeed while the repost fails. Remembering it means a retry posts the
-  // correction rather than voiding a second time.
-  const [voided, setVoided] = useState(false)
+  const replacement = useReplacement(replacing?.id)
   const mutation = useMoneyMutation(async (payload: BalanceAdjustmentPayload) => {
-    if (replacing && !voided) {
-      await api.voidMovement(replacing.id, EDIT_VOID_REASON)
-      setVoided(true)
-    }
+    await replacement.voidOriginal()
     return api.createMoneyAdjustment(payload)
   }, onClose)
   const draft = useMemo<BalanceAdjustmentDraft>(() => ({
@@ -219,13 +251,7 @@ export function BalanceAdjustmentDialog({ account, onClose, replacing }: Balance
       <Card>
         <Copy>{account.name}</Copy>
         <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
-        {replacing ? (
-          <Copy muted>
-            {voided && mutation.error
-              ? 'The original was voided but the correction did not save. Save again to post it.'
-              : 'Saving voids the original and posts this in its place. Both rows stay on the ledger.'}
-          </Copy>
-        ) : null}
+        {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
       </Card>
       <Choice
         label="Direction"
@@ -276,7 +302,13 @@ export function VoidMovementDialog({ id, onClose }: VoidMovementDialogProps) {
   )
 }
 
-export function ExpenseDialog({ onClose }: { onClose: () => void }) {
+export interface ExpenseDialogProps {
+  onClose: () => void
+  /** The posted expense this one corrects. */
+  replacing?: { id: string; edit: ExpenseEdit }
+}
+
+export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
   const api = useApi()
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const accounts = useMemo(
@@ -284,14 +316,20 @@ export function ExpenseDialog({ onClose }: { onClose: () => void }) {
     [accountsQuery.data],
   )
   const joint = accounts.find((account) => account.kind === 'joint')
-  const [category, setCategory] = useState<ExpenseCategory>('supplies')
-  const [amount, setAmount] = useState('')
-  const [chosenAccount, setPaidFrom] = useState<string | null>(null)
-  const [split, setSplit] = useState<AllocationDraft[] | null>(null)
-  const [occurredOn, setOccurredOn] = useState(todayIso())
-  const [notes, setNotes] = useState('')
+  const [category, setCategory] = useState<ExpenseCategory>(replacing?.edit.category ?? 'supplies')
+  const [amount, setAmount] = useState(replacing?.edit.amount ?? '')
+  const [chosenAccount, setPaidFrom] = useState<string | null>(replacing?.edit.paidFrom || null)
+  const [split, setSplit] = useState<AllocationDraft[] | null>(
+    replacing?.edit.split?.map((leg) => ({ kind: 'account', accountId: leg.accountId, store: '', amount: leg.amount })) ?? null,
+  )
+  const [occurredOn, setOccurredOn] = useState(replacing?.edit.occurredOn ?? todayIso())
+  const [notes, setNotes] = useState(replacing?.edit.notes ?? '')
   const [validation, setValidation] = useState<MoneyValidation>({})
-  const mutation = useMoneyMutation(api.createExpense, onClose)
+  const replacement = useReplacement(replacing?.id)
+  const mutation = useMoneyMutation(async (payload: ExpensePayload) => {
+    await replacement.voidOriginal()
+    return api.createExpense(payload)
+  }, onClose)
   // The shared pot pays for shared costs unless someone says otherwise.
   const paidFrom = chosenAccount ?? joint?.id ?? ''
 
@@ -308,14 +346,15 @@ export function ExpenseDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <MoneySheet
-      title="Add expense"
+      title={replacing ? 'Edit expense' : 'Add expense'}
       onClose={onClose}
       onSubmit={submit}
       busy={mutation.isPending}
-      submitLabel="Save expense"
+      submitLabel={replacing ? 'Save correction' : 'Save expense'}
       error={mutation.error ?? accountsQuery.error}
       validation={validation}
     >
+      {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
       <View accessibilityLabel="Category" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {EXPENSE_CATEGORIES.map((value) => (

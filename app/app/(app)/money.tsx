@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Text, View } from 'react-native'
 
-import { BalanceAdjustmentDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
+import { BalanceAdjustmentDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
@@ -10,8 +10,12 @@ import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, 
 import { money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
+  expenseEditFromMovement,
   storeCreditMeaning,
+  transferDraftFromMovement,
   type BalanceAdjustmentDraft,
+  type ExpenseEdit,
+  type TransferDraft,
 } from '../../lib/money-drafts'
 
 const PAGE_SIZE = 50
@@ -147,18 +151,27 @@ function MovementCard({
   )
 }
 
-interface EditTarget {
-  id: string
-  account: Account
-  draft: BalanceAdjustmentDraft
-}
+type EditTarget =
+  | { kind: 'adjustment'; id: string; account: Account; draft: BalanceAdjustmentDraft }
+  | { kind: 'expense'; id: string; edit: ExpenseEdit }
+  | { kind: 'transfer'; id: string; draft: TransferDraft }
 
-/** An adjustment can be re-opened only when its one account is still on the books. */
+/** A movement can be re-opened only when every account it touched is still on the books. */
 function editTarget(movement: Movement, accounts: Account[]): EditTarget | null {
+  if (!movement.legs.every((leg) => accounts.some((item) => item.id === leg.account_id))) return null
+  const today = todayIso()
+  if (movement.kind === 'expense') {
+    const edit = expenseEditFromMovement(movement, today)
+    return edit ? { kind: 'expense', id: movement.id, edit } : null
+  }
+  if (movement.kind === 'transfer') {
+    const draft = transferDraftFromMovement(movement, today)
+    return draft ? { kind: 'transfer', id: movement.id, draft } : null
+  }
   const account = accounts.find((item) => item.id === movement.legs[0]?.account_id)
   if (!account) return null
-  const draft = adjustmentDraftFromMovement(movement, account.balance_means === 'owed', todayIso())
-  return draft ? { id: movement.id, account, draft } : null
+  const draft = adjustmentDraftFromMovement(movement, account.balance_means === 'owed', today)
+  return draft ? { kind: 'adjustment', id: movement.id, account, draft } : null
 }
 
 export interface MoneyProps {
@@ -316,10 +329,21 @@ export function Money(_props: MoneyProps = {}) {
 
       {transferFrom ? <TransferDialog accounts={items} from={transferFrom} onClose={() => setTransferFrom(null)} /> : null}
       {adjusting ? <BalanceAdjustmentDialog account={adjusting} onClose={() => setAdjusting(null)} /> : null}
-      {editing ? (
+      {editing?.kind === 'adjustment' ? (
         <BalanceAdjustmentDialog
           key={editing.id}
           account={editing.account}
+          replacing={{ id: editing.id, draft: editing.draft }}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {editing?.kind === 'expense' ? (
+        <ExpenseDialog key={editing.id} replacing={{ id: editing.id, edit: editing.edit }} onClose={() => setEditing(null)} />
+      ) : null}
+      {editing?.kind === 'transfer' ? (
+        <TransferDialog
+          key={editing.id}
+          accounts={items}
           replacing={{ id: editing.id, draft: editing.draft }}
           onClose={() => setEditing(null)}
         />
