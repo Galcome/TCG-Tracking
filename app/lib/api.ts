@@ -631,6 +631,36 @@ export function boxSize(gameSlug: string, language?: string | null): number | un
     ?.packs
 }
 
+/**
+ * How many packs (or, for an ETB case, how many ETBs) the other sealed products hold.
+ *
+ * Keyed by type *and* game because the same name means different things: a Pokémon
+ * Booster Bundle is six packs, a Magic Bundle nine. A retail Elite Trainer Box and the
+ * Pokémon Center one are separate types for the same reason - nine packs against eleven.
+ *
+ * These are the usual modern counts, not a guarantee; older and special sets differ, which
+ * is why the number is only ever a prefilled suggestion. Tins, blisters, premium
+ * collections and gift sets vary too much per product to suggest anything.
+ */
+export const CONTENTS_SIZES: { type: string; game: string; count: number }[] = [
+  { type: 'elite-trainer-box', game: 'pokemon', count: 9 },
+  { type: 'pokemon-center-elite-trainer-box', game: 'pokemon', count: 11 },
+  { type: 'etb-case', game: 'pokemon', count: 10 },
+  { type: 'booster-bundle', game: 'pokemon', count: 6 },
+  { type: 'booster-bundle', game: 'magic-the-gathering', count: 9 },
+  { type: 'collector-booster-box', game: 'magic-the-gathering', count: 12 },
+  { type: 'illumineers-trove', game: 'lorcana', count: 8 },
+  { type: 'prerelease-kit', game: 'pokemon', count: 4 },
+  { type: 'prerelease-kit', game: 'magic-the-gathering', count: 6 },
+]
+
+/** What opening one of a product usually yields, or undefined when nobody can say. */
+export function contentsSize(typeSlug: string, gameSlug: string, language?: string | null): number | undefined {
+  if (typeSlug === 'sealed-case') return caseSize(gameSlug, language)
+  if (typeSlug === 'booster-box') return boxSize(gameSlug, language)
+  return CONTENTS_SIZES.find((row) => row.type === typeSlug && row.game === gameSlug)?.count
+}
+
 export interface TransformationOutput {
   product_id: string
   product_name: string

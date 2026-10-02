@@ -1,6 +1,6 @@
 import { BUCKETS, type Bucket, type ProductDetail } from './api'
 import { isIsoDate } from './product-drafts'
-import { canCrack } from './product-types'
+import { canCrack, opensInto } from './product-types'
 
 export interface CrackSplit {
   inventory: string
@@ -84,6 +84,10 @@ export function crackWords(productTypeSlug: string | undefined): {
 } | null {
   if (productTypeSlug === 'sealed-case') return { source: 'case', sources: 'cases', child: 'box', children: 'boxes' }
   if (productTypeSlug === 'booster-box') return { source: 'box', sources: 'boxes', child: 'pack', children: 'packs' }
+  if (productTypeSlug === 'etb-case') return { source: 'case', sources: 'cases', child: 'ETB', children: 'ETBs' }
+  if (opensInto(productTypeSlug) === 'booster-pack') {
+    return { source: 'product', sources: 'products', child: 'pack', children: 'packs' }
+  }
   if (canCrack(productTypeSlug)) return { source: 'container', sources: 'containers', child: 'item', children: 'items' }
   return null
 }

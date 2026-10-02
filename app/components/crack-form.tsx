@@ -6,8 +6,7 @@ import {
   BUCKET_LABELS,
   BUCKETS,
   LANGUAGES,
-  caseSize,
-  boxSize,
+  contentsSize,
   type Bucket,
   type Product,
   type ProductDetail,
@@ -157,11 +156,7 @@ export function CrackCaseDialog({ product: recorded, onClose, editing }: CrackCa
     ? types.data?.find((type) => type.id === childTypeId)
     : bySlug(types.data, childSlug)
   const effectiveTypeId = childTypeId || producedType?.id || ''
-  const suggested = product.product_type.slug === 'sealed-case'
-    ? caseSize(gameSlug ?? product.game.slug, language)
-    : product.product_type.slug === 'booster-box'
-      ? boxSize(gameSlug ?? product.game.slug, language)
-      : undefined
+  const suggested = contentsSize(product.product_type.slug, gameSlug ?? product.game.slug, language)
 
   // The size is a visible, editable suggestion. Only fill it while it is still blank so
   // changing game/language never overwrites a number somebody already corrected.

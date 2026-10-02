@@ -13,9 +13,25 @@ export function canRip(slug: string | undefined): boolean {
   return Boolean(slug && !CANNOT_BE_RIPPED.includes(slug))
 }
 
+/** Sealed products whose contents worth tracking are booster packs. */
+export const HOLDS_PACKS = [
+  'booster-box',
+  'collector-booster-box',
+  'elite-trainer-box',
+  'pokemon-center-elite-trainer-box',
+  'booster-bundle',
+  'illumineers-trove',
+  'prerelease-kit',
+  'premium-collection',
+  'tin',
+  'blister',
+  'gift-set',
+]
+
 export function opensInto(slug: string | undefined): string | undefined {
   if (slug === 'sealed-case') return 'booster-box'
-  if (slug === 'booster-box') return 'booster-pack'
+  if (slug === 'etb-case') return 'elite-trainer-box'
+  if (slug && HOLDS_PACKS.includes(slug)) return 'booster-pack'
   return undefined
 }
 

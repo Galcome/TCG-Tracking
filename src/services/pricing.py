@@ -80,6 +80,18 @@ ELIGIBLE_PRODUCT_TYPE_SLUGS = frozenset(
         "box-set",
         "collection",
         "deck",
+        "elite-trainer-box",
+        "pokemon-center-elite-trainer-box",
+        "etb-case",
+        "booster-bundle",
+        "collector-booster-box",
+        "premium-collection",
+        "illumineers-trove",
+        "tin",
+        "blister",
+        "gift-set",
+        "prerelease-kit",
+        "secret-lair",
     }
 )
 

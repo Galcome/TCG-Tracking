@@ -633,7 +633,7 @@ def test_pricing_eligibility_is_strict_about_slabs_and_product_types():
         "Market pricing is manual for graded products."
     )
 
-    for sealed in ("booster-pack", "box-set", "collection", "deck"):
+    for sealed in ("booster-pack", "box-set", "collection", "deck", "elite-trainer-box", "tin"):
         product = SimpleNamespace(product_type=SimpleNamespace(slug=sealed))
         assert pricing.is_pricing_eligible(mapping(product=product).product), sealed
 
