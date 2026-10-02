@@ -9,12 +9,14 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
+from src.models.card_set import CardSet
 from src.models.member import Member
+from src.models.product import Product
 from src.models.taxonomy import Game
 from src.services import sets
 
@@ -73,4 +75,58 @@ def list_sets(
             for record, uses in found
         ],
         did_you_mean=sets.did_you_mean(db, game_id=game_id, query=q),
+    )
+
+
+class SetRename(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name cannot be blank")
+        return stripped
+
+
+@router.patch("/{set_id}", response_model=SetRead)
+def rename_set(
+    set_id: uuid.UUID,
+    payload: SetRename,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> SetRead:
+    """Rename a set everywhere it is used.
+
+    The set is a record, so this is one row - plus the copy of the name each product
+    carries for search, which has to follow or the old spelling keeps finding them.
+    """
+    record = db.get(CardSet, set_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Set not found")
+
+    clash = db.scalar(
+        select(CardSet.name).where(
+            CardSet.id != record.id,
+            CardSet.game_id == record.game_id,
+            func.lower(CardSet.name) == payload.name.lower(),
+        )
+    )
+    if clash is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"Set '{clash}' already exists"
+        )
+
+    record.name = payload.name
+    db.execute(update(Product).where(Product.set_id == record.id).values(set_name=payload.name))
+    db.flush()
+
+    uses = db.scalar(select(func.count()).select_from(Product).where(Product.set_id == record.id))
+    return SetRead(
+        id=record.id,
+        game_id=record.game_id,
+        name=record.name,
+        released_on=record.released_on,
+        uses=int(uses or 0),
     )

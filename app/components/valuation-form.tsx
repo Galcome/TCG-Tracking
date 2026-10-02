@@ -10,6 +10,7 @@ import {
   type ValuationPayload,
   type ValuationValidation,
 } from '../lib/valuation-drafts'
+import type { Valuation } from '../lib/api'
 import { todayIso } from '../lib/format'
 import { Button, Card, Copy, ErrorNotice, Field, Sheet } from './ui'
 import { DateField } from './date-field'
@@ -25,6 +26,8 @@ export interface RecordValuationDialogProps {
   description?: string
   initialCapturedOn?: string
   onSkip?: () => void
+  /** A recorded valuation being corrected, rather than a new one. */
+  editing?: Valuation
 }
 
 export function RecordValuationDialog({
@@ -34,22 +37,30 @@ export function RecordValuationDialog({
   description,
   initialCapturedOn,
   onSkip,
+  editing,
 }: RecordValuationDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
-  const [value, setValue] = useState('')
-  const [capturedOn, setCapturedOn] = useState(initialCapturedOn ?? todayIso())
-  const [notes, setNotes] = useState('')
+  const [value, setValue] = useState(editing?.value ?? '')
+  const [capturedOn, setCapturedOn] = useState(editing?.captured_on ?? initialCapturedOn ?? todayIso())
+  const [notes, setNotes] = useState(editing?.notes ?? '')
   const [validation, setValidation] = useState<ValuationValidation>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const submitting = useRef(false)
 
   const record = useMutation({
-    mutationFn: (payload: ValuationPayload) => api.recordValuation(payload),
+    mutationFn: (payload: ValuationPayload): Promise<unknown> =>
+      editing
+        ? api.updateValuation(editing.id, {
+            value: payload.value,
+            captured_on: payload.captured_on,
+            notes: payload.notes,
+          })
+        : api.recordValuation(payload),
     onSuccess: () => {
-      // A valuation changes only the Vault projection. Do not wait for unrelated product,
-      // grading and transformation reads before closing a form whose write already finished.
-      void queryClient.invalidateQueries({ queryKey: ['vaultHoldings'] })
+      // A valuation changes what things are thought to be worth, never the ledger. Do not
+      // wait for the refetches before closing a form whose write already finished.
+      void queryClient.invalidateQueries()
       onClose()
     },
     onSettled: () => {
@@ -81,7 +92,7 @@ export function RecordValuationDialog({
   const validationMessage = firstValuationValidationError(validation)
 
   return (
-    <Sheet title={title ?? `Record valuation — ${product.name}`} open onClose={onClose} dismissDisabled={busy}>
+    <Sheet title={title ?? `${editing ? 'Edit' : 'Record'} valuation — ${product.name}`} open onClose={onClose} dismissDisabled={busy}>
       <Card>
         <Copy>{product.name}</Copy>
         <Copy muted>

@@ -27,7 +27,7 @@ from src.models.transformation import (
 )
 from src.schemas.ledger import VoidRequest
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
-from src.services import ledger, transformations
+from src.services import inventory, ledger, transformations
 from src.services.costing import Event, allocate
 
 router = APIRouter()
@@ -35,6 +35,10 @@ router = APIRouter()
 MAX_OUTPUT_UNITS = 10_000
 
 BUCKET_PATTERN = f"^({chr(124).join(BUCKETS)})$"
+
+#: What marks a valuation as the estimate typed during a rip, so a corrected rip can find
+#: its own estimates again instead of leaving the wrong ones behind.
+RIP_VALUE_NOTE = "valued when ripped"
 
 
 class OutputRequest(BaseModel):
@@ -87,6 +91,8 @@ class OutputRead(BaseModel):
     bucket: str
     #: This row's share of what the source cost. null when the source's cost is unknown.
     cost: MoneyOutOptional = Field(validation_alias="cost_cents")
+    #: What a rip's hit was thought to be worth each on the day. null for anything else.
+    value: MoneyOutOptional = None
 
 
 class TransformationRead(BaseModel):
@@ -112,6 +118,30 @@ class TransformationRead(BaseModel):
     status: str
 
 
+def _rip_snapshots(db: Session, record: Transformation) -> list[PriceSnapshot]:
+    """The estimates this rip wrote, oldest first."""
+    produced = select(TransformationOutput.product_id).where(
+        TransformationOutput.transformation_id == record.id
+    )
+    return list(
+        db.scalars(
+            select(PriceSnapshot)
+            .where(
+                PriceSnapshot.product_id.in_(produced),
+                PriceSnapshot.captured_on == record.occurred_on,
+                PriceSnapshot.notes == RIP_VALUE_NOTE,
+            )
+            .order_by(PriceSnapshot.created_at)
+        )
+    )
+
+
+def _rip_values(db: Session, record: Transformation) -> dict[uuid.UUID, int]:
+    return {
+        snapshot.product_id: snapshot.value_cents for snapshot in _rip_snapshots(db, record)
+    }
+
+
 def _read(db: Session, record: Transformation) -> TransformationRead:
     rows = db.execute(
         select(TransformationOutput, Product.name)
@@ -120,6 +150,7 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
         .order_by(TransformationOutput.bucket, Product.name)
     ).all()
     source_name = db.scalar(select(Product.name).where(Product.id == record.source_product_id))
+    values = _rip_values(db, record) if record.kind == TRANSFORM_RIP else {}
 
     return TransformationRead(
         id=record.id,
@@ -139,6 +170,7 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
                 quantity=output.quantity,
                 bucket=output.bucket,
                 cost=output.cost_cents,
+                value=values.get(output.product_id),
             )
             for output, name in rows
         ],
@@ -147,20 +179,8 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
     )
 
 
-@router.post("/crack", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
-def crack_case(
-    payload: CrackRequest,
-    member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session, scope="function"),
-) -> TransformationRead:
-    """Open sealed cases into the boxes inside them.
-
-    Refused when the bucket does not hold enough, for the same reason a move is: opening a
-    case you do not have describes nothing that happened, so the honest fix is the data.
-
-    Cracking is always a decision. A case can equally be sold whole, so nothing here
-    happens automatically.
-    """
+def _crack(db: Session, payload: CrackRequest, member: Member) -> Transformation:
+    """Validate and write one crack. Shared by recording a crack and correcting one."""
     if db.get(Product, payload.product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -192,7 +212,7 @@ def crack_case(
                 detail="A case cannot come out of itself",
             )
 
-    record = transformations.transform(
+    return transformations.transform(
         db,
         kind=TRANSFORM_CRACK,
         source_product_id=payload.product_id,
@@ -208,7 +228,23 @@ def crack_case(
         member_id=member.id,
         notes=payload.notes,
     )
-    return _read(db, record)
+
+
+@router.post("/crack", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
+def crack_case(
+    payload: CrackRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> TransformationRead:
+    """Open sealed cases into the boxes inside them.
+
+    Refused when the bucket does not hold enough, for the same reason a move is: opening a
+    case you do not have describes nothing that happened, so the honest fix is the data.
+
+    Cracking is always a decision. A case can equally be sold whole, so nothing here
+    happens automatically.
+    """
+    return _read(db, _crack(db, payload, member))
 
 
 class HitRequest(BaseModel):
@@ -267,28 +303,8 @@ def _hit_costs(payload: RipRequest) -> list[transformations.RipCostSpec]:
     ]
 
 
-@router.post("/rip", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
-def rip_open(
-    payload: RipRequest,
-    member: Member = Depends(get_current_member),
-    db: Session = Depends(db_session, scope="function"),
-) -> TransformationRead:
-    """Open boxes or packs, and record the hits worth tracking.
-
-    Unlike cracking a case, this is a lottery rather than a division. Thirty-six packs make
-    roughly 360 cards and three of them matter, so the box's cost is shared **in proportion
-    to what the hits are thought to be worth** - three hits at $500, $50 and $10 out of a
-    $150 box come to $134, $13 and $3. An even split would price a $10 card the same as a
-    $500 one and make per-card ROI meaningless.
-
-    Whatever the hits do not take is written off as bulk, immediately. The group has said
-    outright it would never rip something in order to sell the bulk, so the leftovers are
-    not an asset - and a bad rip should look bad straight away rather than at some tidier
-    moment later.
-
-    A rip with no hits at all is allowed, and is the honest record of a bad one: the box is
-    gone and its whole cost is a write-off.
-    """
+def _rip(db: Session, payload: RipRequest, member: Member) -> Transformation:
+    """Validate and write one rip. Shared by recording a rip and correcting one."""
     if db.get(Product, payload.product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -347,11 +363,143 @@ def rip_open(
                 value_cents=hit.value,
                 captured_on=payload.occurred_on,
                 created_by_member_id=member.id,
-                notes="valued when ripped",
+                notes=RIP_VALUE_NOTE,
             )
         )
     db.flush()
+    return record
 
+
+@router.post("/rip", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
+def rip_open(
+    payload: RipRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> TransformationRead:
+    """Open boxes or packs, and record the hits worth tracking.
+
+    Unlike cracking a case, this is a lottery rather than a division. Thirty-six packs make
+    roughly 360 cards and three of them matter, so the box's cost is shared **in proportion
+    to what the hits are thought to be worth** - three hits at $500, $50 and $10 out of a
+    $150 box come to $134, $13 and $3. An even split would price a $10 card the same as a
+    $500 one and make per-card ROI meaningless.
+
+    Whatever the hits do not take is written off as bulk, immediately. The group has said
+    outright it would never rip something in order to sell the bulk, so the leftovers are
+    not an asset - and a bad rip should look bad straight away rather than at some tidier
+    moment later.
+
+    A rip with no hits at all is allowed, and is the honest record of a bad one: the box is
+    gone and its whole cost is a write-off.
+    """
+    return _read(db, _rip(db, payload, member))
+
+
+_KIND_LABELS = {TRANSFORM_CRACK: "case crack", TRANSFORM_RIP: "rip"}
+
+
+def _held(db: Session, product_ids: set[uuid.UUID]) -> dict[tuple[uuid.UUID, str], int]:
+    """What each bucket of each product holds right now."""
+    stats = inventory.product_stats(db, list(product_ids))
+    return {
+        (product_id, bucket): quantity
+        for product_id, entry in stats.items()
+        for bucket, quantity in entry.by_bucket.items()
+    }
+
+
+def _retire(
+    db: Session, transformation_id: uuid.UUID, kind: str, member: Member
+) -> tuple[set[uuid.UUID], dict[tuple[uuid.UUID, str], int]]:
+    """Undo the record being corrected, and report what its outputs held beforehand.
+
+    A correction is the old record undone and the right one written, in one transaction, so
+    the cost shares are always FIFO's answer for what is actually recorded rather than a
+    patched-up version of the wrong one. The old row stays, voided, as the history.
+    """
+    record = db.get(Transformation, transformation_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Transformation not found"
+        )
+    if record.kind != kind:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This is not a {_KIND_LABELS[kind]}",
+        )
+    if record.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This has already been voided"
+        )
+
+    produced = set(
+        db.scalars(
+            select(TransformationOutput.product_id).where(
+                TransformationOutput.transformation_id == record.id
+            )
+        )
+    )
+    ledger.lock_products(db, [record.source_product_id, *produced])
+    before = _held(db, produced)
+
+    # The estimates belong to the rip that typed them. Left behind, a corrected value would
+    # sit next to the wrong one on the same day and the chart could show either.
+    if kind == TRANSFORM_RIP:
+        for snapshot in _rip_snapshots(db, record):
+            db.delete(snapshot)
+
+    transformations.void(db, record, member_id=member.id, reason="Corrected")
+    return produced, before
+
+
+def _refuse_overdrawn(
+    db: Session, produced: set[uuid.UUID], before: dict[tuple[uuid.UUID, str], int]
+) -> None:
+    """Refuse a correction that takes away something already sold, moved or opened.
+
+    Only what the correction itself made worse is refused, so stock that was already
+    negative for some unrelated reason does not make every later correction impossible.
+    """
+    for (product_id, bucket), held in _held(db, produced).items():
+        if held < 0 and held < before.get((product_id, bucket), 0):
+            name = db.scalar(select(Product.name).where(Product.id == product_id))
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"{name} would be left holding {held} in {bucket}. Some of what came "
+                    "out has already been sold, moved or opened."
+                ),
+            )
+
+
+@router.put("/{transformation_id}/crack", response_model=TransformationRead)
+def correct_crack(
+    transformation_id: uuid.UUID,
+    payload: CrackRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> TransformationRead:
+    """Correct a case crack: how many, where from, what came out and where it went."""
+    # One savepoint, so a refusal part-way leaves the original exactly as it was.
+    with db.begin_nested():
+        produced, before = _retire(db, transformation_id, TRANSFORM_CRACK, member)
+        record = _crack(db, payload, member)
+        _refuse_overdrawn(db, produced, before)
+    return _read(db, record)
+
+
+@router.put("/{transformation_id}/rip", response_model=TransformationRead)
+def correct_rip(
+    transformation_id: uuid.UUID,
+    payload: RipRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> TransformationRead:
+    """Correct a rip: how many, where from, the hits and what they were thought worth."""
+    with db.begin_nested():
+        produced, before = _retire(db, transformation_id, TRANSFORM_RIP, member)
+        record = _rip(db, payload, member)
+        _refuse_overdrawn(db, produced, before)
     return _read(db, record)
 
 

@@ -8,7 +8,7 @@ import { money } from '../lib/format';
 import { gradingAvailable } from '../lib/grading-drafts';
 import { canCrack, canRip } from '../lib/product-types';
 import { CrackCaseDialog } from './crack-form';
-import { SendToGradingDialog, ReturnFromGradingDialog, VoidGradingDialog } from './grading-forms';
+import { EditGradingDialog, SendToGradingDialog, ReturnFromGradingDialog, VoidGradingDialog } from './grading-forms';
 import { RipDialog } from './rip-form';
 import { Button, Card, Copy, ErrorNotice, Field, Heading, Loading, Row, Sheet } from './ui';
 
@@ -31,6 +31,24 @@ function VoidTransformationDialog({ transformation, onClose }: { transformation:
   </Sheet>;
 }
 
+/**
+ * Correct a rip or a crack. The form needs the product that was opened, which is not the
+ * page's product when the record is being looked at from one of the things that came out.
+ */
+function CorrectTransformationDialog({ transformation, product, onClose }: { transformation: Transformation; product: ProductDetail; onClose: () => void }) {
+  const api = useApi();
+  const own = transformation.source_product_id === product.id;
+  const source = useQuery({ queryKey: ['product', transformation.source_product_id], queryFn: () => api.product(transformation.source_product_id), enabled: !own });
+  const opened = own ? product : source.data;
+  if (!opened) return <Sheet title={'Edit ' + transformation.kind} open onClose={onClose}>
+    <ErrorNotice error={source.error} retry={() => { void source.refetch(); }} />
+    {source.isPending && <Loading />}
+  </Sheet>;
+  return transformation.kind === 'rip'
+    ? <RipDialog key={transformation.id} product={opened} editing={transformation} onClose={onClose} />
+    : <CrackCaseDialog key={transformation.id} product={opened} editing={transformation} onClose={onClose} />;
+}
+
 /** All costs and inherited dates shown here come from the ledger, not client estimates. */
 export function ProductOperations({ product }: { product: ProductDetail }) {
   const api = useApi();
@@ -38,6 +56,8 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
   const [returning, setReturning] = useState<GradingSubmission | null>(null);
   const [voiding, setVoiding] = useState<GradingSubmission | null>(null);
   const [undoing, setUndoing] = useState<Transformation | null>(null);
+  const [editingSubmission, setEditingSubmission] = useState<GradingSubmission | null>(null);
+  const [correcting, setCorrecting] = useState<Transformation | null>(null);
   const grading = useQuery({ queryKey: ['grading', product.id], queryFn: () => api.gradingSubmissions({ product_id: product.id }) });
   const transformations = useQuery({ queryKey: ['transformations', product.id], queryFn: () => api.transformations({ product_id: product.id }) });
   const inStock = product.stats.quantity_on_hand > 0;
@@ -54,6 +74,8 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
     {returning && <ReturnFromGradingDialog product={product} submission={returning} onClose={() => setReturning(null)} />}
     {voiding && <VoidGradingDialog submission={voiding} onClose={() => setVoiding(null)} />}
     {undoing && <VoidTransformationDialog transformation={undoing} onClose={() => setUndoing(null)} />}
+    {editingSubmission && <EditGradingDialog product={product} submission={editingSubmission} onClose={() => setEditingSubmission(null)} />}
+    {correcting && <CorrectTransformationDialog transformation={correcting} product={product} onClose={() => setCorrecting(null)} />}
     <Heading>Grading history</Heading>
     <ErrorNotice error={grading.error} retry={() => { void grading.refetch(); }} />
     {grading.isPending && <Loading />}
@@ -65,8 +87,10 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
       <Copy muted>{submission.notes}</Copy>
       {submission.status === 'out' && <Row>
         <Button label="Record grading return" onPress={() => setReturning(submission)} />
+        <Button label="Edit" onPress={() => setEditingSubmission(submission)} />
         <Button label="Void grading submission" danger onPress={() => setVoiding(submission)} />
       </Row>}
+      {submission.status === 'returned' && <Button label="Edit" onPress={() => setEditingSubmission(submission)} />}
     </Card></View>)}
     <Heading>Opened and graded</Heading>
     <ErrorNotice error={transformations.error} retry={() => { void transformations.refetch(); }} />
@@ -82,7 +106,10 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
         <Copy>{output.quantity} in {output.bucket} · Allocated cost {money(output.cost)}</Copy>
       </View>)}
       <Copy muted>{t.notes}</Copy>
-      {t.status === 'active' && <Button label={'Undo ' + t.kind} danger onPress={() => setUndoing(t)} />}
+      {t.status === 'active' && <Row>
+        {t.kind !== 'grade' && <Button label={'Edit ' + t.kind} onPress={() => setCorrecting(t)} />}
+        <Button label={t.kind === 'grade' ? 'Undo return' : 'Undo ' + t.kind} danger onPress={() => setUndoing(t)} />
+      </Row>}
     </Card></View>)}
   </>;
 }

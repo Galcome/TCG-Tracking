@@ -5,17 +5,21 @@ import { useApi } from '../context/AppContext'
 import {
   buildGradedProductPayload,
   buildReturnFromGradingPayload,
+  buildSubmissionChanges,
   buildSendToGradingPayload,
   buildVoidGradingPayload,
   firstGradingValidationError,
   gradingAvailable,
+  validateEditSubmissionDraft,
   validateGradingReturnContext,
   validateReturnFromGradingDraft,
   validateSendToGradingDraft,
   validateVoidGradingDraft,
+  type EditSubmissionDraft,
   type GradingValidation,
   type ReturnFromGradingDraft,
   type SendToGradingDraft,
+  type SubmissionChanges,
   type VoidGradingDraft,
 } from '../lib/grading-drafts'
 import { todayIso } from '../lib/format'
@@ -643,6 +647,93 @@ export function VoidGradingDialog({ submission, onClose }: VoidGradingDialogProp
       </Card>
       {!canVoid ? <ErrorNotice error={new Error('Only an outstanding submission can be cancelled.')} /> : null}
       <Field label="Reason" value={reason} onChangeText={setReason} autoFocus placeholder="Entered twice" multiline />
+    </GradingSheet>
+  )
+}
+
+/**
+ * Correct a submission. While it is away everything about it can change; once it is back
+ * the count, bucket, date and fees are part of the graded card's cost, so only the labels
+ * can - undo the return first to change the rest.
+ */
+export function EditGradingDialog({ submission, product, onClose }: ReturnFromGradingDialogProps) {
+  const api = useApi()
+  const queryClient = useQueryClient()
+  const out = submission.status === 'out'
+  const submissions = useQuery({ queryKey: ['grading', product.id], queryFn: () => api.gradingSubmissions({ product_id: product.id }) })
+  // What could be sent if this submission did not exist: what is free, plus its own cards.
+  const free = gradingAvailable(product.id, product.stats.by_bucket, submissions.data ?? [])
+  const counts = { ...free, [submission.bucket]: (free[submission.bucket] ?? 0) + submission.quantity }
+  const [bucket, setBucket] = useState<Bucket>(submission.bucket)
+  const [quantity, setQuantity] = useState(String(submission.quantity))
+  const [gradingCompany, setGradingCompany] = useState(text(submission.grading_company))
+  const [sentOn, setSentOn] = useState(submission.sent_on)
+  const [fees, setFees] = useState(submission.fees)
+  const [grade, setGrade] = useState(text(submission.grade))
+  const [notes, setNotes] = useState(text(submission.notes))
+  const [validation, setValidation] = useState<GradingValidation>({})
+  const update = useMutation({
+    mutationFn: (changes: SubmissionChanges) => api.updateSubmission(submission.id, changes),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries()
+      onClose()
+    },
+  })
+
+  function submit() {
+    if (update.isPending) return
+    const draft: EditSubmissionDraft = { quantity, bucket, gradingCompany, sentOn, fees, grade, notes }
+    const errors = validateEditSubmissionDraft(draft, submission, counts[bucket] ?? 0)
+    if (out && !submissions.isSuccess) errors.submissionId = 'Wait for grading availability to load before saving.'
+    setValidation(errors)
+    if (firstGradingValidationError(errors)) return
+    const changes = buildSubmissionChanges(draft, submission)
+    if (Object.keys(changes).length === 0) {
+      onClose()
+      return
+    }
+    update.mutate(changes)
+  }
+
+  return (
+    <GradingSheet
+      title={`Edit grading — ${product.name}`}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel="Save changes"
+      busy={update.isPending}
+      error={update.error ?? submissions.error}
+      validation={validation}
+    >
+      {out ? (
+        <>
+          <Row>
+            <Field label="How many" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" autoFocus />
+            <Field
+              label="Grading, postage and insurance"
+              value={fees}
+              onChangeText={setFees}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+            />
+          </Row>
+          <Field label="Grader" value={gradingCompany} onChangeText={setGradingCompany} placeholder="PSA, BGS, or another grader" />
+          <DateField label="Sent on" value={sentOn} onChange={setSentOn} />
+          <BucketChoice value={bucket} counts={counts} onChange={setBucket} />
+        </>
+      ) : (
+        <>
+          <Copy muted>
+            This one is back, so how many went, where from, when and the fees are part of the
+            graded card&apos;s cost. Undo the return to change those.
+          </Copy>
+          <Row>
+            <Field label="Grade" value={grade} onChangeText={setGrade} autoFocus placeholder="10" />
+            <Field label="Grader" value={gradingCompany} onChangeText={setGradingCompany} placeholder="PSA, BGS, or another grader" />
+          </Row>
+        </>
+      )}
+      <Field label="Note" value={notes} onChangeText={setNotes} multiline />
     </GradingSheet>
   )
 }

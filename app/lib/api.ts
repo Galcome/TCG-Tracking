@@ -638,6 +638,36 @@ export interface TransformationOutput {
   bucket: Bucket
   /** This row's share of what the source cost. null when the source's cost is unknown. */
   cost: string | null
+  /** What a rip's hit was thought to be worth each on the day. null for anything else. */
+  value?: string | null
+}
+
+/** A recorded estimate of what one unit is worth. */
+export interface Valuation {
+  id: string
+  product_id: string
+  value: string
+  captured_on: string
+  source: string
+  notes: string | null
+}
+
+export interface CrackInput {
+  product_id: string
+  quantity: number
+  from_bucket?: Bucket
+  outputs: { product_id: string; quantity: number; bucket?: Bucket }[]
+  occurred_on?: string
+  notes?: string | null
+}
+
+export interface RipInput {
+  product_id: string
+  quantity?: number
+  from_bucket?: Bucket
+  hits: RipHit[]
+  occurred_on?: string
+  notes?: string | null
 }
 
 export interface RipHit {
@@ -1430,5 +1460,76 @@ export function createApi(request: ApiRequest) { return {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
+
+  /** Corrections. Each sends only what changed. */
+  updateMove: (
+    id: string,
+    changes: {
+      quantity?: number
+      from_bucket?: Bucket
+      to_bucket?: Bucket
+      moved_on?: string
+      notes?: string | null
+      audit_reason?: string
+    },
+  ) =>
+    request<unknown>(`/api/v1/moves/${id}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+
+  valuations: (productId: string) =>
+    request<Valuation[]>(`/api/v1/valuations${query({ product_id: productId })}`),
+
+  updateValuation: (
+    id: string,
+    changes: { value?: string; captured_on?: string; notes?: string | null },
+  ) =>
+    request<Valuation>(`/api/v1/valuations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  deleteValuation: (id: string) =>
+    request<void>(`/api/v1/valuations/${id}`, { method: 'DELETE' }),
+
+  updateSubmission: (
+    id: string,
+    changes: {
+      quantity?: number
+      bucket?: Bucket
+      grading_company?: string | null
+      sent_on?: string
+      fees?: string
+      grade?: string | null
+      notes?: string | null
+    },
+  ) =>
+    request<GradingSubmission>(`/api/v1/grading/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  /** Replaces the record: the old one is voided and the corrected one comes back. */
+  correctCrack: (id: string, input: CrackInput) =>
+    request<Transformation>(`/api/v1/transformations/${id}/crack`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+
+  correctRip: (id: string, input: RipInput) =>
+    request<Transformation>(`/api/v1/transformations/${id}/rip`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+
+  renameGame: (id: string, name: string) =>
+    request<Taxonomy>(`/api/v1/games/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+
+  renameProductType: (id: string, name: string) =>
+    request<Taxonomy>(`/api/v1/product-types/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  renameSet: (id: string, name: string) =>
+    request<CardSet>(`/api/v1/sets/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
 } }
 export type Api = ReturnType<typeof createApi>;

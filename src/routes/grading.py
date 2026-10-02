@@ -13,7 +13,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,46 @@ class ReturnRequest(BaseModel):
         return value.strip() or None
 
 
+class SubmissionUpdate(BaseModel):
+    """Corrections to a submission. Only what is sent changes.
+
+    What went and what it cost can change while it is still away. Once it is back those
+    are part of the graded card's cost, so only the labels - grader, grade, notes - can.
+    """
+
+    quantity: int | None = Field(default=None, gt=0, le=1_000)
+    bucket: str | None = Field(default=None, pattern=BUCKET_PATTERN)
+    grading_company: str | None = Field(default=None, max_length=40)
+    sent_on: date | None = None
+    fees: MoneyIn | None = None
+    grade: str | None = Field(default=None, max_length=20)
+    notes: str | None = None
+
+    @field_validator("grading_company", "grade", "notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "SubmissionUpdate":
+        for name in ("quantity", "bucket", "sent_on", "fees"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+#: Request field -> ORM column. The first group is fixed once the card is back.
+_WHILE_OUT = {
+    "quantity": "quantity",
+    "bucket": "bucket",
+    "sent_on": "sent_on",
+    "fees": "fees_cents",
+}
+_LABELS = {"grading_company": "grading_company", "grade": "grade", "notes": "notes"}
+
+
 class SubmissionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -115,6 +155,29 @@ def _read(db: Session, record: GradingSubmission, today: date | None = None) -> 
     )
 
 
+def _sendable(
+    db: Session,
+    product_id: uuid.UUID,
+    bucket: str,
+    *,
+    excluding: uuid.UUID | None = None,
+) -> int:
+    """What the bucket holds that is not already at a grader.
+
+    `excluding` leaves one submission out of the count, so correcting it only needs room
+    for the difference rather than for the whole quantity again.
+    """
+    outstanding = select(func.coalesce(func.sum(GradingSubmission.quantity), 0)).where(
+        GradingSubmission.product_id == product_id,
+        GradingSubmission.bucket == bucket,
+        GradingSubmission.status == GRADING_OUT,
+    )
+    if excluding is not None:
+        outstanding = outstanding.where(GradingSubmission.id != excluding)
+    held = transformations.available_in_bucket(db, product_id, bucket)
+    return max(held - int(db.scalar(outstanding) or 0), 0)
+
+
 @router.post("", response_model=SubmissionRead, status_code=status.HTTP_201_CREATED)
 def submit(
     payload: SubmitRequest,
@@ -130,18 +193,7 @@ def submit(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     ledger.lock_products(db, [payload.product_id])
-    available = transformations.available_in_bucket(db, payload.product_id, payload.bucket)
-    outstanding = int(
-        db.scalar(
-            select(func.coalesce(func.sum(GradingSubmission.quantity), 0)).where(
-                GradingSubmission.product_id == payload.product_id,
-                GradingSubmission.bucket == payload.bucket,
-                GradingSubmission.status == GRADING_OUT,
-            )
-        )
-        or 0
-    )
-    available = max(available - outstanding, 0)
+    available = _sendable(db, payload.product_id, payload.bucket)
     if payload.quantity > available:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -267,6 +319,66 @@ def take_back(
         record.notes = payload.notes
     db.flush()
 
+    return _read(db, record)
+
+
+@router.patch("/{submission_id}", response_model=SubmissionRead)
+def update_submission(
+    submission_id: uuid.UUID,
+    payload: SubmissionUpdate,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> SubmissionRead:
+    """Correct a submission in place."""
+    record = db.get(GradingSubmission, submission_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    ledger.lock_products(db, [record.product_id])
+    db.execute(
+        select(GradingSubmission.id).where(GradingSubmission.id == record.id).with_for_update()
+    )
+    db.refresh(record)
+    if record.status == GRADING_VOIDED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This submission was cancelled and can no longer be changed",
+        )
+
+    changes = payload.model_dump(exclude_unset=True)
+    is_out = record.status == GRADING_OUT
+    if not is_out and any(
+        changes[field] != getattr(record, column)
+        for field, column in _WHILE_OUT.items()
+        if field in changes
+    ):
+        # The return already turned these into the graded card's quantity and cost.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is already back. Undo the return to change the quantity, bucket, "
+                "send date or fees."
+            ),
+        )
+    if is_out and "grade" in changes and changes["grade"] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The grade is recorded when it comes back",
+        )
+
+    if is_out:
+        quantity = changes.get("quantity", record.quantity)
+        bucket = changes.get("bucket", record.bucket)
+        available = _sendable(db, record.product_id, bucket, excluding=record.id)
+        if quantity > available:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{bucket} holds {available}, so {quantity} cannot be sent",
+            )
+
+    for field, column in {**_WHILE_OUT, **_LABELS}.items():
+        if field in changes:
+            setattr(record, column, changes[field])
+    db.flush()
     return _read(db, record)
 
 

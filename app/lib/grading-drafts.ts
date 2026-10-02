@@ -299,3 +299,79 @@ export const validateGradingReturnDraft = validateReturnFromGradingDraft
 export const validateGradingVoidDraft = validateVoidGradingDraft
 export const buildGradingSendPayload = buildSendToGradingPayload
 export const buildGradingReturnPayload = buildReturnFromGradingPayload
+
+/** The edit form's fields. Which of them apply depends on whether the cards are back. */
+export interface EditSubmissionDraft {
+  quantity: string
+  bucket: Bucket
+  gradingCompany: string
+  sentOn: string
+  fees: string
+  grade: string
+  notes: string
+}
+
+export interface SubmissionChanges {
+  quantity?: number
+  bucket?: Bucket
+  grading_company?: string | null
+  sent_on?: string
+  fees?: string
+  grade?: string | null
+  notes?: string | null
+}
+
+/**
+ * Validate a correction. `available` is what the chosen bucket could send if this
+ * submission did not exist - what is free there plus the submission's own cards.
+ */
+export function validateEditSubmissionDraft(
+  draft: EditSubmissionDraft,
+  submission: Pick<GradingSubmission, 'status'>,
+  available?: number,
+): GradingValidation {
+  const errors: GradingValidation = {}
+  if (draft.gradingCompany.trim().length > 40) errors.gradingCompany = 'Use 40 characters or fewer.'
+  if (submission.status !== 'out') {
+    if (draft.grade.trim().length > 20) errors.grade = 'Use 20 characters or fewer.'
+    return errors
+  }
+
+  const quantity = parseIntegerQuantity(draft.quantity, { positive: true })
+  if (quantity === null) {
+    errors.quantity = 'Enter a whole number greater than zero.'
+  } else if (quantity > MAX_GRADING_QUANTITY) {
+    errors.quantity = `Send no more than ${MAX_GRADING_QUANTITY.toLocaleString()} units at a time.`
+  } else if (available !== undefined && quantity > available) {
+    errors.quantity = `Only ${available} units are in this bucket.`
+  }
+  validateDate(draft.sentOn, 'sentOn', errors)
+  if (!isMoneyString(draft.fees, true)) errors.fees = 'Use digits with up to two decimal places.'
+  return errors
+}
+
+/** Only what differs from the record, so an untouched field is never rewritten. */
+export function buildSubmissionChanges(
+  draft: EditSubmissionDraft,
+  submission: GradingSubmission,
+): SubmissionChanges {
+  const changes: SubmissionChanges = {}
+  const company = optionalText(draft.gradingCompany)
+  if (company !== (submission.grading_company ?? null)) changes.grading_company = company
+  const notes = optionalText(draft.notes)
+  if (notes !== (submission.notes ?? null)) changes.notes = notes
+
+  if (submission.status !== 'out') {
+    const grade = optionalText(draft.grade)
+    if (grade !== (submission.grade ?? null)) changes.grade = grade
+    return changes
+  }
+
+  const quantity = parseIntegerQuantity(draft.quantity, { positive: true })
+  if (quantity !== null && quantity !== submission.quantity) changes.quantity = quantity
+  if (draft.bucket !== submission.bucket) changes.bucket = draft.bucket
+  if (draft.sentOn !== submission.sent_on) changes.sent_on = draft.sentOn
+  const fees = draft.fees.trim() || '0'
+  if (Number(fees) !== Number(submission.fees)) changes.fees = fees
+  return changes
+}

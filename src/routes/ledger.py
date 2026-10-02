@@ -28,6 +28,7 @@ from src.schemas.ledger import (
     AdjustmentUpdate,
     MoveCreate,
     MoveRead,
+    MoveUpdate,
     PurchaseCreate,
     PurchaseRead,
     PurchaseUnitCosts,
@@ -958,6 +959,82 @@ def create_move(
         action="create",
         member_id=member.id,
         after=ledger.snapshot(move, ["quantity", "from_bucket", "bucket", "moved_on"]),
+    )
+    db.refresh(move)
+    return move
+
+
+MOVE_FIELDS = {
+    "quantity": "quantity",
+    "from_bucket": "from_bucket",
+    "to_bucket": "bucket",
+    "moved_on": "moved_on",
+    "notes": "notes",
+}
+
+
+def _bucket_counts(db: Session, product_id: uuid.UUID) -> dict[str, int]:
+    stats = inventory.product_stats(db, [product_id]).get(product_id)
+    return dict(stats.by_bucket) if stats else {}
+
+
+@router.patch("/moves/{move_id}", response_model=MoveRead)
+def update_move(
+    move_id: uuid.UUID,
+    payload: MoveUpdate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> StockMove:
+    """Correct a move in place: how many, between which buckets, and when.
+
+    Held to the same rule as making one. The corrected move is refused when it would take
+    more out of a bucket than the bucket holds, because stock that was never there cannot
+    have moved.
+    """
+    move = _require_active(db, StockMove, move_id, "Move")
+    ledger.lock_products(db, [move.product_id])
+    db.refresh(move)
+    if move.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This move has been voided and can no longer be changed",
+        )
+    changes = payload.model_dump(exclude_unset=True)
+    audit_reason = changes.pop("audit_reason", None)
+
+    held_before = _bucket_counts(db, move.product_id)
+    # The stock check can only be made against the corrected move, so the correction is
+    # written inside a savepoint that a refusal takes back with it.
+    with db.begin_nested():
+        before = _apply(move, changes, MOVE_FIELDS)
+        if move.from_bucket == move.bucket:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A move needs two different buckets",
+            )
+        db.flush()
+
+        # Only a bucket this edit pushed further below zero is refused. One that was already
+        # short for another reason (an oversell) is not this move's to fix.
+        for bucket, held in _bucket_counts(db, move.product_id).items():
+            if held < 0 and held < held_before.get(bucket, 0):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"{bucket} would be left holding {held}, so the move cannot change "
+                        "to this"
+                    ),
+                )
+
+    ledger.record_audit(
+        db,
+        entity_type="move",
+        entity_id=move.id,
+        action="update",
+        member_id=member.id,
+        before=before,
+        after=_after(move, before),
+        reason=audit_reason,
     )
     db.refresh(move)
     return move

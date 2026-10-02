@@ -13,6 +13,7 @@ import {
   type Product,
   type ReadCard,
   type RipPreview,
+  type Transformation,
 } from '../lib/api'
 import {
   buildRipPreviewPayload,
@@ -44,6 +45,8 @@ export interface RipDialogProps {
   product: Product
   onClose: () => void
   initialBucket?: Bucket
+  /** A recorded rip being corrected: saving replaces it instead of ripping again. */
+  editing?: Transformation
 }
 
 type IdentityField = 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'
@@ -347,20 +350,45 @@ function bucketLabel(bucket: Bucket, count: number): string {
 /**
  * Photo suggestions and manual entry share human-controlled identity and save decisions.
  */
-export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
+export function RipDialog({ product: recorded, onClose, initialBucket, editing }: RipDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
   const productTypes = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
 
+  // Correcting a rip puts back what it opened first, so that stock counts as on hand here.
+  const product = useMemo<Product>(() => editing
+    ? {
+        ...recorded,
+        stats: {
+          ...recorded.stats,
+          by_bucket: {
+            ...recorded.stats.by_bucket,
+            [editing.source_bucket]: (recorded.stats.by_bucket[editing.source_bucket] ?? 0) + editing.source_quantity,
+          },
+        },
+      }
+    : recorded, [editing, recorded])
   const held = product.stats.by_bucket
   const [fromBucket, setFromBucket] = useState<Bucket>(
-    initialBucket && (held[initialBucket] ?? 0) > 0
-      ? initialBucket
-      : BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
+    editing
+      ? editing.source_bucket
+      : initialBucket && (held[initialBucket] ?? 0) > 0
+        ? initialBucket
+        : BUCKETS.find((bucket) => (held[bucket] ?? 0) > 0) ?? 'inventory',
   )
-  const [sourceQuantity, setSourceQuantity] = useState('1')
-  const [occurredOn, setOccurredOn] = useState(todayIso())
-  const [rows, setRows] = useState<RipHitDraft[]>([emptyHit()])
+  const [sourceQuantity, setSourceQuantity] = useState(editing ? String(editing.source_quantity) : '1')
+  const [occurredOn, setOccurredOn] = useState(editing?.occurred_on ?? todayIso())
+  const [rows, setRows] = useState<RipHitDraft[]>(() => editing?.outputs.length
+    ? editing.outputs.map((output) => ({
+        ...emptyHit(output.bucket),
+        productId: output.product_id,
+        name: output.product_name,
+        selectedProductName: output.product_name,
+        choice: 'reuse' as const,
+        quantity: String(output.quantity),
+        value: output.value ?? '',
+      }))
+    : [emptyHit()])
   const [photoBusy, setPhotoBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [validation, setValidation] = useState<RipValidation>({})
@@ -381,7 +409,8 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
   const previewKey = previewInput ? ripPreviewKey(previewInput) : 'invalid'
   const preview = useQuery<RipPreviewEnvelope>({
     queryKey: ['ripPreview', previewKey],
-    enabled: previewInput !== null,
+    // The estimate cannot see the stock a correction puts back, so it would only mislead.
+    enabled: previewInput !== null && !editing,
     queryFn: async () => {
       if (!previewInput) throw new Error('Rip preview input is incomplete.')
       return { input: previewInput, result: await api.previewRip(previewInput) }
@@ -436,7 +465,7 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
       }
       const payload = buildRipPayload(resolvedDraft, product, { productTypes: productTypes.data })
       if (!payload) throw new Error('Complete all rip fields before saving.')
-      return api.ripOpen(payload)
+      return editing ? api.correctRip(editing.id, payload) : api.ripOpen(payload)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries()
@@ -564,12 +593,12 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
 
   return (
     <RipSheet
-      title={`Rip open — ${product.name}`}
+      title={`${editing ? 'Edit rip' : 'Rip open'} — ${product.name}`}
       onClose={onClose}
       onSubmit={submit}
       submitLabel={filled.length === 0
         ? (emptyConfirmationShown ? 'Confirm bulk write-off' : 'Review bulk write-off')
-        : 'Log the hits'}
+        : editing ? 'Save changes' : 'Log the hits'}
       busy={run.isPending}
       uploadBusy={photoBusy}
       error={run.error ?? lookupError}
@@ -654,14 +683,18 @@ export function RipDialog({ product, onClose, initialBucket }: RipDialogProps) {
           onChoice={(choice, candidate) => updateChoice(row.key, choice, candidate)}
         />
       ))}
-      <RipPreviewCard
-        preview={currentPreview}
-        rows={filled}
-        loading={previewInput !== null && preview.isFetching && !currentPreview}
-        error={previewInput ? preview.error : undefined}
-        validation={previewValidation}
-        onRetry={() => { void preview.refetch() }}
-      />
+      {editing ? (
+        <Copy muted>Saving replaces the recorded rip; costs are allocated again from these hits.</Copy>
+      ) : (
+        <RipPreviewCard
+          preview={currentPreview}
+          rows={filled}
+          loading={previewInput !== null && preview.isFetching && !currentPreview}
+          error={previewInput ? preview.error : undefined}
+          validation={previewValidation}
+          onRetry={() => { void preview.refetch() }}
+        />
+      )}
       <Button label="Add another hit" disabled={run.isPending} onPress={addRow} />
 
       {emptyConfirmationShown ? (
