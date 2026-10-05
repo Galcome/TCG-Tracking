@@ -1,4 +1,5 @@
-import type { ExpenseCategory, FundingLeg } from './api'
+import type { ExpenseCategory, FundingLeg, MovementLeg } from './api'
+import { money, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
 export type MoneyAdjustmentDirection = 'up' | 'down'
@@ -295,4 +296,14 @@ export function buildBalanceAdjustmentPayload(draft: BalanceAdjustmentDraft): Ba
     occurred_on: draft.occurredOn,
     notes: draft.notes.trim() || null,
   }
+}
+
+/** One account a movement touched, in plain words. A leg's amount is signed cash flow, so for
+ * a partner (a liability) money leaving means the business owes them more. */
+export function legLine(leg: Pick<MovementLeg, 'account_name' | 'account_kind' | 'amount'>): string {
+  const out = tone(leg.amount) === 'loss'
+  const amount = money(leg.amount.trim().replace(/^-/, ''))
+  if (leg.account_kind === 'member') return leg.account_name + ' is owed ' + amount + (out ? ' more' : ' less')
+  if (leg.account_kind === 'store_credit') return amount + ' store credit ' + (out ? 'used at ' : 'added at ') + leg.account_name
+  return amount + (out ? ' out of ' : ' into ') + leg.account_name
 }

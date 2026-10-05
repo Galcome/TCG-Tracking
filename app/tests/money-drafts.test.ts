@@ -6,6 +6,7 @@ import {
   adjustmentDraftFromMovement,
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
+  legLine,
   buildTransferPayload,
   expenseEditFromMovement,
   parseAdjustmentCents,
@@ -246,4 +247,13 @@ test('only a balanced two-leg transfer can be re-opened', () => {
   assert.equal(transferDraftFromMovement(transfer([legs[0], { account_id: 'b', amount: '4.00' }]), date), null)
   assert.equal(transferDraftFromMovement(transfer([legs[0], { account_id: 'b', amount: '-5.00' }]), date), null)
   assert.equal(transferDraftFromMovement(transfer(legs, { occurred_on: null, notes: null }), date)?.occurredOn, date)
+})
+
+test('ledger lines say what happened to each account in plain words', () => {
+  assert.equal(legLine({ account_name: 'Joseph', account_kind: 'member', amount: '-75.18' }), 'Joseph is owed $75.18 more')
+  assert.equal(legLine({ account_name: 'Joseph', account_kind: 'member', amount: '41.00' }), 'Joseph is owed $41.00 less')
+  assert.equal(legLine({ account_name: 'WealthSimple', account_kind: 'joint', amount: '-1046.86' }), '$1,046.86 out of WealthSimple')
+  assert.equal(legLine({ account_name: 'WealthSimple', account_kind: 'joint', amount: '200.00' }), '$200.00 into WealthSimple')
+  assert.equal(legLine({ account_name: 'LCS', account_kind: 'store_credit', amount: '-20.00' }), '$20.00 store credit used at LCS')
+  assert.equal(legLine({ account_name: 'LCS', account_kind: 'store_credit', amount: '20.00' }), '$20.00 store credit added at LCS')
 })

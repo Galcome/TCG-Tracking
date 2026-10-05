@@ -11,6 +11,7 @@ import { money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
   expenseEditFromMovement,
+  legLine,
   storeCreditMeaning,
   transferDraftFromMovement,
   type BalanceAdjustmentDraft,
@@ -96,18 +97,12 @@ function AccountCard({
   )
 }
 
-function movementAccountKindLabel(kind: Movement['legs'][number]['account_kind']): string {
-  if (kind === 'joint') return 'joint cash'
-  if (kind === 'member') return 'partner owed'
-  return 'store credit'
-}
-
 function MovementLegs({ movement }: { movement: Movement }) {
   return (
     <View style={{ gap: 4 }}>
       {movement.legs.map((leg) => (
         <Copy key={leg.account_id} muted>
-          {leg.account_name} · {movementAccountKindLabel(leg.account_kind)} · cash flow <Signed value={leg.amount}>{money(leg.amount)}</Signed>
+          {legLine(leg)}
         </Copy>
       ))}
     </View>
@@ -138,11 +133,10 @@ function MovementCard({
           </View>
           <Copy>{money(movement.amount)}</Copy>
         </Row>
-        <Copy muted>Legs show signed cash flow: positive arrives, negative leaves.</Copy>
         <MovementLegs movement={movement} />
         {movement.notes ? <Copy muted>{movement.notes}</Copy> : null}
         <Row>
-          <Copy muted>{movement.status === 'voided' ? 'Voided — retained for audit' : 'Posted'}</Copy>
+          <Copy muted>{movement.status === 'voided' ? 'Voided' : 'Posted'}</Copy>
           {canVoid && onEdit ? <Button label="Edit" onPress={onEdit} /> : null}
           {canVoid ? <Button label="Void" onPress={onVoid} danger /> : null}
         </Row>
