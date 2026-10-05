@@ -418,8 +418,6 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
             </>
           ) : null}
           <Row>
-            <Field label="Shipping" value={shipping} onChangeText={amounts.setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-            <Field label="Tax" value={tax} onChangeText={amounts.setTax} keyboardType="decimal-pad" placeholder="0.00" />
             <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
           </Row>
           <Field label="Bought from" value={source} onChangeText={setSource} />
@@ -477,13 +475,17 @@ function PurchaseAmountFields({ amounts, fees, autoFocus = false }: {
         <Field label="Price each" value={amounts.each} onChangeText={amounts.setEach} keyboardType="decimal-pad" placeholder="Optional" />
         <Field label="Total paid" value={amounts.amount} onChangeText={amounts.setAmount} keyboardType="decimal-pad" placeholder="0.00" />
       </Row>
+      <Row>
+        <Field label="Shipping" value={amounts.shipping} onChangeText={amounts.setShipping} keyboardType="decimal-pad" placeholder="0.00" />
+        <Field label="Tax" value={amounts.tax} onChangeText={amounts.setTax} keyboardType="decimal-pad" placeholder="0.00" />
+      </Row>
       <Button
         label={amounts.addHst ? '13% HST added' : 'Add 13% HST'}
         variant={amounts.addHst ? 'primary' : 'secondary'}
         onPress={amounts.toggleHst}
       />
-      {amounts.addHst && amounts.tax && allIn ? (
-        <Copy muted>HST {money(amounts.tax)} · {money(allIn)} paid in all</Copy>
+      {allIn && (amounts.shipping.trim() || amounts.tax.trim() || fees.trim()) ? (
+        <Copy muted>{money(allIn)} comes out of the paying account in all</Copy>
       ) : null}
     </>
   )
@@ -556,8 +558,6 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
         <>
           <Copy muted>Optional shipping and purchase details</Copy>
           <Row>
-            <Field label="Shipping" value={shipping} onChangeText={amounts.setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-            <Field label="Tax" value={tax} onChangeText={amounts.setTax} keyboardType="decimal-pad" placeholder="0.00" />
             <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
           </Row>
           <Field label="Bought from" value={source} onChangeText={setSource} />
