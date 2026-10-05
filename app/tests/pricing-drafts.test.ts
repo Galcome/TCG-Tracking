@@ -13,6 +13,7 @@ import {
   catalogId,
   isCertainSuggestion,
   marketPosition,
+  unitPosition,
   needsPricingSetup,
   preferredSubtype,
   pricingEligibilityMessage,
@@ -113,6 +114,11 @@ test('market position is exact cents of the stock on hand against its remaining 
   assert.equal(marketPosition(holding(3, '9.00', null)), null)
   assert.equal(marketPosition(holding(3, '9.00', '4.99', 'unavailable')), null)
   assert.equal(marketPosition(holding(3, 'n/a', '4.99')), null)
+  assert.deepEqual(unitPosition(holding(10, '971.68', null)), { cost: '97.17', price: null, profit: null })
+  assert.deepEqual(unitPosition(holding(2, '0.00', '656.53')), { cost: '0.00', price: '656.53', profit: '656.53' })
+  assert.deepEqual(unitPosition(holding(3, '10.00', '3.00', 'stale')), { cost: '3.33', price: '3.00', profit: '-0.33' })
+  assert.deepEqual(unitPosition(holding(3, '10.00', '3.00', 'unavailable')), { cost: '3.33', price: null, profit: null })
+  assert.equal(unitPosition(holding(0, '0.00', '4.99')), null)
   assert.equal(marketPosition({ ...holding(3, '9.00', null), market_estimate: null }), null)
 })
 

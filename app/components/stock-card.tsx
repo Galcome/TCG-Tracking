@@ -3,7 +3,7 @@ import { colors } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type VaultHolding } from '../lib/api';
 import { money } from '../lib/format';
-import { canUseFreeMarketPricing, marketPosition } from '../lib/pricing-drafts';
+import { canUseFreeMarketPricing, marketPosition, unitPosition } from '../lib/pricing-drafts';
 import { GameIdentity } from './game-identity';
 import { Button, Card, Copy, Row, Signed } from './ui';
 import { VaultDetails, VaultSummary } from './vault-valuation';
@@ -32,6 +32,7 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
   const position = marketPosition(p);
+  const unit = unitPosition(p);
   const setRepeatsName = Boolean(p.set_name && p.name.toLocaleLowerCase().includes(p.set_name.toLocaleLowerCase()));
   return <View role="group" accessibilityLabel={'Stock product: ' + p.name}><Card><View style={{ flexDirection: dense ? 'row' : 'column', flexWrap: 'wrap', alignItems: dense ? 'center' : 'stretch', gap: 16 }}>
     <View style={{ flexGrow: 1, flexBasis: dense ? 260 : undefined, gap: 8 }}>
@@ -55,7 +56,9 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
       {vault ? <VaultSummary holding={vault} /> : <>
       <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
       {position ? <Row><Copy>{bucket && p.stats.by_bucket[bucket] !== p.stats.quantity_on_hand ? `Value of all ${p.stats.quantity_on_hand}` : 'Value'} {money(position.value)}</Copy><Copy>Unrealized <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy></Row> : null}
-      {position ? <Copy muted>{money(p.market_estimate?.value)} / unit{p.market_estimate?.status === 'stale' ? ' · stale' : ''}</Copy> : null}
+      {unit ? <Row><Copy>Cost <Text style={{ color: colors.loss }}>{money(unit.cost)}</Text> each</Copy>
+        {unit.price !== null ? <Copy>Price <Text style={{ color: colors.gain }}>{money(unit.price)}</Text> each{p.market_estimate?.status === 'stale' ? ' · stale' : ''}</Copy> : null}
+        {unit.profit !== null ? <Copy>Profit <Signed value={unit.profit}>{money(unit.profit)}</Signed> each</Copy> : null}</Row> : null}
       {!position && !noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}</>}
     </View>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button variant="primary" style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />

@@ -5,6 +5,7 @@ import type {
   PricingRefresh,
   PricingSuggestion,
 } from './api'
+import { perUnit } from './format'
 import { decimalCents } from './money-drafts'
 
 /** Mirrors the server: every factory-sealed product has one listing and market price. */
@@ -134,6 +135,24 @@ export function marketPosition(
   if (unit === null || cost === null) return null
   const value = unit * BigInt(quantity)
   return { value: centsString(value), unrealized: centsString(value - cost) }
+}
+
+/**
+ * One unit's cost, today's price and the difference, so nobody divides a lot total by its
+ * quantity. Cost is the remaining cost spread over the units on hand, to the nearest cent;
+ * profit is price minus that rounded cost, so the three figures shown always agree. Price
+ * and profit are null without a usable estimate, and everything is null with nothing on hand.
+ */
+export function unitPosition(
+  product: Pick<Product, 'stats' | 'market_estimate'>,
+): { cost: string; price: string | null; profit: string | null } | null {
+  const cost = product.stats.quantity_on_hand > 0 ? perUnit(product.stats.remaining_cost, product.stats.quantity_on_hand) : null
+  const costCents = cost === null ? null : decimalCents(cost)
+  if (cost === null || costCents === null) return null
+  const estimate = product.market_estimate
+  const price = estimate?.value && estimate.status !== 'unavailable' ? decimalCents(estimate.value) : null
+  if (price === null) return { cost, price: null, profit: null }
+  return { cost, price: centsString(price), profit: centsString(price - costCents) }
 }
 
 /** The printing a listing is most likely held in: the product's own variant, else Normal. */
