@@ -639,8 +639,9 @@ export function boxSize(gameSlug: string, language?: string | null): number | un
  * Pokémon Center one are separate types for the same reason - nine packs against eleven.
  *
  * These are the usual modern counts, not a guarantee; older and special sets differ, which
- * is why the number is only ever a prefilled suggestion. Tins, blisters, premium
- * collections and gift sets vary too much per product to suggest anything.
+ * is why the number is only ever a prefilled suggestion. Tins, blisters, premium-tier
+ * collections, collection boxes, calendars, gift sets and gift bundles vary too much per
+ * product to suggest anything.
  */
 export const CONTENTS_SIZES: { type: string; game: string; count: number }[] = [
   { type: 'elite-trainer-box', game: 'pokemon', count: 9 },
@@ -648,6 +649,9 @@ export const CONTENTS_SIZES: { type: string; game: string; count: number }[] = [
   { type: 'etb-case', game: 'pokemon', count: 10 },
   { type: 'booster-bundle', game: 'pokemon', count: 6 },
   { type: 'booster-bundle', game: 'magic-the-gathering', count: 9 },
+  { type: 'build-and-battle-box', game: 'pokemon', count: 4 },
+  { type: 'trainers-toolkit', game: 'pokemon', count: 4 },
+  { type: 'mini-tin', game: 'pokemon', count: 2 },
   { type: 'collector-booster-box', game: 'magic-the-gathering', count: 12 },
   { type: 'illumineers-trove', game: 'lorcana', count: 8 },
   { type: 'prerelease-kit', game: 'pokemon', count: 4 },
@@ -1083,6 +1087,8 @@ export function createApi(request: ApiRequest) { return {
   members: () => request<Member[]>('/api/v1/members'),
   games: () => request<Taxonomy[]>('/api/v1/games'),
   productTypes: () => request<Taxonomy[]>('/api/v1/product-types'),
+  createProductType: (name: string) =>
+    request<Taxonomy>('/api/v1/product-types', { method: 'POST', body: JSON.stringify({ name }) }),
 
   products: (params: {
     q?: string

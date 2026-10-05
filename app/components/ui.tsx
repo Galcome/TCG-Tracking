@@ -51,19 +51,41 @@ export function Field({ label, ...props }: TextInputProps & { label: string }) {
     <TextInput {...props} accessibilityLabel={label} placeholderTextColor={colors.muted}
       style={[styles.input, { fontFamily: fonts.body }, props.multiline && { minHeight: 80 }, props.style]} /></View>;
 }
-export function Choice({ label, value, options, onChange, disabled = false }: {
+/** A pick-one sheet. With `onCreate`, typing a name that is not on the list offers to add it;
+ * `onCreate` resolves to the new option's value, which is then chosen. */
+export function Choice({ label, value, options, onChange, disabled = false, onCreate }: {
   label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean;
+  onCreate?: (name: string) => Promise<string>;
 }) {
   const fonts = useTypography();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const close = () => { setOpen(false); setQ(''); };
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<unknown>(null);
+  const close = () => { setOpen(false); setQ(''); setAddError(null); };
+  const typed = q.trim().replace(/\s+/g, ' ');
+  const canAdd = Boolean(onCreate && typed && !options.some(o => o.label.toLowerCase() === typed.toLowerCase()));
+  const add = async () => {
+    if (!onCreate || adding) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      onChange(await onCreate(typed));
+      close();
+    } catch (error) {
+      setAddError(error);
+    } finally {
+      setAdding(false);
+    }
+  };
   return <View style={styles.field}><Text style={[styles.label, { fontFamily: fonts.medium }]}>{label}</Text>
     <Button label={label + ': ' + (options.find(o => o.value === value)?.label ?? 'Choose')} disabled={disabled} onPress={() => setOpen(true)} />
-    <Sheet title={label} open={open} onClose={close}>
-      {options.length > 10 && <Field label="Find option" value={q} onChangeText={setQ} />}
-      {options.filter(o => o.label.toLowerCase().includes(q.toLowerCase())).map(o =>
-        <Button key={o.value} label={o.label} disabled={disabled} onPress={() => { onChange(o.value); close(); }} />)}
+    <Sheet title={label} open={open} onClose={close} dismissDisabled={adding}>
+      {(onCreate || options.length > 10) && <Field label={onCreate ? 'Find or add' : 'Find option'} value={q} onChangeText={setQ} editable={!adding} />}
+      {canAdd && <Button label={adding ? 'Adding…' : 'Add "' + typed + '"'} variant="primary" disabled={disabled || adding} onPress={() => { void add(); }} />}
+      <ErrorNotice error={addError} />
+      {options.filter(o => o.label.toLowerCase().includes(q.trim().toLowerCase())).map(o =>
+        <Button key={o.value} label={o.label} disabled={disabled || adding} onPress={() => { onChange(o.value); close(); }} />)}
     </Sheet></View>;
 }
 export function Sheet({ title, children, open, onClose, dismissDisabled = false, footer, compact = false }: PropsWithChildren<{ title: string; open: boolean; onClose: () => void; dismissDisabled?: boolean; footer?: ReactNode; compact?: boolean }>) {

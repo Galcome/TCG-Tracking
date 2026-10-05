@@ -27,14 +27,31 @@ def test_sealed_products_have_their_own_types_ahead_of_the_catch_alls(client):
         "booster-bundle",
         "collector-booster-box",
         "premium-collection",
+        "ultra-premium-collection",
+        "super-premium-collection",
+        "collection-box",
+        "pin-collection",
+        "poster-collection",
+        "collector-chest",
+        "build-and-battle-box",
+        "build-and-battle-stadium",
+        "trainers-toolkit",
+        "holiday-calendar",
+        "mini-tin",
         "illumineers-trove",
         "tin",
         "blister",
         "gift-set",
+        "gift-bundle",
+        "starter-kit",
+        "commander-deck",
+        "illumineers-quest",
         "prerelease-kit",
         "secret-lair",
     ):
         assert slug in slugs
+    assert slugs.index("ultra-premium-collection") == slugs.index("premium-collection") + 1
+    assert slugs.index("mini-tin") == slugs.index("tin") + 1
     assert slugs[-2:] == ["lot", "other"]
 
 
