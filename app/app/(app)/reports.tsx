@@ -290,10 +290,10 @@ export default function Reports() {
       <MonthlyTrend />
       <TierReport />
       <SetReport />
-      <AgingReport />
+      <AgingReport filters={filters} />
       <AttentionReport />
       <Card>
-        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. Tier results show lifetime trading; set holdings, stock aging, and data attention include current positions. These sections are independent of the selected period and filters. Grouped CSV follows the selected filters and sorting; inventory CSV includes all in-stock products across buckets.</Copy>
+        <Copy muted>Financial calculations, decimal amounts, and unknown-versus-zero values come from the API. Tier results show lifetime trading; set holdings, stock aging, and data attention include current positions. These sections are independent of the selected period, and only stock aging follows the filters. Grouped CSV follows the selected filters and sorting; inventory CSV includes all in-stock products across buckets.</Copy>
       </Card>
     </Page>
   )

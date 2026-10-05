@@ -263,15 +263,19 @@ def read_by_month(
 
 @router.get("/reports/aging", response_model=list[AgingLotRead])
 def read_aging(
+    set_id: uuid.UUID | None = SetQuery,
+    game_id: uuid.UUID | None = GameQuery,
+    product_type_id: uuid.UUID | None = TypeQuery,
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session, scope="function"),
 ):
     """Unsold stock, oldest money first, one row per purchase lot.
 
-    Not period-scoped: what is sitting on the shelf today is not a function of a date
-    range, and filtering it by one would hide the oldest stock exactly when it matters.
+    Follows the game, set and type filters, but is not period-scoped: what is sitting on the
+    shelf today is not a function of a date range, and filtering it by one would hide the
+    oldest stock exactly when it matters.
     """
-    return reporting.aging_lots(db)
+    return reporting.aging_lots(db, filters=_filters(set_id, game_id, product_type_id))
 
 
 @router.get("/reports/attention", response_model=AttentionRead)

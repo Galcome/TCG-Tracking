@@ -591,6 +591,25 @@ def test_undated_lots_sort_after_every_dated_one(db, client, make_product):
     assert [row["days_held"] for row in rows] == [300, None]
 
 
+def test_aging_follows_the_report_filters(client, make_product, lorcana_ids, product_type_id):
+    """Looking at one game or type should not list every other one's stock."""
+    pokemon = make_product("Pokemon Box")
+    buy(client, pokemon["id"], 1, "100.00", on=TODAY - timedelta(days=30))
+    game_id, type_id = lorcana_ids
+    lorcana = client.post(
+        "/api/v1/products",
+        json={"name": "Lorcana Single", "game_id": str(game_id), "product_type_id": str(type_id)},
+    ).json()
+    buy(client, lorcana["id"], 1, "50.00", on=TODAY - timedelta(days=90))
+
+    def names(query: str) -> list[str]:
+        return [row["product_name"] for row in client.get("/api/v1/reports/aging" + query).json()]
+
+    assert names("") == ["Lorcana Single", "Pokemon Box"]
+    assert names(f"?game_id={game_id}") == ["Lorcana Single"]
+    assert names(f"?product_type_id={product_type_id}") == ["Pokemon Box"]
+
+
 # ------------------------------------------------------------------------ attention
 
 

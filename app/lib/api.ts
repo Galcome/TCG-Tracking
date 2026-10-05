@@ -1348,8 +1348,8 @@ export function createApi(request: ApiRequest) { return {
   lineage: (productId: string) =>
     request<LineageRollup>(`/api/v1/reports/lineage/${productId}`),
 
-  /** Not period-scoped: what is on the shelf today is not a function of a date range. */
-  aging: () => request<AgingLot[]>('/api/v1/reports/aging'),
+  /** Follows the filters but not the period: what is on the shelf today has no date range. */
+  aging: (filters: ReportFilters = {}) => request<AgingLot[]>(`/api/v1/reports/aging${query({ ...filters })}`),
   attention: () => request<Attention>('/api/v1/reports/attention'),
 
   /** Sets worth offering for one game, best first. Scoped to a game on purpose. */

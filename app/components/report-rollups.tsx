@@ -7,7 +7,7 @@ import { Text, View } from 'react-native'
 import { Button, Card, Copy, ErrorNotice, Loading, Row, Signed } from './ui'
 import { useApi } from '../context/AppContext'
 import { colors } from '../context/ThemeContext'
-import type { AgingLot, Attention, SetRollupRow, TierRow } from '../lib/api'
+import type { AgingLot, Attention, ReportFilters, SetRollupRow, TierRow } from '../lib/api'
 import {
   agingDescription,
   groupAgingLots,
@@ -201,14 +201,14 @@ function AgingRows({ lots }: { lots: AgingLot[] }) {
 }
 
 /** Current non-Vault stock by remaining purchase lot. The API subtracts Vault units. */
-export function AgingReport() {
+export function AgingReport({ filters }: { filters: ReportFilters }) {
   const api = useApi()
-  const query = useQuery({ queryKey: ['reports', 'aging'], queryFn: api.aging })
+  const query = useQuery({ queryKey: ['reports', 'aging', filters], queryFn: () => api.aging(filters) })
 
   return (
     <RollupSection
       title="Stock aging"
-      description="Current unsold non-Vault stock (Inventory and Store), independent of the selected period and filters. Vault stock is excluded because it is held on purpose."
+      description="Current unsold non-Vault stock (Inventory and Store), for the selected game, set and type, whatever the period. Vault stock is excluded because it is held on purpose."
       query={query}
       emptyMessage="No remaining purchase lots."
       isEmpty={(rows) => rows.length === 0}
