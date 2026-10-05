@@ -25,8 +25,10 @@ export const HOLDS_PACKS = [
   'premium-collection',
   'ultra-premium-collection',
   'super-premium-collection',
+  'collection-box',
   'pin-collection',
   'poster-collection',
+  'collector-chest',
   'build-and-battle-box',
   'build-and-battle-stadium',
   'trainers-toolkit',
@@ -35,6 +37,7 @@ export const HOLDS_PACKS = [
   'tin',
   'blister',
   'gift-set',
+  'gift-bundle',
 ]
 
 export function opensInto(slug: string | undefined): string | undefined {

@@ -639,8 +639,9 @@ export function boxSize(gameSlug: string, language?: string | null): number | un
  * Pokémon Center one are separate types for the same reason - nine packs against eleven.
  *
  * These are the usual modern counts, not a guarantee; older and special sets differ, which
- * is why the number is only ever a prefilled suggestion. Tins, blisters, premium
- * tier collections, calendars and gift sets vary too much per product to suggest anything.
+ * is why the number is only ever a prefilled suggestion. Tins, blisters, premium-tier
+ * collections, collection boxes, calendars, gift sets and gift bundles vary too much per
+ * product to suggest anything.
  */
 export const CONTENTS_SIZES: { type: string; game: string; count: number }[] = [
   { type: 'elite-trainer-box', game: 'pokemon', count: 9 },

@@ -104,13 +104,13 @@ test('crack words and child naming follow the operation and type identity', () =
 })
 
 test('the named sealed products open into packs, and an ETB case into ETBs', () => {
-  for (const type of ['elite-trainer-box', 'pokemon-center-elite-trainer-box', 'booster-bundle', 'collector-booster-box', 'illumineers-trove', 'premium-collection', 'ultra-premium-collection', 'super-premium-collection', 'build-and-battle-box', 'mini-tin', 'tin', 'blister']) {
+  for (const type of ['elite-trainer-box', 'pokemon-center-elite-trainer-box', 'booster-bundle', 'collector-booster-box', 'illumineers-trove', 'premium-collection', 'ultra-premium-collection', 'super-premium-collection', 'collection-box', 'collector-chest', 'gift-bundle', 'build-and-battle-box', 'mini-tin', 'tin', 'blister']) {
     assert.equal(opensInto(type), 'booster-pack')
     assert.deepEqual(crackWords(type), { source: 'product', sources: 'products', child: 'pack', children: 'packs' })
   }
   assert.equal(opensInto('etb-case'), 'elite-trainer-box')
   assert.deepEqual(crackWords('etb-case'), { source: 'case', sources: 'cases', child: 'ETB', children: 'ETBs' })
-  assert.equal(opensInto('secret-lair'), undefined)
+  for (const type of ['secret-lair', 'commander-deck', 'starter-kit', 'illumineers-quest']) assert.equal(opensInto(type), undefined)
 })
 
 test('the suggested contents depend on the type and the game', () => {

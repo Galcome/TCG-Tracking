@@ -1,10 +1,10 @@
-"""Give the rest of the Pokémon sealed lineup its own product types.
+"""Give the rest of the Pokémon, Magic and Lorcana sealed lineups their own product types.
 
-0017 filed an Ultra-Premium Collection, a Build & Battle Box and a Mini Tin under types
-that do not describe them. Each is a separate product with its own market price and,
-for most, its own pack count, so each gets a type.
+0017 filed an Ultra-Premium Collection, a collection box, a Build & Battle Box and a
+Commander deck under types that do not describe them. Each is a separate product with
+its own market price and, for most, its own pack count, so each gets a type.
 
-Revision ID: 0018_more_pokemon_sealed_types
+Revision ID: 0018_more_sealed_product_types
 Revises: 0017_sealed_product_types
 """
 
@@ -14,7 +14,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0018_more_pokemon_sealed_types"
+revision: str = "0018_more_sealed_product_types"
 down_revision: str | None = "0017_sealed_product_types"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -25,33 +25,46 @@ SEED_NAMESPACE = uuid.UUID("6f0f5b1a-0b5e-5e6f-9a2c-0d1f2e3a4b5c")
 NEW_TYPES = [
     ("Ultra-Premium Collection", "ultra-premium-collection"),
     ("Super-Premium Collection", "super-premium-collection"),
+    ("Collection Box", "collection-box"),
     ("Pin Collection", "pin-collection"),
     ("Poster Collection", "poster-collection"),
+    ("Collector Chest", "collector-chest"),
     ("Build & Battle Box", "build-and-battle-box"),
     ("Build & Battle Stadium", "build-and-battle-stadium"),
     ("Trainer's Toolkit", "trainers-toolkit"),
     ("Holiday Calendar", "holiday-calendar"),
     ("Mini Tin", "mini-tin"),
+    ("Illumineer's Quest", "illumineers-quest"),
+    ("Gift Bundle", "gift-bundle"),
+    ("Starter Kit", "starter-kit"),
+    ("Commander Deck", "commander-deck"),
 ]
 NEW_SLUGS = [slug for _, slug in NEW_TYPES]
 
 # Every sealed type after Collector Booster Box (16), in list order. Collections stay
-# together, and a Mini Tin sits beside the Tin. Lot and Other keep 40 and 41.
+# together, a Mini Tin sits beside the Tin, and the Magic-only types sit together. Lot
+# and Other keep 40 and 41.
 ORDER = [
     "premium-collection",
     "ultra-premium-collection",
     "super-premium-collection",
+    "collection-box",
     "pin-collection",
     "poster-collection",
+    "collector-chest",
     "build-and-battle-box",
     "build-and-battle-stadium",
     "trainers-toolkit",
     "holiday-calendar",
     "illumineers-trove",
+    "illumineers-quest",
     "tin",
     "mini-tin",
     "blister",
     "gift-set",
+    "gift-bundle",
+    "starter-kit",
+    "commander-deck",
     "prerelease-kit",
     "secret-lair",
 ]
