@@ -2,10 +2,23 @@ import type { Transaction } from './api'
 import { reportMoney } from './reports'
 export const money = reportMoney
 type HistoryAmounts = Pick<Transaction, 'kind' | 'quantity' | 'amount' | 'base_amount' | 'shipping' | 'tax' | 'fees' | 'cost' | 'has_unknown_cost'>
+/** A decimal amount split across `quantity` units, to the cent (half up), or null when it cannot
+ * be read. Done in integer cents so a large total never picks up float error. */
+export function perUnit(amount: string | null, quantity: number): string | null {
+  const match = amount?.trim().match(/^(-?)(\d+)(?:\.(\d{0,2}))?$/)
+  const units = BigInt(Math.abs(quantity))
+  if (!match || units === 0n) return null
+  const cents = BigInt(match[2]) * 100n + BigInt((match[3] ?? '').padEnd(2, '0'))
+  const each = (cents * 2n + units) / (units * 2n)
+  return match[1] + (each / 100n).toString() + '.' + (each % 100n).toString().padStart(2, '0')
+}
 /** One line of a product's transaction history. A purchase's amount is its landed cost, so it
- * reads as what was paid and what that was made of, never as a separate (absent) cost. */
+ * reads as what was paid and what that was made of, never as a separate (absent) cost. Several
+ * units bought or sold together also show the price of one. */
 export function transactionLine(t: HistoryAmounts): string {
   const parts = ['Quantity ' + t.quantity]
+  const each = Math.abs(t.quantity) > 1 && (t.kind === 'purchase' || t.kind === 'sale') ? perUnit(t.amount, t.quantity) : null
+  if (each !== null) parts.push(money(each) + ' each')
   if (t.kind === 'purchase') {
     const extras = ([['shipping', t.shipping], ['tax', t.tax], ['fees', t.fees]] as const)
       .filter(([, value]) => tone(value) !== null)
