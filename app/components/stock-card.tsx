@@ -8,22 +8,25 @@ import { GameIdentity } from './game-identity';
 import { Button, Card, Copy, Row, Signed } from './ui';
 import { VaultDetails, VaultSummary } from './vault-valuation';
 
-// The app ships no icon font, so the row shortcuts are glyphs named for screen readers.
-function IconButton({ glyph, label, onPress }: { glyph: string; label: string; onPress: () => void }) {
+// The app ships no icon font, so the row shortcuts are glyphs with a one-word caption,
+// named in full for screen readers.
+function IconButton({ glyph, caption, label, onPress }: { glyph: string; caption: string; label: string; onPress: () => void }) {
+  const fonts = useTypography();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={4}
-    style={({ pressed }) => ({ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.raised, opacity: pressed ? 0.7 : 1 })}>
-    <Text accessible={false} style={{ color: colors.accent, fontSize: 20 }}>{glyph}</Text>
+    style={({ pressed }) => ({ minWidth: 52, height: 52, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.raised, opacity: pressed ? 0.7 : 1 })}>
+    <Text accessible={false} style={{ color: colors.accent, fontSize: 18, lineHeight: 22 }}>{glyph}</Text>
+    <Text accessible={false} style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 11 }}>{caption}</Text>
   </Pressable>;
 }
 
-// Editing is rare from a list, so it is two small icons rather than a fourth equal-weight
-// button: one opens the product page, one opens the cost form in place, because imported
-// stock arrives at $0.00 and the correction must not be two screens away.
+// Editing is rare from a list, so it is small captioned icons rather than a fourth
+// equal-weight button. Edit and Cost open their forms in place, so fixing a wrong type or
+// an imported $0.00 cost is not two screens away; the name still opens the product page.
 // On the Vault tab the row carries the Vault holding, so manual worth and appreciation
 // replace the market position: the Vault is valued, not priced.
-export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden }: {
+export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
-  onDetails: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
+  onDetails: () => void; onEdit: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
   onEditCost?: () => void; onToggleHidden?: () => void;
 }) {
   const fonts = useTypography();
@@ -40,9 +43,9 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onSell,
         <Copy>{bucket ? p.stats.by_bucket[bucket] : p.stats.quantity_on_hand}</Copy>
         <Copy muted>{bucket ? 'In ' + BUCKET_LABELS[bucket] : 'In stock'}</Copy>
       </View><View style={{ flexDirection: 'row', gap: 8 }}>
-        <IconButton glyph="✎" label="Edit product" onPress={onDetails} />
-        {onEditCost ? <IconButton glyph="$" label="Edit cost" onPress={onEditCost} /> : null}
-        {onToggleHidden ? <IconButton glyph={p.is_hidden ? '◉' : '⊘'} label={p.is_hidden ? 'Unhide product' : 'Hide product'} onPress={onToggleHidden} /> : null}
+        <IconButton glyph="✎" caption="Edit" label="Edit product" onPress={onEdit} />
+        {onEditCost ? <IconButton glyph="$" caption="Cost" label="Edit cost" onPress={onEditCost} /> : null}
+        {onToggleHidden ? <IconButton glyph={p.is_hidden ? '◉' : '⊘'} caption={p.is_hidden ? 'Unhide' : 'Hide'} label={p.is_hidden ? 'Unhide product' : 'Hide product'} onPress={onToggleHidden} /> : null}
       </View></Row>
       <Row>{BUCKETS.map(b => <Text key={b} style={{ fontFamily: fonts.medium, fontSize: 12, color: colors[b], backgroundColor: colors.raised, padding: 8, borderRadius: 8 }}>{BUCKET_LABELS[b]} {p.stats.by_bucket[b]}</Text>)}</Row>
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}

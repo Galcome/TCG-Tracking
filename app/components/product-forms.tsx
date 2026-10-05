@@ -28,7 +28,7 @@ import {
 } from '../lib/product-drafts'
 import { money, todayIso } from '../lib/format'
 import { ontarioHst, purchaseGrandTotal, totalFromEach } from '../lib/purchase-math'
-import { namedByItsSet } from '../lib/product-types'
+import { nameAfterTypeChange, namedByItsSet } from '../lib/product-types'
 import { canUseFreeMarketPricing } from '../lib/pricing-drafts'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
 import { SetField } from './set-field'
@@ -595,6 +595,11 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
   const selectedType = productTypes.data?.find((type) => type.id === productTypeId)
   const showSlabFields = selectedType?.slug === 'graded-card' || product.product_type.slug === 'graded-card' || hadSlabMetadata
 
+  function changeType(id: string) {
+    setName(nameAfterTypeChange(name, setLabel, selectedType ?? product.product_type, productTypes.data?.find((type) => type.id === id)))
+    setProductTypeId(id)
+  }
+
   function submit() {
     const errors = validateDraft('edit', { name, gameId, productTypeId })
     setValidation(errors)
@@ -636,7 +641,7 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
     >
       <Row>
         <Choice label="Game" value={gameId} options={(games.data ?? []).map((game) => option(game.id, game.name))} onChange={setGameId} />
-        <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={setProductTypeId} />
+        <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={changeType} />
       </Row>
       <Choice label="Language" value={language} options={LANGUAGES.map((item) => option(item, item))} onChange={setLanguage} />
       <SetField game={games.data?.find(game => game.id === gameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />

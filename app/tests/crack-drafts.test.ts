@@ -13,7 +13,7 @@ import {
   validateCrackDraft,
   type CrackDraft,
 } from '../lib/crack-drafts'
-import { opensInto, suggestedProductName } from '../lib/product-types'
+import { nameAfterTypeChange, opensInto, suggestedProductName } from '../lib/product-types'
 
 const product = {
   id: 'case-1',
@@ -100,7 +100,7 @@ test('crack words and child naming follow the operation and type identity', () =
   for (const type of ['lot', 'collection', 'binder', 'deck', 'other']) {
     assert.deepEqual(crackWords(type), { source: 'container', sources: 'containers', child: 'item', children: 'items' })
   }
-  assert.equal(suggestedProductName('Stellar Crown', { id: 'box', name: 'Booster Box', slug: 'booster-box', is_system: true, sort_order: 0 }), 'Stellar Crown Booster Box')
+  assert.equal(suggestedProductName('Stellar Crown', { name: 'Booster Box', slug: 'booster-box' }), 'Stellar Crown Booster Box')
 })
 
 test('the named sealed products open into packs, and an ETB case into ETBs', () => {
@@ -124,4 +124,13 @@ test('the suggested contents depend on the type and the game', () => {
   assert.equal(contentsSize('sealed-case', 'pokemon'), 6)
   assert.equal(contentsSize('tin', 'pokemon'), undefined)
   assert.equal(contentsSize('elite-trainer-box', 'lorcana'), undefined)
+})
+
+test('a set-derived name follows a corrected type, a hand-typed name does not', () => {
+  const center = { name: 'Pokémon Center Elite Trainer Box', slug: 'pokemon-center-elite-trainer-box' }
+  const retail = { name: 'Elite Trainer Box', slug: 'elite-trainer-box' }
+  const single = { name: 'Single', slug: 'single' }
+  assert.equal(nameAfterTypeChange('Delta Reign Pokémon Center Elite Trainer Box', 'Delta Reign', center, retail), 'Delta Reign Elite Trainer Box')
+  assert.equal(nameAfterTypeChange('My PC ETB', 'Delta Reign', center, retail), 'My PC ETB')
+  assert.equal(nameAfterTypeChange('Delta Reign Pokémon Center Elite Trainer Box', 'Delta Reign', center, single), 'Delta Reign Pokémon Center Elite Trainer Box')
 })

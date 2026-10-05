@@ -65,7 +65,7 @@ export default function Inventory() {
   useEffect(() => { const t = setTimeout(() => { setRanges(rangeText); setOffset(0); }, 400); return () => clearTimeout(t); }, [rangeText]);
   const setRange = (key: keyof typeof NO_RANGES) => (text: string) => setRangeText(current => ({ ...current, [key]: text.trim() }));
   const [adding, setAdding] = useState(false);
-  const [operation, setOperation] = useState<{ product: Product; mode: 'move' } | null>(null);
+  const [operation, setOperation] = useState<{ product: Product; mode: 'move' | 'edit' } | null>(null);
   const [selling, setSelling] = useState<Product | null>(null);
   const [ripping, setRipping] = useState<Product | null>(null);
   const [valuing, setValuing] = useState<Product | null>(null);
@@ -162,6 +162,7 @@ export default function Inventory() {
     {products.data?.items.map(p => <StockCard key={p.id} product={p} bucket={bucket} dense={isDesktop} vault={bucket === 'vault' ? holdings.get(p.id) : undefined}
       onValue={bucket === 'vault' ? () => setValuing(p) : undefined}
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
+      onEdit={() => setOperation({ product: p, mode: 'edit' })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
       onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
       onEditCost={() => setCosting(p)}
