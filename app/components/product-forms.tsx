@@ -26,7 +26,8 @@ import {
   type DraftValidation,
   type ProductFormMode,
 } from '../lib/product-drafts'
-import { todayIso } from '../lib/format'
+import { money, todayIso } from '../lib/format'
+import { ontarioHst, purchaseGrandTotal, totalFromEach } from '../lib/purchase-math'
 import { namedByItsSet } from '../lib/product-types'
 import { canUseFreeMarketPricing } from '../lib/pricing-drafts'
 import { Button, Card, Choice, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
@@ -234,12 +235,10 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
   const [certNumber, setCertNumber] = useState('')
   const [storageLocation, setStorageLocation] = useState('')
   const [notes, setNotes] = useState('')
-  const [quantity, setQuantity] = useState('1')
-  const [amount, setAmount] = useState('')
+  const amounts = usePurchaseAmounts()
+  const { quantity, amount, shipping, tax } = amounts
   const [purchaseDate, setPurchaseDate] = useState(todayIso())
   const [bucket, setBucket] = useState<Bucket>('inventory')
-  const [shipping, setShipping] = useState('')
-  const [tax, setTax] = useState('')
   const [fees, setFees] = useState('')
   const [source, setSource] = useState('')
   // null means untouched (use the signed-in member's account); an empty string is an
@@ -299,6 +298,7 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
       amount,
       date: purchaseDate,
     })
+    if (amounts.eachError) errors.amount = amounts.eachError
     if (fundingSplit) errors.funding = allocationError(fundingSplit, [amount, shipping, tax, fees], true) ?? undefined
     setValidation(errors)
     if (firstValidationError(errors)) return
@@ -386,10 +386,7 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
           game_id: effectiveGameId, name: effectiveName.trim(), set_name: setLabel.trim(),
           kind: chosenType!.name, ...(collectorNumber.trim() ? { collector_number: collectorNumber.trim() } : {}),
         } : null} /> : null}
-      <Row>
-        <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" />
-        <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
-      </Row>
+      <PurchaseAmountFields amounts={amounts} fees={fees} />
       <DateField label="Purchase date" value={purchaseDate} onChange={setPurchaseDate} />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
@@ -421,8 +418,6 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
             </>
           ) : null}
           <Row>
-            <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-            <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
             <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
           </Row>
           <Field label="Bought from" value={source} onChangeText={setSource} />
@@ -433,15 +428,76 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
   )
 }
 
+/**
+ * Quantity, price each, total paid, shipping and tax for a new purchase.
+ *
+ * A price each fills the total (typing a total clears it), and Add 13% HST fills the tax
+ * from the total and shipping (typing a tax switches it off). Tax is part of cost basis.
+ */
+function usePurchaseAmounts() {
+  const [quantity, setQuantity] = useState('1')
+  const [each, setEach] = useState('')
+  const [typedAmount, setTypedAmount] = useState('')
+  const [shipping, setShipping] = useState('')
+  const [typedTax, setTypedTax] = useState('')
+  const [addHst, setAddHst] = useState(false)
+  const amount = each.trim() ? totalFromEach(quantity, each) ?? '' : typedAmount
+  const tax = addHst ? ontarioHst(amount, shipping) ?? '' : typedTax
+  return {
+    quantity,
+    setQuantity,
+    each,
+    setEach,
+    amount,
+    setAmount: (value: string) => { setEach(''); setTypedAmount(value) },
+    shipping,
+    setShipping,
+    tax,
+    setTax: (value: string) => { setAddHst(false); setTypedTax(value) },
+    addHst,
+    toggleHst: () => setAddHst((current) => !current),
+    eachError: each.trim() && totalFromEach(quantity, each) === null
+      ? 'Enter the price each with up to two decimal places.'
+      : undefined,
+  }
+}
+
+function PurchaseAmountFields({ amounts, fees, autoFocus = false }: {
+  amounts: ReturnType<typeof usePurchaseAmounts>
+  fees: string
+  autoFocus?: boolean
+}) {
+  const allIn = purchaseGrandTotal(amounts.amount, amounts.shipping, amounts.tax, fees)
+  return (
+    <>
+      <Row>
+        <Field label="Quantity" value={amounts.quantity} onChangeText={amounts.setQuantity} autoFocus={autoFocus} keyboardType="number-pad" />
+        <Field label="Price each" value={amounts.each} onChangeText={amounts.setEach} keyboardType="decimal-pad" placeholder="Optional" />
+        <Field label="Total paid" value={amounts.amount} onChangeText={amounts.setAmount} keyboardType="decimal-pad" placeholder="0.00" />
+      </Row>
+      <Row>
+        <Field label="Shipping" value={amounts.shipping} onChangeText={amounts.setShipping} keyboardType="decimal-pad" placeholder="0.00" />
+        <Field label="Tax" value={amounts.tax} onChangeText={amounts.setTax} keyboardType="decimal-pad" placeholder="0.00" />
+      </Row>
+      <Button
+        label={amounts.addHst ? '13% HST added' : 'Add 13% HST'}
+        variant={amounts.addHst ? 'primary' : 'secondary'}
+        onPress={amounts.toggleHst}
+      />
+      {allIn && (amounts.shipping.trim() || amounts.tax.trim() || fees.trim()) ? (
+        <Copy muted>{money(allIn)} comes out of the paying account in all</Copy>
+      ) : null}
+    </>
+  )
+}
+
 function PurchaseForm({ product, onClose }: { product: Product; onClose: () => void }) {
   const api = useApi()
   const { accounts, mine, error: accountError } = useAccounts()
-  const [quantity, setQuantity] = useState('1')
-  const [amount, setAmount] = useState('')
+  const amounts = usePurchaseAmounts()
+  const { quantity, amount, shipping, tax } = amounts
   const [purchaseDate, setPurchaseDate] = useState(todayIso())
   const [bucket, setBucket] = useState<Bucket>('inventory')
-  const [shipping, setShipping] = useState('')
-  const [tax, setTax] = useState('')
   const [fees, setFees] = useState('')
   const [source, setSource] = useState('')
   const [notes, setNotes] = useState('')
@@ -455,6 +511,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
 
   function submit() {
     const errors = validateDraft('purchase', { productId: product.id, quantity, amount, date: purchaseDate })
+    if (amounts.eachError) errors.amount = amounts.eachError
     if (fundingSplit) errors.funding = allocationError(fundingSplit, [amount, shipping, tax, fees], true) ?? undefined
     setValidation(errors)
     if (firstValidationError(errors)) return
@@ -487,10 +544,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
       validation={validation}
     >
       <Copy muted>{product.stats.quantity_on_hand} units currently on hand.</Copy>
-      <Row>
-        <Field label="Quantity" value={quantity} onChangeText={setQuantity} autoFocus keyboardType="number-pad" />
-        <Field label="Total paid" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" />
-      </Row>
+      <PurchaseAmountFields amounts={amounts} fees={fees} autoFocus />
       <DateField label="Purchase date" value={purchaseDate} onChange={setPurchaseDate} />
       <BucketChoice label="Goes to" value={bucket} onChange={setBucket} />
       {!fundingSplit ? <AccountChoice label="Paid from" value={fundedBy} accounts={accounts} onChange={setPaidFrom} /> : null}
@@ -504,8 +558,6 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
         <>
           <Copy muted>Optional shipping and purchase details</Copy>
           <Row>
-            <Field label="Shipping" value={shipping} onChangeText={setShipping} keyboardType="decimal-pad" placeholder="0.00" />
-            <Field label="Tax" value={tax} onChangeText={setTax} keyboardType="decimal-pad" placeholder="0.00" />
             <Field label="Fees" value={fees} onChangeText={setFees} keyboardType="decimal-pad" placeholder="0.00" />
           </Row>
           <Field label="Bought from" value={source} onChangeText={setSource} />

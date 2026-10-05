@@ -69,14 +69,21 @@ test('sealed entry derives names, keeps manual corrections, and keeps optional f
   await page.getByRole('button', { name: 'Did you mean Stellar Crown?', exact: true }).click()
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Stellar Crown Booster Box')
 
-  await expect(page.getByLabel('Shipping', { exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('Shipping', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Fees', { exact: true })).toHaveCount(0)
   await expect(page.getByLabel('Grading company', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Show optional details', exact: true }).click()
-  await expect(page.getByLabel('Shipping', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Fees', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Collector number', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Grading company', { exact: true })).toHaveCount(0)
 
-  await page.getByLabel('Total paid', { exact: true }).fill('10.00')
+  await page.getByLabel('Quantity', { exact: true }).fill('4')
+  await page.getByLabel('Price each', { exact: true }).fill('80.99')
+  await page.getByLabel('Shipping', { exact: true }).fill('15')
+  await page.getByRole('button', { name: 'Add 13% HST', exact: true }).click()
+  await expect(page.getByLabel('Total paid', { exact: true })).toHaveValue('323.96')
+  await expect(page.getByLabel('Tax', { exact: true })).toHaveValue('44.06')
+  await expect(page.getByText('$383.02 comes out of the paying account in all', { exact: true })).toBeVisible()
   const posted: Record<string, unknown>[] = []
   await page.route(API + '/api/v1/products', async (route) => {
     posted.push(route.request().postDataJSON() as Record<string, unknown>)
@@ -88,6 +95,7 @@ test('sealed entry derives names, keeps manual corrections, and keeps optional f
   })
   await page.getByRole('button', { name: 'Save product', exact: true }).click()
   await expect.poll(() => posted[0]?.name).toBe('Stellar Crown Booster Box')
+  expect(posted[0].initial_purchase).toMatchObject({ quantity: 4, amount: '323.96', shipping: '15', tax: '44.06' })
   await expect(page.getByText('Retry this fixture', { exact: true })).toBeVisible()
 
   await page.getByLabel('Name', { exact: true }).fill('My sealed product')
