@@ -16,7 +16,7 @@ import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
 import { EditCostDialog } from '../../../components/cost-form';
 import { openPurchases } from '../../../lib/cost-drafts';
-import { money } from '../../../lib/format';
+import { money, transactionLine } from '../../../lib/format';
 import { canCrack, canRip } from '../../../lib/product-types';
 
 export default function ProductDetail() {
@@ -55,7 +55,7 @@ export default function ProductDetail() {
       <Disclosure title="Rip, crack and grading" defaultOpen={p.stats.quantity_on_hand > 0 && (canRip(p.product_type.slug) || canCrack(p.product_type.slug))}><ProductOperations key={p.id} product={p} /></Disclosure>
       <Disclosure title="Cost lineage"><LineageReport productId={p.id} /></Disclosure>
       <Disclosure title="Transaction history" defaultOpen={p.history.length > 0}>{p.history.map(t=><Card key={t.kind+t.id}><Copy>{t.kind} · {t.occurred_on ?? 'No date'} · {t.status}</Copy>
-        <Copy>Quantity {t.quantity} · Amount {money(t.amount)} · Cost {money(t.cost)}</Copy><Copy muted>{t.notes}</Copy>
+        <Copy>{transactionLine(t)}</Copy><Copy muted>{t.notes}</Copy>
         {t.status === 'active' && <Row>
           <Button label={'Edit ' + t.kind} onPress={() => setForm({ mode: 'transaction', transaction: t })} />
           <Button label={'Void ' + t.kind} danger onPress={() => setForm({ mode: 'void', transaction: t })} />
