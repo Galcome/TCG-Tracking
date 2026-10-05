@@ -44,9 +44,22 @@ export function bySlug(types: Taxonomy[] | undefined, slug: string | undefined):
   return types.find((option) => option.slug === slug)
 }
 
-export function suggestedProductName(setLabel: string, type: Taxonomy | undefined): string {
+export function suggestedProductName(setLabel: string, type: Pick<Taxonomy, 'name' | 'slug'> | undefined): string {
   const set = setLabel.trim()
   if (!set || !type || !namedByItsSet(type.slug)) return ''
   if (set.toLowerCase().endsWith(type.name.toLowerCase())) return set
   return `${set} ${type.name}`
+}
+
+/** The name after correcting a product's type. A name that was the old type's suggestion
+ * follows the new type; a name typed by hand is left alone. */
+export function nameAfterTypeChange(
+  name: string,
+  setLabel: string,
+  from: Pick<Taxonomy, 'name' | 'slug'> | undefined,
+  to: Pick<Taxonomy, 'name' | 'slug'> | undefined,
+): string {
+  const before = suggestedProductName(setLabel, from)
+  const after = suggestedProductName(setLabel, to)
+  return before && after && name.trim() === before ? after : name
 }
