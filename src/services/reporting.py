@@ -664,8 +664,11 @@ class AgingLot:
     days_held: int | None
 
 
-def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
-    """Unsold stock, oldest money first. Undated lots sort last.
+def aging_lots(
+    db: Session, today: date | None = None, filters: Filters | None = None
+) -> list[AgingLot]:
+    """Unsold stock, oldest money first. Undated lots sort last. Narrowed to the products the
+    filters allow, so looking at one set does not list every other set's stock.
 
     The Vault is excluded. A Store box at 400 days is a problem and a Vault box at 400 days
     is on plan - same number, opposite meaning - so averaging them describes neither.
@@ -677,6 +680,7 @@ def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
     slow stock goes to disappear.
     """
     reference = today or date.today()
+    allowed = matching_products(db, filters)
     vaulted = vault.vault_units(db)
     products = {
         row.id: row
@@ -696,6 +700,8 @@ def aging_lots(db: Session, today: date | None = None) -> list[AgingLot]:
     ):
         product = products.get(lot.product_id)
         if product is None:  # pragma: no cover - a purchase always has its product
+            continue
+        if allowed is not None and lot.product_id not in allowed:
             continue
 
         units = int(lot.remaining)
