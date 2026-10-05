@@ -377,3 +377,55 @@ def test_pricing_routes_require_authentication():
 
     response = TestClient(app).get("/api/v1/pricing/mappings")
     assert response.status_code in (401, 403)
+
+
+def test_a_product_no_feed_quotes_shows_its_latest_valuation(client, db, make_product):
+    graded = make_product("Magikarp", grading_company="PSA", grade="10")
+    unavailable = make_product("Unlisted Box")
+    quoted = make_product("Quoted Box")
+    for product, value, on in (
+        (graded, "40.00", "2026-09-01"),
+        (graded, "55.00", "2026-10-01"),
+        (unavailable, "20.00", "2026-10-01"),
+        (quoted, "99.00", "2026-10-01"),
+    ):
+        recorded = client.post(
+            "/api/v1/valuations",
+            json={"product_id": product["id"], "value": value, "captured_on": on},
+        )
+        assert recorded.status_code == 201, recorded.text
+    for product, status, cents in ((unavailable, "unavailable", None), (quoted, "fresh", 1350)):
+        created = client.post("/api/v1/pricing/mappings", json=mapping_payload(product["id"]))
+        assert created.status_code == 201, created.text
+        mapping_row = db.get(CatalogMapping, uuid.UUID(created.json()["id"]))
+        db.add(
+            CurrentMarketQuote(
+                mapping_id=mapping_row.id,
+                product_id=mapping_row.product_id,
+                status=status,
+                original_currency="USD",
+                original_value_cents=cents,
+                cad_value_cents=cents,
+                source_revision="feed-1",
+                source_as_of=date.today() if cents else None,
+            )
+        )
+    db.flush()
+
+    detail = client.get(f"/api/v1/products/{graded['id']}").json()["market_estimate"]
+    assert detail == {
+        "value": "55.00",
+        "captured_on": "2026-10-01",
+        "status": "fresh",
+        "provider": "manual",
+        "source_revision": None,
+    }
+    listed = {
+        item["id"]: item["market_estimate"]
+        for item in client.get("/api/v1/products", params={"limit": 50}).json()["items"]
+    }
+    assert listed[graded["id"]]["value"] == "55.00"
+    assert listed[unavailable["id"]]["provider"] == "manual"
+    assert listed[unavailable["id"]]["value"] == "20.00"
+    assert listed[quoted["id"]]["provider"] == "tcgcsv"
+    assert listed[quoted["id"]]["value"] == "13.50"

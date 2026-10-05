@@ -115,7 +115,7 @@ export default function Inventory() {
     {operation ? <ProductForms product={operation.product} mode={operation.mode} onClose={() => setOperation(null)} /> : null}
     {costing ? <EditCostDialog key={costing.id} product={costing} onClose={() => setCosting(null)} /> : null}
     {selling ? <RecordSaleDialog product={selling} onClose={() => setSelling(null)} /> : null}
-    {valuing ? <RecordValuationDialog key={valuing.id} product={{ id: valuing.id, name: valuing.name }} onClose={() => setValuing(null)} /> : null}
+    {valuing ? <RecordValuationDialog key={valuing.id} product={{ id: valuing.id, name: valuing.name }} initialValue={valuing.market_estimate?.value ?? undefined} onClose={() => setValuing(null)} /> : null}
     {ripping ? <RipDialog product={ripping} initialBucket={bucket || undefined} onClose={() => setRipping(null)} /> : null}
     <View accessibilityLabel="Stock locations" style={{ flexDirection: 'row', flexWrap: wrapLocations ? 'wrap' : 'nowrap', gap: 6 }}>
       <Pressable accessibilityRole="button" accessibilityLabel="All stock" accessibilityState={{ selected: !bucket }} onPress={() => { router.setParams({ bucket: '' }); setOffset(0); }} style={{ flex: wrapLocations ? undefined : 1, width: wrapLocations ? '48%' : undefined, minWidth: 0, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: !bucket ? colors.accent : colors.edge, backgroundColor: !bucket ? colors.raised : 'transparent' }}><Text style={{ color: colors.accent, fontSize: 12, textAlign: 'center' }}>All</Text></Pressable>
@@ -160,7 +160,7 @@ export default function Inventory() {
     {products.data?.items.length === 0 && <Card><Copy>No products match these filters.</Copy>
       {q.trim() ? <Button variant="primary" label={`Add "${q.trim()}"`} onPress={() => setAdding(true)} /> : null}</Card>}
     {products.data?.items.map(p => <StockCard key={p.id} product={p} bucket={bucket} dense={isDesktop} vault={bucket === 'vault' ? holdings.get(p.id) : undefined}
-      onValue={bucket === 'vault' ? () => setValuing(p) : undefined}
+      onValue={() => setValuing(p)}
       onDetails={() => router.push({ pathname: '/products/[productId]', params: { productId: p.id } })}
       onEdit={() => setOperation({ product: p, mode: 'edit' })}
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}

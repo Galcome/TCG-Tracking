@@ -25,6 +25,8 @@ export interface RecordValuationDialogProps {
   title?: string
   description?: string
   initialCapturedOn?: string
+  /** Today's figure, so changing a value starts from it rather than a blank field. */
+  initialValue?: string
   onSkip?: () => void
   /** A recorded valuation being corrected, rather than a new one. */
   editing?: Valuation
@@ -36,12 +38,13 @@ export function RecordValuationDialog({
   title,
   description,
   initialCapturedOn,
+  initialValue,
   onSkip,
   editing,
 }: RecordValuationDialogProps) {
   const api = useApi()
   const queryClient = useQueryClient()
-  const [value, setValue] = useState(editing?.value ?? '')
+  const [value, setValue] = useState(editing?.value ?? initialValue ?? '')
   const [capturedOn, setCapturedOn] = useState(editing?.captured_on ?? initialCapturedOn ?? todayIso())
   const [notes, setNotes] = useState(editing?.notes ?? '')
   const [validation, setValidation] = useState<ValuationValidation>({})

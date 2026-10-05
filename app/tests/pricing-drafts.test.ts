@@ -12,6 +12,7 @@ import {
   canUseFreeMarketPricing,
   catalogId,
   isCertainSuggestion,
+  isManualEstimate,
   marketPosition,
   unitPosition,
   needsPricingSetup,
@@ -228,4 +229,11 @@ test('the set-up summary counts only what actually happened', () => {
     pricingSetupSummary(['matched', 'skipped', 'none', 'failed']),
     'Priced 1 of 4 · 1 skipped · 1 with no listing · 1 failed.',
   )
+})
+
+test('a typed valuation is told apart from a feed quote', () => {
+  const estimate = { value: '55.00', captured_on: '2026-10-01', status: 'fresh' as const, source_revision: null }
+  assert.equal(isManualEstimate({ market_estimate: { ...estimate, provider: 'manual' } }), true)
+  assert.equal(isManualEstimate({ market_estimate: { ...estimate, provider: 'tcgcsv' } }), false)
+  assert.equal(isManualEstimate({ market_estimate: null }), false)
 })

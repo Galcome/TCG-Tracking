@@ -33,6 +33,7 @@ from src.models.market_price import (
     CurrentMarketQuote,
     MarketPriceSnapshot,
 )
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 
 logger = logging.getLogger(__name__)
@@ -826,6 +827,43 @@ def current_estimates(
     return estimates
 
 
+#: The provider a typed valuation is shown under when no feed quotes the product.
+MANUAL_PROVIDER = "manual"
+
+
+def display_estimates(db: Session, product_ids: list[Any]) -> dict[Any, MarketEstimate]:
+    """What a product card shows per unit: the feed quote, else the latest typed valuation.
+
+    Graded cards, lots and custom types never get a feed quote, so without the fallback
+    their card could not show a price at all. The same order the stock sort and the
+    dashboard use: a usable quote leads, the newest valuation fills the gap.
+    """
+    estimates = current_estimates(db, product_ids)
+    unquoted = [
+        product_id
+        for product_id in product_ids
+        if (quote := estimates.get(product_id)) is None
+        or quote.value_cents is None
+        or quote.status == QUOTE_UNAVAILABLE
+    ]
+    if not unquoted:
+        return estimates
+    # Ascending, so the newest valuation is the one left in the dict.
+    for product_id, value_cents, captured_on in db.execute(
+        select(PriceSnapshot.product_id, PriceSnapshot.value_cents, PriceSnapshot.captured_on)
+        .where(PriceSnapshot.product_id.in_(unquoted))
+        .order_by(PriceSnapshot.captured_on.asc(), PriceSnapshot.created_at.asc())
+    ):
+        estimates[product_id] = MarketEstimate(
+            value_cents=value_cents,
+            captured_on=captured_on,
+            status=QUOTE_FRESH,
+            provider=MANUAL_PROVIDER,
+            source_revision=None,
+        )
+    return estimates
+
+
 def _record_failure(
     db: Session,
     mapping: CatalogMapping,
@@ -1111,6 +1149,7 @@ __all__ = [
     "TCGCSV_REQUEST_DELAY_SECONDS",
     "BankOfCanadaProvider",
     "current_estimates",
+    "display_estimates",
     "eligibility_error",
     "is_pricing_eligible",
     "refresh",
