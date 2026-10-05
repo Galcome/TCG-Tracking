@@ -47,6 +47,14 @@ export const FREE_MARKET_PRICING_TYPES = [
   'secret-lair',
 ] as const
 
+/** The server shows a typed valuation under this provider when no feed quotes the product. */
+export const MANUAL_PROVIDER = 'manual'
+
+/** Whether the estimate is somebody's typed valuation rather than a feed quote. */
+export function isManualEstimate(product: Pick<Product, 'market_estimate'>): boolean {
+  return product.market_estimate?.provider === MANUAL_PROVIDER
+}
+
 export const EMPTY_PRICING_MAPPING: CatalogMappingDraft = {
   external_product_id: '',
   external_group_id: '',

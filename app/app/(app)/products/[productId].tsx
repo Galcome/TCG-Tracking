@@ -18,6 +18,7 @@ import { EditCostDialog } from '../../../components/cost-form';
 import { openPurchases } from '../../../lib/cost-drafts';
 import { money, transactionLine } from '../../../lib/format';
 import { canCrack, canRip } from '../../../lib/product-types';
+import { isManualEstimate } from '../../../lib/pricing-drafts';
 
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
@@ -41,15 +42,15 @@ export default function ProductDetail() {
       <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
       <Disclosure title="Manage product"><Row>{([{ mode: 'edit', label: 'Edit product' }, { mode: 'adjust', label: 'Adjust stock' }] as const).map(action =>
           <Button key={action.mode} label={action.label} onPress={() => setForm({ mode: action.mode })} />)}</Row>
-      <Button label="Record valuation" onPress={() => setValuing(true)} />
-      <ProductValuations product={p} />
       <RenameActions product={p} />
       <ProductLifecycle product={p} /></Disclosure>
       {form && <ProductForms {...form} product={p} onClose={() => setForm(null)} />}
       {costing && <EditCostDialog product={p} onClose={() => setCosting(false)} />}
       {selling && <RecordSaleDialog product={p} onClose={() => setSelling(false)} />}
-      {valuing && <RecordValuationDialog key={p.id} product={p} onClose={() => setValuing(false)} />}
-      <Card><Copy muted>Market estimate · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No market estimate' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}</Card>
+      {valuing && <RecordValuationDialog key={p.id} product={p} initialValue={p.market_estimate?.value ?? undefined} onClose={() => setValuing(false)} />}
+      <Card><Copy muted>Estimated value · CAD / unit</Copy><Copy>{p.market_estimate?.value == null ? 'No estimate yet' : money(p.market_estimate.value)}</Copy>{p.market_estimate ? <Copy muted>{isManualEstimate(p) ? 'Your valuation' : p.market_estimate.status} · {p.market_estimate.captured_on ?? 'Date unavailable'}</Copy> : null}
+        <Button label="Record valuation" onPress={() => setValuing(true)} />
+        <ProductValuations product={p} /></Card>
       <PriceSuggestion product={p} />
       <Disclosure title="Market pricing"><PricingControls product={p} /></Disclosure>
       <Disclosure title="Rip, crack and grading" defaultOpen={p.stats.quantity_on_hand > 0 && (canRip(p.product_type.slug) || canCrack(p.product_type.slug))}><ProductOperations key={p.id} product={p} /></Disclosure>

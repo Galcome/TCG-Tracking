@@ -18,6 +18,7 @@ import {
   canUseFreeMarketPricing,
   catalogId,
   isCertainSuggestion,
+  isManualEstimate,
   pricingEligibilityMessage,
   preferredSubtype,
   pricingMappingDraft,
@@ -85,7 +86,7 @@ function LocalIdentity({ product }: { product: ProductDetail }) {
 
 function MarketEstimate({ product }: { product: ProductDetail }) {
   const estimate = product.market_estimate
-  if (!estimate) {
+  if (!estimate || isManualEstimate(product)) {
     return <Copy muted>No confirmed free-source estimate.</Copy>
   }
 
