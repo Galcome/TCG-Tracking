@@ -1,5 +1,23 @@
+import type { Transaction } from './api'
 import { reportMoney } from './reports'
 export const money = reportMoney
+type HistoryAmounts = Pick<Transaction, 'kind' | 'quantity' | 'amount' | 'base_amount' | 'shipping' | 'tax' | 'fees' | 'cost' | 'has_unknown_cost'>
+/** One line of a product's transaction history. A purchase's amount is its landed cost, so it
+ * reads as what was paid and what that was made of, never as a separate (absent) cost. */
+export function transactionLine(t: HistoryAmounts): string {
+  const parts = ['Quantity ' + t.quantity]
+  if (t.kind === 'purchase') {
+    const extras = ([['shipping', t.shipping], ['tax', t.tax], ['fees', t.fees]] as const)
+      .filter(([, value]) => tone(value) !== null)
+      .map(([label, value]) => money(value) + ' ' + label)
+    parts.push('Paid ' + money(t.amount) + (extras.length ? ' (' + [money(t.base_amount), ...extras].join(' + ') + ')' : ''))
+    return parts.join(' · ')
+  }
+  if (t.amount !== null) parts.push('Amount ' + money(t.amount))
+  if (t.has_unknown_cost) parts.push('Cost Unknown')
+  else if (t.cost !== null) parts.push('Cost ' + money(t.cost))
+  return parts.join(' · ')
+}
 export function percent(value: number | null | undefined) {
   return value == null ? 'Unknown' : (value * 100).toFixed(1) + '%';
 }

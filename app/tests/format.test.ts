@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { dateFromIso, describeDate, money, todayIso, tone, yesterdayIso } from '../lib/format'
+import { dateFromIso, describeDate, money, todayIso, tone, transactionLine, yesterdayIso } from '../lib/format'
 test('shared CAD display never loses large-value cents or converts unknown to zero', () => {
   assert.equal(money('90071992547409.91'), '$90,071,992,547,409.91')
   assert.equal(money('-0.29'), '-$0.29')
@@ -39,4 +39,13 @@ test('only real calendar days parse', () => {
   assert.equal(dateFromIso('2026-02-29'), null)
   assert.equal(dateFromIso('2026-9-1'), null)
   assert.equal(dateFromIso('2024-02-29')?.getDate(), 29)
+})
+
+test('history shows what a purchase paid, and cost only where there is one', () => {
+  const row = { quantity: 4, amount: '388.67', base_amount: '323.96', shipping: '20.00', tax: '44.71', fees: '0.00', cost: null, has_unknown_cost: false }
+  assert.equal(transactionLine({ ...row, kind: 'purchase' }), 'Quantity 4 · Paid $388.67 ($323.96 + $20.00 shipping + $44.71 tax)')
+  assert.equal(transactionLine({ ...row, kind: 'purchase', amount: '50.00', base_amount: '50.00', shipping: '0.00', tax: '0.00' }), 'Quantity 4 · Paid $50.00')
+  assert.equal(transactionLine({ ...row, kind: 'sale', quantity: -1, amount: '120.00', cost: '97.17' }), 'Quantity -1 · Amount $120.00 · Cost $97.17')
+  assert.equal(transactionLine({ ...row, kind: 'sale', quantity: -1, amount: '120.00', has_unknown_cost: true }), 'Quantity -1 · Amount $120.00 · Cost Unknown')
+  assert.equal(transactionLine({ ...row, kind: 'move', quantity: 2, amount: null }), 'Quantity 2')
 })
