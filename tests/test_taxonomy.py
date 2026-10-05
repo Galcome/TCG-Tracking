@@ -27,6 +27,15 @@ def test_sealed_products_have_their_own_types_ahead_of_the_catch_alls(client):
         "booster-bundle",
         "collector-booster-box",
         "premium-collection",
+        "ultra-premium-collection",
+        "super-premium-collection",
+        "pin-collection",
+        "poster-collection",
+        "build-and-battle-box",
+        "build-and-battle-stadium",
+        "trainers-toolkit",
+        "holiday-calendar",
+        "mini-tin",
         "illumineers-trove",
         "tin",
         "blister",
@@ -35,6 +44,8 @@ def test_sealed_products_have_their_own_types_ahead_of_the_catch_alls(client):
         "secret-lair",
     ):
         assert slug in slugs
+    assert slugs.index("ultra-premium-collection") == slugs.index("premium-collection") + 1
+    assert slugs.index("mini-tin") == slugs.index("tin") + 1
     assert slugs[-2:] == ["lot", "other"]
 
 

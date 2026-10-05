@@ -149,7 +149,14 @@ function useGamesAndTypes() {
   const api = useApi()
   const games = useQuery({ queryKey: ['games'], queryFn: api.games })
   const productTypes = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes })
-  return { games, productTypes }
+  const queryClient = useQueryClient()
+  /** A type nobody seeded, added from the picker. Resolves once the list includes it. */
+  async function addProductType(name: string): Promise<string> {
+    const created = await api.createProductType(name)
+    await queryClient.invalidateQueries({ queryKey: ['productTypes'] })
+    return created.id
+  }
+  return { games, productTypes, addProductType }
 }
 
 function useAccounts() {
@@ -219,7 +226,7 @@ function AccountChoice({
 
 function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; initialName?: string }) {
   const api = useApi()
-  const { games, productTypes } = useGamesAndTypes()
+  const { games, productTypes, addProductType } = useGamesAndTypes()
   const { accounts, mine, error: accountError } = useAccounts()
   const [name, setName] = useState(initialName)
   const [nameTouched, setNameTouched] = useState(Boolean(initialName))
@@ -357,6 +364,7 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
           value={effectiveProductTypeId}
           options={(productTypes.data ?? []).map((type) => option(type.id, type.name))}
           onChange={(value) => { setProductTypeId(value); setListing(null) }}
+          onCreate={addProductType}
         />
       </Row>
       <Choice
@@ -570,7 +578,7 @@ function PurchaseForm({ product, onClose }: { product: Product; onClose: () => v
 
 function EditProductForm({ product, onClose }: { product: Product | ProductDetail; onClose: () => void }) {
   const api = useApi()
-  const { games, productTypes } = useGamesAndTypes()
+  const { games, productTypes, addProductType } = useGamesAndTypes()
   const [name, setName] = useState(product.name)
   const [gameId, setGameId] = useState(product.game.id)
   const [productTypeId, setProductTypeId] = useState(product.product_type.id)
@@ -641,7 +649,7 @@ function EditProductForm({ product, onClose }: { product: Product | ProductDetai
     >
       <Row>
         <Choice label="Game" value={gameId} options={(games.data ?? []).map((game) => option(game.id, game.name))} onChange={setGameId} />
-        <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={changeType} />
+        <Choice label="Product type" value={productTypeId} options={(productTypes.data ?? []).map((type) => option(type.id, type.name))} onChange={changeType} onCreate={addProductType} />
       </Row>
       <Choice label="Language" value={language} options={LANGUAGES.map((item) => option(item, item))} onChange={setLanguage} />
       <SetField game={games.data?.find(game => game.id === gameId)?.slug ?? ''} value={setLabel} onChange={setSetLabel} />
