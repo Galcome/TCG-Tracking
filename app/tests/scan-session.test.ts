@@ -11,6 +11,7 @@ import {
   scanReviewError,
   scanReducer,
   scanTotal,
+  photographed,
   sight,
   type ScanItem,
 } from '../lib/scan-session'
@@ -82,6 +83,24 @@ test('a misread set or number of a card still in view is not another card', () =
   assert.deepEqual(items.map((item) => item.setName), ['Prismatic Evolutions', 'Surging Sparks'])
   // The exact same read is the same card, however long it was gone.
   assert.equal(look(items, [card()], IN_VIEW_MS * 10).length, 2)
+})
+
+test('one card per photo, and the same card photographed again is another copy', () => {
+  assert.equal(photographed([], [], 0), null)
+  assert.equal(photographed([], [card({ name: ' ' })], 0), null)
+
+  const first = photographed([], [card({ name: ' ' }), card(), card({ name: 'Raichu' })], 7)
+  assert.equal(first?.type, 'seen')
+  let items = scanReducer([], first!)
+  assert.deepEqual(items.map((item) => [item.name, item.seenAt]), [['Pikachu ex', 7]])
+
+  const again = photographed(items, [card({ collector_number: '57' })], 8)
+  assert.deepEqual(again, { type: 'quantity', key: items[0].key, delta: 1 })
+  items = scanReducer(items, again!)
+  assert.equal(items[0].quantity, 2)
+
+  // A different read is a different card here; the person removes it if it was a bad photo.
+  assert.equal(photographed(items, [card({ set_name: '' })], 9)?.type, 'seen')
 })
 
 test('a frame with two new cards adds both, newest first, and skips blanks', () => {
