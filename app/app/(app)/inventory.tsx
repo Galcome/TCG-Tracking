@@ -41,7 +41,7 @@ export default function Inventory() {
   const wrapLocations = !isDesktop && fontScale > 1.3;
   const [filtersOpen, setFiltersOpen] = useState(false);
   const api = useApi();
-  const params = useLocalSearchParams<{ bucket?: string }>();
+  const params = useLocalSearchParams<{ bucket?: string; added?: string }>();
   const bucket = BUCKETS.includes(params.bucket as Bucket) ? params.bucket as Bucket : '';
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
@@ -71,6 +71,15 @@ export default function Inventory() {
   const [valuing, setValuing] = useState<Product | null>(null);
   const [costing, setCosting] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
+  // Arriving from a new product: clear anything that could hide it and put the newest first.
+  // Adjusted during render rather than in an effect, so the old view never fetches first.
+  const [seenAdded, setSeenAdded] = useState(params.added);
+  if (params.added && params.added !== seenAdded) {
+    setSeenAdded(params.added);
+    setSearch(''); setQ(''); setGame(''); setType(''); setStock('in'); setIncludeArchived(false);
+    setHidden('exclude'); setPriced(''); setRangeText(NO_RANGES); setRanges(NO_RANGES);
+    setSort('newest'); setOffset(0);
+  }
   const games = useQuery({ queryKey: ['games'], queryFn: api.games });
   const types = useQuery({ queryKey: ['productTypes'], queryFn: api.productTypes });
   const bounds = { min_unit_value: moneyBound(ranges.minValue), max_unit_value: moneyBound(ranges.maxValue),
