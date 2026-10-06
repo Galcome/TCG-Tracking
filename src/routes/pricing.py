@@ -3,7 +3,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,8 +11,10 @@ from src.dependencies import db_session, get_current_member
 from src.models.catalog import (
     CATALOG_PROVIDER_TCGCSV,
     CATALOG_PROVIDERS,
+    MAPPING_CONFIRMED,
     CatalogMapping,
 )
+from src.models.market_price import CurrentMarketQuote
 from src.models.member import Member
 from src.models.product import Product
 from src.models.taxonomy import Game
@@ -286,6 +288,7 @@ def create_mapping(
             detail="A mapping for this product and provider already exists; update it instead.",
         ) from error
     db.refresh(mapping)
+    _price_now(db, mapping)
     return CatalogMappingRead.model_validate(mapping, from_attributes=True)
 
 
@@ -314,12 +317,45 @@ def update_mapping(
         **changes,
     }
     _validate_mapping(candidate, mapping.product)
+    relisted = any(
+        field in _LISTING_FIELDS and getattr(mapping, field) != value
+        for field, value in changes.items()
+    )
     for field, value in changes.items():
         setattr(mapping, field, value)
+    if relisted:
+        # The quote priced the old listing; drop it so the new one is fetched, not skipped
+        # as already fresh, and the old price never shows against the new listing.
+        db.execute(delete(CurrentMarketQuote).where(CurrentMarketQuote.mapping_id == mapping.id))
 
     db.flush()
     db.refresh(mapping)
+    _price_now(db, mapping)
     return CatalogMappingRead.model_validate(mapping, from_attributes=True)
+
+
+_LISTING_FIELDS = frozenset(
+    {
+        "external_product_id",
+        "external_group_id",
+        "external_category_id",
+        "subtype_name",
+        "condition",
+        "language",
+    }
+)
+
+
+def _price_now(db: Session, mapping: CatalogMapping) -> None:
+    """Price a just-saved listing instead of leaving it unpriced until the daily refresh."""
+    if mapping.match_status != MAPPING_CONFIRMED:
+        return
+    try:
+        pricing_service.refresh(db, mapping_ids=[mapping.id])
+    except pricing_service.PricingError:
+        # A refresh already running, or a feed failure: the daily refresh retries anything
+        # not fresh, and saving the listing must not fail because pricing could not run.
+        return
 
 
 @router.post("/refresh", response_model=PricingRefreshRead)
