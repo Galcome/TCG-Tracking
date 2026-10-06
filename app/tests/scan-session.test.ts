@@ -5,12 +5,13 @@ import type { CardLookup, ProductCandidate, ReadCard } from '../lib/api'
 import {
   lineTotal,
   matchingProduct,
-  newCards,
+  IN_VIEW_MS,
   scanKey,
   scanReadyError,
   scanReviewError,
   scanReducer,
   scanTotal,
+  sight,
   type ScanItem,
 } from '../lib/scan-session'
 
@@ -51,34 +52,82 @@ function lookup(overrides: Partial<CardLookup> = {}): CardLookup {
   }
 }
 
+function look(items: ScanItem[], cards: ReadCard[], at = 0): ScanItem[] {
+  return scanReducer(items, { type: 'seen', sighting: sight(items, cards, at) })
+}
+
 function seen(...cards: ReadCard[]): ScanItem[] {
-  return scanReducer([], { type: 'seen', cards })
+  return look([], cards)
 }
 
 test('a card is one row however many frames it stays in view', () => {
   let items = seen(card())
-  items = scanReducer(items, { type: 'seen', cards: [card({ collector_number: '57/191' })] })
-  items = scanReducer(items, { type: 'seen', cards: [card({ name: ' pikachu EX ' })] })
+  items = look(items, [card({ collector_number: '57/191' })], 1000)
+  items = look(items, [card({ name: ' pikachu EX ' })], 2000)
 
   assert.equal(items.length, 1)
   assert.equal(items[0].quantity, 1)
   assert.equal(items[0].status, 'pricing')
+  assert.equal(items[0].seenAt, 2000)
+})
+
+test('a misread set or number of a card still in view is not another card', () => {
+  let items = seen(card())
+  items = look(items, [card({ set_name: '', collector_number: '0300' })], IN_VIEW_MS)
+  items = look(items, [card({ set_name: 'SSP', collector_number: '0308' })], IN_VIEW_MS * 2)
+  assert.equal(items.length, 1)
+
+  // Out of view long enough, a differently read card with the same name is another printing.
+  items = look(items, [card({ set_name: 'Prismatic Evolutions', collector_number: '28' })], IN_VIEW_MS * 3 + 1)
+  assert.deepEqual(items.map((item) => item.setName), ['Prismatic Evolutions', 'Surging Sparks'])
+  // The exact same read is the same card, however long it was gone.
+  assert.equal(look(items, [card()], IN_VIEW_MS * 10).length, 2)
 })
 
 test('a frame with two new cards adds both, newest first, and skips blanks', () => {
   let items = seen(card())
-  items = scanReducer(items, {
-    type: 'seen',
-    cards: [card({ name: 'Raichu', collector_number: '58' }), card({ name: '  ' }), card({ name: 'Raichu', collector_number: '058' })],
-  })
+  items = look(items, [card({ name: 'Raichu', collector_number: '58' }), card({ name: '  ' }), card({ name: 'Raichu', collector_number: '058' })])
 
   assert.deepEqual(items.map((item) => item.name), ['Raichu', 'Pikachu ex'])
 })
 
-test('newCards only returns what the session has not got', () => {
+test('sight only offers what the session has not got', () => {
   const items = seen(card())
-  assert.deepEqual(newCards(items, [card(), card({ name: 'Raichu' })]).map((c) => c.name), ['Raichu'])
+  const sighting = sight(items, [card(), card(), card({ name: 'Raichu' })], 5)
+  assert.deepEqual(sighting.fresh.map((item) => item.name), ['Raichu'])
+  assert.deepEqual(sighting.seen, [items[0].key])
+  assert.deepEqual(sight(items, [], 5), { at: 5, fresh: [], reread: [], seen: [] })
   assert.notEqual(scanKey(card()), scanKey(card({ set_name: 'Prismatic Evolutions' })))
+})
+
+test('a clearer read replaces a row whose set was unreadable, until someone touches it', () => {
+  const unreadable = lookup({ set_id: null, set_name: null, candidates: [], suggested_index: null, method: null, message: 'The set was not readable. Pick it by hand.' })
+  let items = seen(card({ set_name: '' }))
+  items = scanReducer(items, { type: 'quantity', key: items[0].key, delta: 1 })
+  items = scanReducer(items, { type: 'priced', key: items[0].key, lookup: unreadable })
+
+  const sighting = sight(items, [card()], 1000)
+  assert.equal(sighting.reread.length, 1)
+  items = scanReducer(items, { type: 'seen', sighting })
+  assert.equal(items.length, 1)
+  assert.equal(items[0].key, scanKey(card()))
+  assert.equal(items[0].setName, 'Surging Sparks')
+  assert.equal(items[0].status, 'pricing')
+  assert.equal(items[0].quantity, 2)
+
+  // A row the person already started on keeps what they did.
+  let typed = seen(card({ set_name: '' }))
+  typed = scanReducer(typed, { type: 'priced', key: typed[0].key, lookup: unreadable })
+  const late = sight(typed, [card()], 1000)
+  typed = scanReducer(typed, { type: 'paid', key: typed[0].key, paidEach: '2' })
+  assert.equal(scanReducer(typed, { type: 'seen', sighting: late })[0].setName, '')
+  assert.equal(sight(typed, [card()], 1000).reread.length, 0)
+})
+
+test('a certain catalog match confirms the card, but a model pick waits for the person', () => {
+  const [item] = seen(card())
+  assert.equal(scanReducer([item], { type: 'priced', key: item.key, lookup: lookup() })[0].reviewed, true)
+  assert.equal(scanReducer([item], { type: 'priced', key: item.key, lookup: lookup({ method: 'ai' }) })[0].reviewed, false)
 })
 
 test('a priced card takes the catalog price, set and listing', () => {
@@ -201,7 +250,8 @@ test('the person can choose an ambiguous catalog listing and edit identity befor
   assert.equal(items[0].variant, 'Reverse Holofoil')
   assert.equal(items[0].price, '20.00')
   assert.equal(items[0].listing?.productId, 8)
-  items = scanReducer(items, { type: 'reviewed', key: items[0].key })
+  assert.equal(items[0].reviewed, true)
+  assert.equal(scanReviewError(items), null)
   items = scanReducer(items, { type: 'identity', key: items[0].key, field: 'language', value: 'Japanese' })
   assert.equal(items[0].language, 'Japanese')
   assert.equal(items[0].reviewed, false)
