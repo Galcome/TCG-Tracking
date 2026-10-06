@@ -888,18 +888,21 @@ def refresh(
     now: datetime | None = None,
     provider: TCGCSVProvider | None = None,
     fx: BankOfCanadaProvider | None = None,
+    mapping_ids: list[Any] | None = None,
 ) -> RefreshSummary:
-    """Refresh confirmed mappings once for the provider's current daily revision."""
+    """Refresh confirmed mappings once for the provider's current daily revision.
+
+    ``mapping_ids`` narrows the run to those mappings, so a newly saved listing is priced
+    without refetching every group.
+    """
     _acquire_refresh_lock(db)
     reference = today or date.today()
     attempted_at = now or datetime.now(UTC)
+    stmt = select(CatalogMapping).where(CatalogMapping.match_status == MAPPING_CONFIRMED)
+    if mapping_ids is not None:
+        stmt = stmt.where(CatalogMapping.id.in_(mapping_ids))
     mappings = list(
-        db.scalars(
-            select(CatalogMapping)
-            .where(CatalogMapping.match_status == MAPPING_CONFIRMED)
-            .order_by(CatalogMapping.id)
-            .limit(MAX_REFRESH_MAPPINGS + 1)
-        )
+        db.scalars(stmt.order_by(CatalogMapping.id).limit(MAX_REFRESH_MAPPINGS + 1))
     )
     if not mappings:
         return RefreshSummary(0, 0, 0, 0, 0, None, ())

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,9 @@ from src.models.market_price import CurrentMarketQuote
 from src.models.taxonomy import ProductType
 from src.routes import pricing as pricing_route
 from src.services import pricing
+
+#: Captured before conftest swaps it out, for the tests that price a saved listing.
+REAL_PRICE_NOW = pricing_route._price_now
 
 
 def mapping_payload(product_id: str, **overrides) -> dict:
@@ -429,3 +433,87 @@ def test_a_product_no_feed_quotes_shows_its_latest_valuation(client, db, make_pr
     assert listed[unavailable["id"]]["value"] == "20.00"
     assert listed[quoted["id"]]["provider"] == "tcgcsv"
     assert listed[quoted["id"]]["value"] == "13.50"
+
+
+class FakeFeed:
+    """TCGCSV stand-in priced by listing id, in USD."""
+
+    prices = {"42": "10.00", "43": "20.00"}
+    quoted: list[str] = []
+
+    def latest_update(self):
+        return pricing.FeedRevision("r1", date(2026, 10, 5))
+
+    def quote_for(self, mapping, revision):
+        FakeFeed.quoted.append(mapping.external_product_id)
+        return pricing.ProviderQuote(
+            Decimal(self.prices[mapping.external_product_id]), "USD", revision
+        )
+
+    def release_group(self, _category_id, _group_id):
+        return None
+
+
+class FakeFX:
+    def usd_cad(self, on_or_before):
+        return pricing.ExchangeRate(Decimal("1.35"), on_or_before)
+
+
+@pytest.fixture
+def live_pricing(monkeypatch):
+    FakeFeed.quoted = []
+    monkeypatch.setattr(pricing_route, "_price_now", REAL_PRICE_NOW)
+    monkeypatch.setattr(pricing_route.pricing_service, "TCGCSVProvider", FakeFeed)
+    monkeypatch.setattr(pricing_route.pricing_service, "BankOfCanadaProvider", FakeFX)
+
+
+def _quote(db, mapping_id):
+    db.expire_all()
+    return db.scalar(
+        select(CurrentMarketQuote).where(CurrentMarketQuote.mapping_id == uuid.UUID(mapping_id))
+    )
+
+
+def test_saving_a_listing_prices_it_straight_away(client, db, make_product, live_pricing):
+    product = make_product("Priced On Save")
+    created = client.post("/api/v1/pricing/mappings", json=mapping_payload(product["id"]))
+    assert created.status_code == 201, created.text
+    mapping_id = created.json()["id"]
+    assert _quote(db, mapping_id).cad_value_cents == 1350
+
+    # A note is not a new listing: the quote stands.
+    noted = client.patch(f"/api/v1/pricing/mappings/{mapping_id}", json={"notes": "checked"})
+    assert noted.status_code == 200, noted.text
+    assert _quote(db, mapping_id).cad_value_cents == 1350
+
+    # Pointing at another listing drops the old price and fetches the new one.
+    moved = client.patch(
+        f"/api/v1/pricing/mappings/{mapping_id}", json={"external_product_id": "43"}
+    )
+    assert moved.status_code == 200, moved.text
+    assert FakeFeed.quoted[-1] == "43"
+    assert _quote(db, mapping_id).cad_value_cents == 2700
+
+    # A disabled listing is never priced.
+    asked = len(FakeFeed.quoted)
+    disabled = client.patch(
+        f"/api/v1/pricing/mappings/{mapping_id}",
+        json={"external_product_id": "42", "match_status": "disabled"},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert len(FakeFeed.quoted) == asked
+    assert _quote(db, mapping_id) is None
+
+
+def test_a_busy_refresh_never_fails_saving_a_listing(
+    client, db, make_product, live_pricing, monkeypatch
+):
+    def busy(_db, **_kwargs):
+        raise pricing.PricingRefreshBusy("already running")
+
+    monkeypatch.setattr(pricing_route.pricing_service, "refresh", busy)
+    product = make_product("Saved While Busy")
+    created = client.post("/api/v1/pricing/mappings", json=mapping_payload(product["id"]))
+    assert created.status_code == 201, created.text
+    assert _quote(db, created.json()["id"]) is None
+

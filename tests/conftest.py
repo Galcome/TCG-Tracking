@@ -60,6 +60,14 @@ from src.main import app  # noqa: E402
 from src.models.taxonomy import Game, ProductType  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def no_pricing_on_mapping_save(monkeypatch) -> None:
+    """Saving a listing prices it from TCGCSV; tests opt in with fake providers."""
+    from src.routes import pricing as pricing_route
+
+    monkeypatch.setattr(pricing_route, "_price_now", lambda _db, _mapping: None)
+
+
 @pytest.fixture
 def db() -> Generator[Session, None, None]:
     """A session inside a transaction that is always rolled back.
