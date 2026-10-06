@@ -20,16 +20,29 @@ export interface ScanItem {
   paidEach: string
   status: 'pricing' | 'priced' | 'unpriced'
   message: string | null
-  /** Every card must be explicitly reviewed before it can be saved. */
+  /** Every card is confirmed before it can be saved: by a certain catalog match or by a person. */
   reviewed: boolean
   candidates: PricedListing[]
   catalogSetName: string | null
   /** The catalog listing the price came from, so an added product can be mapped to it. */
   listing: { productId: number; groupId: number; categoryId: number; subtype: string } | null
+  /** When a frame last read this card, in ms. */
+  seenAt: number
+}
+
+/** What one frame's read changes. Built by `sight`, so the scanner prices exactly these. */
+export interface Sighting {
+  at: number
+  /** Cards the session has not got. */
+  fresh: ScanItem[]
+  /** Rows a clearer read replaces, by their old key. */
+  reread: { key: string; item: ScanItem }[]
+  /** Rows still in view. */
+  seen: string[]
 }
 
 export type ScanAction =
-  | { type: 'seen'; cards: ReadCard[] }
+  | { type: 'seen'; sighting: Sighting }
   | { type: 'priced'; key: string; lookup: CardLookup }
   | { type: 'failed'; key: string; message: string }
   | { type: 'quantity'; key: string; delta: number }
@@ -59,17 +72,62 @@ export function scanKey(card: Pick<ReadCard, 'name' | 'set_name' | 'collector_nu
   return [normal(card.name), normal(card.set_name), cardNumber(card.collector_number)].join('|')
 }
 
-/** The cards in this read that the session has not already got, each once. */
-export function newCards(items: readonly ScanItem[], cards: readonly ReadCard[]): ReadCard[] {
-  const known = new Set(items.map((item) => item.key))
-  const fresh: ReadCard[] = []
-  for (const card of cards) {
-    const key = scanKey(card)
-    if (!card.name.trim() || known.has(key)) continue
-    known.add(key)
-    fresh.push(card)
+/** A card read again within this long of its last read is still the card in view. */
+export const IN_VIEW_MS = 6000
+
+function scanItem(card: ReadCard, at: number): ScanItem {
+  return {
+    key: scanKey(card),
+    name: card.name.trim(),
+    setName: card.set_name.trim(),
+    collectorNumber: card.collector_number.trim(),
+    variant: card.variant.trim(),
+    language: card.language.trim(),
+    quantity: 1,
+    price: '',
+    paidEach: '',
+    status: 'pricing',
+    message: null,
+    reviewed: false,
+    candidates: [],
+    catalogSetName: null,
+    listing: null,
+    seenAt: at,
   }
-  return fresh
+}
+
+/** A row the lookup could not place and that nobody has touched yet. */
+function untouched(item: ScanItem): boolean {
+  return item.status === 'unpriced' && !item.listing && !item.reviewed && !item.paidEach && !item.price
+}
+
+/**
+ * What one frame's read means for the session. The camera reads a card a little differently
+ * frame to frame ("0300" then "0308", a set then none), so a read with the name of a card
+ * still in view is that card, not another copy; a second copy is a tap on +. A clearer read
+ * of a row whose set was unreadable replaces it, so it can be priced.
+ */
+export function sight(items: readonly ScanItem[], cards: readonly ReadCard[], at: number): Sighting {
+  const sighting: Sighting = { at, fresh: [], reread: [], seen: [] }
+  const keys = new Set(items.map((item) => item.key))
+  for (const card of cards) {
+    if (!card.name.trim()) continue
+    const key = scanKey(card)
+    const known = items.find((item) => item.key === key) ??
+      items.find((item) => normal(item.name) === normal(card.name) && at - item.seenAt <= IN_VIEW_MS)
+    if (!known) {
+      if (!keys.has(key)) sighting.fresh.push(scanItem(card, at))
+      keys.add(key)
+      continue
+    }
+    if (sighting.seen.includes(known.key)) continue
+    sighting.seen.push(known.key)
+    if (!normal(known.setName) && normal(card.set_name) && untouched(known) && !keys.has(key)) {
+      sighting.reread.push({ key: known.key, item: { ...scanItem(card, at), quantity: known.quantity } })
+      keys.add(key)
+    }
+  }
+  return sighting
 }
 
 function priced(item: ScanItem, lookup: CardLookup): ScanItem {
@@ -81,7 +139,7 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
       candidates: lookup.candidates,
       catalogSetName: lookup.set_name,
       message: lookup.message ?? (lookup.candidates.length
-        ? 'Several listings fit. Choose the right one.'
+        ? 'Several listings fit. Pick the catalog match below.'
         : 'No catalog listing found. Enter the price.'),
     }
   }
@@ -96,6 +154,8 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
     candidates: lookup.candidates,
     catalogSetName: lookup.set_name,
     message: chosen.market ? null : (lookup.message ?? 'The catalog has no price for this printing.'),
+    // Same name and number in the same set is certain; a model's pick still needs a look.
+    reviewed: item.reviewed || lookup.method === 'exact',
     listing: {
       productId: chosen.listing.product_id,
       groupId: chosen.listing.group_id,
@@ -107,27 +167,18 @@ function priced(item: ScanItem, lookup: CardLookup): ScanItem {
 
 export function scanReducer(items: ScanItem[], action: ScanAction): ScanItem[] {
   switch (action.type) {
-    case 'seen':
+    case 'seen': {
+      const { at, fresh, reread, seen } = action.sighting
+      const known = new Set(items.map((item) => item.key))
       return [
-        ...newCards(items, action.cards).map((card): ScanItem => ({
-          key: scanKey(card),
-          name: card.name.trim(),
-          setName: card.set_name.trim(),
-          collectorNumber: card.collector_number.trim(),
-          variant: card.variant.trim(),
-          language: card.language.trim(),
-          quantity: 1,
-          price: '',
-          paidEach: '',
-          status: 'pricing',
-          message: null,
-          reviewed: false,
-          candidates: [],
-          catalogSetName: null,
-          listing: null,
-        })),
-        ...items,
+        ...fresh.filter((item) => !known.has(item.key)),
+        ...items.map((item) => {
+          const better = reread.find((entry) => entry.key === item.key)
+          if (better && untouched(item)) return better.item
+          return seen.includes(item.key) ? { ...item, seenAt: at } : item
+        }),
       ]
+    }
     case 'priced':
       return items.map((item) => item.key === action.key ? priced(item, action.lookup) : item)
     case 'failed':
@@ -176,7 +227,8 @@ export function scanReducer(items: ScanItem[], action: ScanAction): ScanItem[] {
             categoryId: chosen.listing.category_id,
             subtype: chosen.subtype,
           },
-          reviewed: false,
+          // Picking the listing by hand is the review.
+          reviewed: true,
         }
       })
     case 'reviewed':
