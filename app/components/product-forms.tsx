@@ -271,7 +271,8 @@ function AddProductForm({ onClose, initialName = '' }: { onClose: () => void; in
     return created
   }, (created) => {
     onClose()
-    if (canUseFreeMarketPricing(created)) router.push(`/products/${created.id}`)
+    // Land where it was stored, newest first, so the product just added is on top.
+    router.push({ pathname: '/inventory', params: { bucket, added: created.id } })
   })
 
   const effectiveGameId = gameId || games.data?.[0]?.id || ''

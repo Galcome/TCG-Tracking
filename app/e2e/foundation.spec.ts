@@ -1325,8 +1325,8 @@ test('adding a product can start from the price catalog and saves its mapping', 
   const mapped = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/pricing/mappings');
   await page.getByRole('button', { name: 'Save product', exact: true }).click();
   expect((await mapped).status()).toBe(201);
-  await expect(page).toHaveURL(/\/products\/[0-9a-f-]+$/);
-  const productId = new URL(page.url()).pathname.split('/').pop()!;
+  await expect(page).toHaveURL(/\/inventory\?bucket=inventory&added=[0-9a-f-]+$/);
+  const productId = new URL(page.url()).searchParams.get('added')!;
   const product = await (await request.get(API + '/api/v1/products/' + productId)).json();
   expect(product).toMatchObject({ name: unique, collector_number: '238/191', variant: 'Holofoil', set_name: setName });
   expect(product.stats.remaining_cost).toBe('5.00');
@@ -1360,10 +1360,13 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await expect(page.getByRole('heading', { name: 'Add product', exact: true })).toHaveCount(0);
   const afterUnfundedPurchase = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(afterUnfundedPurchase.total_owed).toBe(beforeUnfundedPurchase.total_owed);
-  await expect(page).toHaveURL(/\/products\/[0-9a-f-]+$/);
+  // Saving lands on the tab it was stored in, newest first, so the new product is on top.
+  await expect(page).toHaveURL(/\/inventory\?bucket=inventory&added=[0-9a-f-]+$/);
+  const productId = new URL(page.url()).searchParams.get('added')!;
+  await page.getByRole('button', { name: 'Expo mutation journey', exact: true }).first().click();
+  await expect(page).toHaveURL(new RegExp('/products/' + productId + '$'));
   await openProductSections(page);
   await expect(page.getByText('Remaining cost $84.33', { exact: true })).toBeVisible();
-  const productId = new URL(page.url()).pathname.split('/').pop()!;
   const readProduct = async () => (await request.get(API + '/api/v1/products/' + productId)).json();
   expect((await readProduct()).collector_number).toBe('042');
   expect((await readProduct()).set_name).toBe(knownSets.items[0].name);
