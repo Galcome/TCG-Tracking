@@ -23,6 +23,7 @@ import {
   positiveMoney,
 } from '../lib/money-drafts'
 import { money, todayIso } from '../lib/format'
+import { withOntarioHst } from '../lib/purchase-math'
 import { allocationError, fundingPayload, type AllocationDraft } from '../lib/allocation-drafts'
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory } from '../lib/api'
 import { AllocationEditor } from './allocation-editor'
@@ -318,6 +319,10 @@ export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
   const joint = accounts.find((account) => account.kind === 'joint')
   const [category, setCategory] = useState<ExpenseCategory>(replacing?.edit.category ?? 'supplies')
   const [amount, setAmount] = useState(replacing?.edit.amount ?? '')
+  // Receipts usually show the price before tax; this adds 13% HST so nobody does the math.
+  const [addHst, setAddHst] = useState(false)
+  const withHst = addHst ? withOntarioHst(amount) : null
+  const total = withHst ?? amount
   const [chosenAccount, setPaidFrom] = useState<string | null>(replacing?.edit.paidFrom || null)
   const [split, setSplit] = useState<AllocationDraft[] | null>(
     replacing?.edit.split?.map((leg) => ({ kind: 'account', accountId: leg.accountId, store: '', amount: leg.amount })) ?? null,
@@ -335,8 +340,8 @@ export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
 
   function submit() {
     const today = todayIso()
-    const splitError = split ? allocationError(split, [amount], true) : null
-    const draft = { category, amount, occurredOn, notes, paidFrom, split: split && !splitError ? fundingPayload(split) : null }
+    const splitError = split ? allocationError(split, [total], true) : null
+    const draft = { category, amount: total, occurredOn, notes, paidFrom, split: split && !splitError ? fundingPayload(split) : null }
     const errors = validateExpenseDraft(draft, today)
     if (splitError) errors.split = splitError
     setValidation(errors)
@@ -356,6 +361,12 @@ export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
     >
       {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
+      <Button
+        label={addHst ? '13% HST added' : 'Add 13% HST'}
+        variant={addHst ? 'primary' : 'secondary'}
+        onPress={() => setAddHst((current) => !current)}
+      />
+      {withHst ? <Copy muted>{money(withHst)} with HST is what gets recorded</Copy> : null}
       <View accessibilityLabel="Category" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {EXPENSE_CATEGORIES.map((value) => (
           <Button
