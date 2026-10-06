@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ontarioHst, purchaseGrandTotal, totalFromEach } from '../lib/purchase-math'
+import { ontarioHst, purchaseGrandTotal, totalFromEach, withOntarioHst } from '../lib/purchase-math'
 
 test('the total paid is the quantity times the price of one', () => {
   assert.equal(totalFromEach('4', '80.99'), '323.96')
@@ -24,4 +24,11 @@ test('the grand total adds shipping, tax and fees to the total paid', () => {
   assert.equal(purchaseGrandTotal('323.96', '', '42.11', ''), '366.07')
   assert.equal(purchaseGrandTotal('100', '10', '14.30', '2.5'), '126.80')
   assert.equal(purchaseGrandTotal('100', 'x', '', ''), null)
+})
+
+test('an expense with HST added is the amount plus 13%, rounded half up', () => {
+  assert.equal(withOntarioHst('100'), '113.00')
+  assert.equal(withOntarioHst('19.99'), '22.59')
+  assert.equal(withOntarioHst(''), null)
+  assert.equal(withOntarioHst('ten'), null)
 })

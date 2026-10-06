@@ -37,3 +37,9 @@ export function purchaseGrandTotal(amount: string, shipping: string, tax: string
   if (paid === null || extras.some((cents) => cents === null)) return null
   return centsText(extras.reduce<bigint>((sum, cents) => sum + cents!, paid))
 }
+
+/** An amount with Ontario HST added on top, for costs recorded as one all-in figure. */
+export function withOntarioHst(amount: string): string | null {
+  const tax = ontarioHst(amount, '')
+  return tax === null ? null : purchaseGrandTotal(amount, '', tax, '')
+}
