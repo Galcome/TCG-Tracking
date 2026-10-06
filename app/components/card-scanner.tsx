@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import { File } from 'expo-file-system'
 import * as Haptics from 'expo-haptics'
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import { useQuery } from '@tanstack/react-query'
@@ -93,7 +94,9 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
       const rendered = await ImageManipulator.manipulate(picture.uri).resize({ width: FRAME_WIDTH }).renderAsync()
       const frame = await rendered.saveAsync({ compress: 0.6, format: SaveFormat.JPEG })
       if (cancelled) return
-      const result = await api.readCards(photoBody({ uri: frame.uri, name: 'frame.jpg', type: 'image/jpeg' }))
+      const result = await api.readCards(photoBody({
+        uri: frame.uri, name: 'frame.jpg', type: 'image/jpeg', read: () => new File(frame.uri).bytes(),
+      }))
       if (cancelled) return
       const fresh = newCards(itemsRef.current, result.cards)
       if (!fresh.length) return
