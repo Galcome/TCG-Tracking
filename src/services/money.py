@@ -25,6 +25,7 @@ from src.models.money import (
     ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     JOINT_ACCOUNT_NAME,
+    MOVEMENT_CONTRIBUTION,
     MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
     MoneyAccount,
@@ -160,6 +161,23 @@ def balances(db: Session) -> dict[uuid.UUID, int]:
     return {account_id: int(total) for account_id, total in rows}
 
 
+def contributions(db: Session) -> dict[uuid.UUID, int]:
+    """What each partner has put in for their shares, over active contributions only."""
+    rows = db.execute(
+        select(
+            MoneyMovement.contributed_by_member_id,
+            func.coalesce(func.sum(MoneyPosting.delta_cents), 0),
+        )
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyMovement.kind == MOVEMENT_CONTRIBUTION,
+        )
+        .group_by(MoneyMovement.contributed_by_member_id)
+    )
+    return {member_id: int(total) for member_id, total in rows}
+
+
 def balance_for(account: MoneyAccount, flow: int) -> int:
     """What this account's balance means, from its raw flow.
 
@@ -185,6 +203,7 @@ def record_movement(
     purchase_id: uuid.UUID | None = None,
     sale_id: uuid.UUID | None = None,
     expense_category: str | None = None,
+    contributed_by_member_id: uuid.UUID | None = None,
 ) -> MoneyMovement:
     """Write one movement and its legs. `legs` are (account_id, signed cents)."""
     movement = MoneyMovement(
@@ -193,6 +212,7 @@ def record_movement(
         purchase_id=purchase_id,
         sale_id=sale_id,
         expense_category=expense_category,
+        contributed_by_member_id=contributed_by_member_id,
         notes=notes,
         created_by_member_id=member_id,
     )

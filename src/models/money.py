@@ -27,6 +27,7 @@ That single flip is why every event the group described falls out of one rule:
 | Sale paid in store credit | That shop +X | Credit to spend there, and no cash anywhere |
 | Purchase paid with store credit | That shop -X | Credit spent down |
 | Sleeves bought from Joint | Joint -X | Cash down, and profit down by X |
+| Joseph puts $5,000 in for his shares | Joint +X | Cash in, and nobody is owed it |
 
 **Store credit is value, not money.** A store-credit account sums like the joint one - it is
 something the group owns and can spend - but it is never added into a cash figure. Selling a
@@ -86,12 +87,17 @@ MOVEMENT_ADJUSTMENT = "adjustment"
 #: out of whoever paid, exactly like funding; the difference is that it lands in profit as a
 #: period cost instead of in any product's cost basis.
 MOVEMENT_EXPENSE = "expense"
+#: A partner putting money in for their share of the business. Cash arrives in the joint
+#: account and, unlike a transfer from their own account, nothing is owed back: it is
+#: ownership, not a loan. `contributed_by_member_id` says whose shares it bought.
+MOVEMENT_CONTRIBUTION = "contribution"
 MOVEMENT_KINDS = (
     MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
     MOVEMENT_TRANSFER,
     MOVEMENT_ADJUSTMENT,
     MOVEMENT_EXPENSE,
+    MOVEMENT_CONTRIBUTION,
 )
 
 #: Fixed on purpose: a free-text category splits "Sleeves" and "sleeves" into two totals,
@@ -110,7 +116,7 @@ EXPENSE_CATEGORIES = (
 
 _ACCOUNT_KIND_CHECK = "kind IN ('joint', 'member', 'store_credit')"
 _MOVEMENT_KIND_CHECK = (
-    "kind IN ('funding', 'proceeds', 'transfer', 'adjustment', 'expense')"
+    "kind IN ('funding', 'proceeds', 'transfer', 'adjustment', 'expense', 'contribution')"
 )
 #: Spelled out rather than built from EXPENSE_CATEGORIES so no SQL is ever assembled from
 #: strings; a test pins the two together.
@@ -206,6 +212,12 @@ class MoneyMovement(Base, TimestampMixin):
             "(kind = 'expense') = (expense_category IS NOT NULL)",
             name="ck_money_movements_expense_has_category",
         ),
+        # Every contribution names whose shares it bought and nothing else does, so a
+        # partner's capital total can never pick up a stray transfer.
+        CheckConstraint(
+            "(kind = 'contribution') = (contributed_by_member_id IS NOT NULL)",
+            name="ck_money_movements_contribution_has_member",
+        ),
         Index("ix_money_movements_status_date", "status", "occurred_on"),
         Index("ix_money_movements_purchase", "purchase_id"),
         Index("ix_money_movements_sale", "sale_id"),
@@ -225,6 +237,11 @@ class MoneyMovement(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     expense_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default=DEFAULT_CURRENCY)
+    #: Set on contributions only: the partner whose share of the business this paid for.
+    #: Separate from `created_by_member_id`, because Joseph can record Jason's buy-in.
+    contributed_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("members.id"), nullable=True
+    )
 
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True

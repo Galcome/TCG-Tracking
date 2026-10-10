@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Text, View } from 'react-native'
 
-import { BalanceAdjustmentDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
+import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
@@ -28,6 +28,7 @@ const MOVEMENT_KINDS: { value: MovementKind | ''; label: string }[] = [
   { value: 'transfer', label: MOVEMENT_LABELS.transfer },
   { value: 'adjustment', label: MOVEMENT_LABELS.adjustment },
   { value: 'expense', label: MOVEMENT_LABELS.expense },
+  { value: 'contribution', label: MOVEMENT_LABELS.contribution },
 ]
 
 function isZeroMoney(value: string): boolean {
@@ -85,6 +86,9 @@ function AccountCard({
           <View style={{ flex: 1, minWidth: 180 }}>
             <Copy>{account.name}</Copy>
             <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
+            {account.contributed && !isZeroMoney(account.contributed) ? (
+              <Copy muted>Put in for shares: {money(account.contributed)}</Copy>
+            ) : null}
           </View>
           <Copy><Text style={{ color: balanceTone(account) }}>{money(account.balance)}</Text></Copy>
         </Row>
@@ -180,6 +184,7 @@ export function Money(_props: MoneyProps = {}) {
   const [offset, setOffset] = useState(0)
   const [transferFrom, setTransferFrom] = useState<string | null>(null)
   const [adjusting, setAdjusting] = useState<Account | null>(null)
+  const [contributing, setContributing] = useState(false)
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const [voiding, setVoiding] = useState<string | null>(null)
 
@@ -221,6 +226,7 @@ export function Money(_props: MoneyProps = {}) {
         <>
           <Row>
             {items.length > 0 ? <Button label="Move money" onPress={() => setTransferFrom(items[0].id)} /> : null}
+            <Button label="Put in for shares" onPress={() => setContributing(true)} />
           </Row>
           <Card>
             <Row>
@@ -232,7 +238,12 @@ export function Money(_props: MoneyProps = {}) {
               <View style={{ flex: 1, minWidth: 150 }}>
                 <Copy muted>Owed to partners</Copy>
                 <Copy>{money(accounts.data.total_owed)}</Copy>
-                <Copy muted>Money put in from personal pockets</Copy>
+                <Copy muted>Personal money the business pays back</Copy>
+              </View>
+              <View style={{ flex: 1, minWidth: 150 }}>
+                <Copy muted>Put in for shares</Copy>
+                <Copy>{money(accounts.data.total_contributed)}</Copy>
+                <Copy muted>Ownership - never paid back</Copy>
               </View>
               <View style={{ flex: 1, minWidth: 150 }}>
                 <Copy muted>In store credit</Copy>
@@ -244,7 +255,7 @@ export function Money(_props: MoneyProps = {}) {
                 </Copy>
               </View>
             </Row>
-            <Copy muted>These three balances are different facts and are never added together.</Copy>
+            <Copy muted>These balances are different facts and are never added together.</Copy>
           </Card>
           {shownAccounts.map((account) => (
             <AccountCard
@@ -322,6 +333,7 @@ export function Money(_props: MoneyProps = {}) {
       ) : null}
 
       {transferFrom ? <TransferDialog accounts={items} from={transferFrom} onClose={() => setTransferFrom(null)} /> : null}
+      {contributing ? <ContributionDialog accounts={items} onClose={() => setContributing(false)} /> : null}
       {adjusting ? <BalanceAdjustmentDialog account={adjusting} onClose={() => setAdjusting(null)} /> : null}
       {editing?.kind === 'adjustment' ? (
         <BalanceAdjustmentDialog

@@ -893,6 +893,8 @@ export interface Account {
   is_active: boolean
   balance: string
   balance_means: 'cash' | 'owed' | 'credit'
+  /** Put in for shares - ownership, never owed back. Partner accounts only. */
+  contributed: string | null
 }
 
 export interface AccountsPage {
@@ -904,9 +906,11 @@ export interface AccountsPage {
   total_credit: string
   /** Shops with credit left, for "$2,400 across 2 stores". */
   credit_stores: number
+  /** Everything partners have put in for their shares. Not a debt, so apart from total_owed. */
+  total_contributed: string
 }
 
-export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense'
+export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense' | 'contribution'
 
 export const EXPENSE_CATEGORIES = [
   'supplies',
@@ -950,6 +954,8 @@ export interface Movement {
   product_name: string | null
   /** Set on expenses only. */
   expense_category: ExpenseCategory | null
+  /** Set on buy-ins only: whose shares it paid for. */
+  contributed_by_member_id?: string | null
   notes: string | null
   status: string
 }
@@ -983,6 +989,7 @@ export const MOVEMENT_LABELS: Record<MovementKind, string> = {
   transfer: 'Transfer',
   adjustment: 'Adjustment',
   expense: 'Expense',
+  contribution: 'Buy-in',
 }
 
 export interface NewProduct {
@@ -1478,17 +1485,28 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(transfer),
     }),
 
-  /** Signed integer cents in the account's own terms: +5000 adds $50 owed to a member. */
+  /** Signed integer cents in the account's own terms: +5000 adds $50 owed to a member.
+   *  Give `target` instead of `amount` to set the balance outright; the server works out the change. */
   createMoneyAdjustment: (adjustment: {
     account_id: string
-    /** This endpoint uniquely accepts signed integer cents, not decimal dollars. */
-    amount: number
     occurred_on?: string
     notes?: string | null
-  }) =>
+  } & ({ amount: number } | { target: number })) =>
     request<Movement>('/api/v1/money/adjustments', {
       method: 'POST',
       body: JSON.stringify(adjustment),
+    }),
+
+  /** A partner buying into the business: cash into Joint, owed back to nobody. */
+  createContribution: (contribution: {
+    member_id: string
+    amount: string
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/contributions', {
+      method: 'POST',
+      body: JSON.stringify(contribution),
     }),
 
   voidMovement: (id: string, reason: string) =>
