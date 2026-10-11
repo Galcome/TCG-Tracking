@@ -22,7 +22,7 @@ export function DeleteProductDialog({ product, onClose, onDeleted }: { product: 
   })
   return <Sheet title="Delete product" open dismissDisabled={remove.isPending} onClose={() => { if (!remove.isPending) onClose() }}>
     <Copy>{product.name}</Copy>
-    <Copy muted>Removes it along with every purchase, sale and move recorded against it, voided ones included, and the money those moved. A log of what was removed is kept. This cannot be undone.</Copy>
+    <Copy muted>Removes it along with every purchase, sale and move recorded against it, voided ones included, and the money those moved. A full copy is kept: as a last resort it can be recovered from Recently deleted on the Stock screen.</Copy>
     <ErrorNotice error={remove.error} />
     <Button label={remove.isPending ? 'Saving…' : 'Delete'} danger disabled={remove.isPending} onPress={() => { if (running.current) return; running.current = true; remove.mutate() }} />
   </Sheet>

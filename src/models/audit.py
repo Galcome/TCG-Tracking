@@ -22,12 +22,16 @@ ACTION_CREATE = "create"
 ACTION_UPDATE = "update"
 ACTION_VOID = "void"
 ACTION_DELETE = "delete"
+#: A deleted product put back from its delete row, as a last resort.
+ACTION_RESTORE = "restore"
 
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (
-        CheckConstraint("action IN ('create', 'update', 'void', 'delete')", name="ck_audit_action"),
+        CheckConstraint(
+            "action IN ('create', 'update', 'void', 'delete', 'restore')", name="ck_audit_action"
+        ),
         Index("ix_audit_entity", "entity_type", "entity_id"),
     )
 

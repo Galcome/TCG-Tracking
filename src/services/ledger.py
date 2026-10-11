@@ -16,9 +16,10 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.models.audit import ACTION_DELETE, AuditLog
+from src.models.audit import ACTION_DELETE, ACTION_RESTORE, AuditLog
 from src.models.grading import GradingSubmission
 from src.models.ledger import (
     STATUS_ACTIVE,
@@ -33,6 +34,7 @@ from src.models.money import MoneyMovement
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.transformation import Transformation, TransformationOutput
+from src.services import recovery
 from src.services.costing import Event, allocate
 
 EntityKind = Literal[
@@ -259,7 +261,7 @@ def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None
     For test entries and duplicates: one step instead of voiding each purchase and sale one
     by one. Its purchases, sales, moves, adjustments, cost allocations and the money that
     funded or came from them all go, voided rows included. The audit row left behind lists
-    what was removed, so the delete is still accountable.
+    what was removed, and keeps a full copy of it so `restore_product` can put it back.
 
     A product that was opened or sent for grading is refused: those link it to other
     products' stock and cost, and removing one side would corrupt the other.
@@ -309,6 +311,7 @@ def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None
             }
             for sale in sales
         ],
+        "records": recovery.capture(db, product.id),
     }
 
     # Children before parents. Money postings go with their movement (ON DELETE CASCADE);
@@ -332,3 +335,43 @@ def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None
     )
     db.delete(product)
     db.flush()
+
+
+def restore_product(db: Session, entry: AuditLog, *, member_id: uuid.UUID | None) -> uuid.UUID:
+    """Put a deleted product back exactly as it was, from the copy its delete row kept.
+
+    A last resort for a delete that should not have happened. Everything returns with its
+    original ids, then FIFO is rebuilt so cost and profit match what they were.
+    """
+    before = entry.before or {}
+    records = before.get("records")
+    if records is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This product was deleted before deletes kept a full copy, so it cannot "
+            "be put back.",
+        )
+    if db.get(Product, entry.entity_id) is not None:
+        raise HTTPException(status_code=409, detail="This product is already back.")
+
+    try:
+        with db.begin_nested():
+            recovery.restore(db, records)
+    except IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="Something this product was recorded against no longer exists, so it "
+            "cannot be put back.",
+        ) from error
+
+    recompute_product(db, entry.entity_id)
+    record_audit(
+        db,
+        entity_type="product",
+        entity_id=entry.entity_id,
+        action=ACTION_RESTORE,
+        member_id=member_id,
+        after={"name": before.get("name"), "from_delete": str(entry.id)},
+    )
+    db.flush()
+    return entry.entity_id
