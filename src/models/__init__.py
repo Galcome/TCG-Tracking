@@ -11,6 +11,7 @@ from src.models.ledger import CostAllocation, InventoryAdjustment, Purchase, Sal
 from src.models.market_price import CurrentMarketQuote, MarketPriceSnapshot
 from src.models.member import Member
 from src.models.money import MoneyAccount, MoneyMovement, MoneyPosting
+from src.models.portfolio import PortfolioSnapshot
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
@@ -30,6 +31,7 @@ __all__ = [
     "MoneyAccount",
     "MoneyMovement",
     "MoneyPosting",
+    "PortfolioSnapshot",
     "PriceSnapshot",
     "Product",
     "ProductType",

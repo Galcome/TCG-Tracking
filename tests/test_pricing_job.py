@@ -117,7 +117,11 @@ def test_main_returns_failure_when_worker_exhausts_retries(monkeypatch):
     monkeypatch.setattr(job.settings, "app_role", "worker")
     monkeypatch.setattr(job, "sync_sets", lambda: None)
     monkeypatch.setattr(job, "run", lambda: (_ for _ in ()).throw(job.PricingJobError("bad")))
+    snapshots = []
+    monkeypatch.setattr(job, "snapshot_portfolio", lambda: snapshots.append(True))
     assert job.main() == 1
+    # Yesterday's prices are still a value; the chart should not get a gap for it.
+    assert snapshots == [True]
 
 
 def test_main_returns_success_for_worker(monkeypatch):
@@ -125,9 +129,28 @@ def test_main_returns_success_for_worker(monkeypatch):
     monkeypatch.setattr(job.settings, "app_role", "worker")
     monkeypatch.setattr(job, "sync_sets", lambda: order.append("sets"))
     monkeypatch.setattr(job, "run", lambda: order.append("prices") or summary())
+    monkeypatch.setattr(job, "snapshot_portfolio", lambda: order.append("value"))
     assert job.main() == 0
-    # New sets are linked before prices refresh, so a fresh release is priced the same day.
-    assert order == ["sets", "prices"]
+    # New sets are linked before prices refresh, so a fresh release is priced the same day,
+    # and the day's value is taken from the prices just refreshed.
+    assert order == ["sets", "prices", "value"]
+
+
+def test_snapshot_portfolio_records_through_the_session(caplog):
+    caplog.set_level("INFO", logger=job.logger.name)
+    seen = []
+
+    assert job.snapshot_portfolio(record_fn=seen.append, db_factory=_database) is True
+    assert isinstance(seen[0], FakeDB)
+    assert "portfolio_snapshot_complete" in caplog.text
+
+
+def test_snapshot_portfolio_failure_is_logged_not_raised(caplog):
+    def failing(_db):
+        raise SQLAlchemyError("connection lost")
+
+    assert job.snapshot_portfolio(record_fn=failing, db_factory=_database) is False
+    assert "portfolio_snapshot_failed error=SQLAlchemyError" in caplog.text
 
 
 def test_sync_sets_logs_its_summary(caplog):
