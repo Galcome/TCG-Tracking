@@ -20,6 +20,36 @@ export interface BalanceAdjustmentDraft {
   notes: string
 }
 
+/** Setting a balance outright: "Jason says he is owed $5,000" is typed as 5000. */
+export interface BalanceTargetDraft {
+  accountId: string
+  target: string
+  occurredOn: string
+  notes: string
+}
+
+export interface BalanceTargetPayload {
+  account_id: string
+  /** Signed integer cents in the account's own terms; the server works out the change. */
+  target: number
+  occurred_on: string
+  notes: string | null
+}
+
+export interface ContributionDraft {
+  memberId: string
+  amount: string
+  occurredOn: string
+  notes: string
+}
+
+export interface ContributionPayload {
+  member_id: string
+  amount: string
+  occurred_on: string
+  notes: string | null
+}
+
 export interface ExpenseDraft {
   category: ExpenseCategory
   amount: string
@@ -109,14 +139,16 @@ interface PostedMovement {
   expense_category?: ExpenseCategory | null
 }
 
-/** A leg's signed cash flow as exact cents, or null when it is not a money string. */
-function legCents(amount: string): bigint | null {
-  const raw = amount.trim()
+/** A signed dollar string ("-12.50", "$5,000") as exact cents, or null when it is not one. */
+export function signedCents(amount: string): bigint | null {
+  const raw = amount.trim().replace(/[$,\s]/g, '')
   const negative = raw.startsWith('-')
   const magnitude = decimalCents(negative ? raw.slice(1) : raw)
   if (magnitude === null) return null
   return negative ? -magnitude : magnitude
 }
+
+const legCents = signedCents
 
 function dollars(cents: bigint): string {
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
@@ -238,6 +270,67 @@ export function validateBalanceAdjustmentDraft(draft: Partial<BalanceAdjustmentD
   validateAmount(errors, draft.amount)
   validateDate(errors, draft.occurredOn)
   return errors
+}
+
+/** What setting the balance to `target` would change it by, or null when either is unreadable. */
+export function balanceChange(current: string, target: string): bigint | null {
+  const from = signedCents(current)
+  const to = signedCents(target)
+  if (from === null || to === null) return null
+  return to - from
+}
+
+/** The change a new balance makes, said the way the account means it. */
+export function balanceChangeLine(account: { name: string; balance_means: string }, change: bigint): string {
+  if (change === 0n) return 'No change - that is already the balance.'
+  const up = change > 0n
+  const amount = money(dollars(up ? change : -change))
+  if (account.balance_means === 'owed') return `${account.name} will be owed ${amount} ${up ? 'more' : 'less'}`
+  if (account.balance_means === 'credit') return `${amount} store credit ${up ? 'added' : 'removed'}`
+  return `${amount} ${up ? 'into' : 'out of'} ${account.name}`
+}
+
+export function validateBalanceTargetDraft(draft: Partial<BalanceTargetDraft>, current: string): MoneyValidation {
+  const errors: MoneyValidation = {}
+  if (!draft.accountId) errors.accountId = 'Choose an account to adjust.'
+  const target = signedCents(draft.target ?? '')
+  if (target === null) {
+    errors.amount = 'Enter the new balance, like 5000 or -25.50.'
+  } else if ((target < 0n ? -target : target) > BigInt(MAX_ADJUSTMENT_CENTS)) {
+    errors.amount = 'Enter a balance no larger than 1 billion dollars.'
+  } else if (balanceChange(current, draft.target ?? '') === 0n) {
+    errors.amount = 'That is already the balance.'
+  }
+  validateDate(errors, draft.occurredOn)
+  return errors
+}
+
+export function buildBalanceTargetPayload(draft: BalanceTargetDraft, current: string): BalanceTargetPayload | null {
+  if (Object.keys(validateBalanceTargetDraft(draft, current)).length > 0) return null
+  return {
+    account_id: draft.accountId,
+    target: Number(signedCents(draft.target)),
+    occurred_on: draft.occurredOn,
+    notes: draft.notes.trim() || null,
+  }
+}
+
+export function validateContributionDraft(draft: Partial<ContributionDraft>): MoneyValidation {
+  const errors: MoneyValidation = {}
+  if (!draft.memberId) errors.accountId = 'Choose whose shares this pays for.'
+  validateAmount(errors, draft.amount?.trim())
+  validateDate(errors, draft.occurredOn)
+  return errors
+}
+
+export function buildContributionPayload(draft: ContributionDraft): ContributionPayload | null {
+  if (Object.keys(validateContributionDraft(draft)).length > 0) return null
+  return {
+    member_id: draft.memberId,
+    amount: draft.amount.trim(),
+    occurred_on: draft.occurredOn,
+    notes: draft.notes.trim() || null,
+  }
 }
 
 export function validateExpenseDraft(draft: Partial<ExpenseDraft>, today: string): MoneyValidation {

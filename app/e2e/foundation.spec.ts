@@ -1164,11 +1164,14 @@ test('money adjustments use exact cents and transfer void restores both balances
   const member = before.items.find((a: { name: string }) => a.name === 'E2E Tester');
   const cents = (s: string) => BigInt(s.replace('.', ''));
   await page.getByRole('group', { name: joint.name, exact: true }).getByRole('button', { name: 'Adjust', exact: true }).click();
-  await page.getByLabel('How much', { exact: true }).fill('19.99');
+  // Set mode: type the balance it should be, and the server works out the change.
+  const target = cents(joint.balance) + 1999n;
+  const typed = (target < 0n ? '-' : '') + (target < 0n ? -target : target).toString().padStart(3, '0').replace(/(\d\d)$/, '.$1');
+  await page.getByLabel('New balance', { exact: true }).fill(typed);
   await page.getByLabel('Audit note', { exact: true }).fill('Expo exact-cent adjustment');
   const adjustment = page.waitForRequest(r => r.method() === 'POST' && r.url() === API + '/api/v1/money/adjustments');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
-  expect((await adjustment).postDataJSON().amount).toBe(1999);
+  expect((await adjustment).postDataJSON().target).toBe(Number(target));
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const adjusted = await readAccounts();
   expect(cents(adjusted.joint_balance)).toBe(cents(before.joint_balance) + 1999n);
@@ -1594,6 +1597,7 @@ test('a debt the group owes is never coloured as a gain', async ({ page, request
   // Put the member in the red. A member balance is negated at read time, so a debt arrives at the
   // component as a positive number - colouring by sign alone would paint what is owed as profit.
   await page.getByRole('group', { name: member.name, exact: true }).getByRole('button', { name: 'Adjust', exact: true }).click();
+  await page.getByRole('button', { name: 'Enter a change instead', exact: true }).click();
   await page.getByLabel('How much', { exact: true }).fill('12.34');
   await page.getByLabel('Audit note', { exact: true }).fill('Expo owed-colour check');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
@@ -1609,6 +1613,7 @@ test('a debt the group owes is never coloured as a gain', async ({ page, request
   expect(owedColour).toBe(LOSS);
   // Joint cash keeps sign-based colouring: it is the one balance where up really is good.
   await page.getByRole('group', { name: joint.name, exact: true }).getByRole('button', { name: 'Adjust', exact: true }).click();
+  await page.getByRole('button', { name: 'Enter a change instead', exact: true }).click();
   await page.getByLabel('How much', { exact: true }).fill('25.00');
   await page.getByLabel('Audit note', { exact: true }).fill('Expo joint-colour check');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();

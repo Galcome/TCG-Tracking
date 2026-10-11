@@ -4,17 +4,25 @@ import { View } from 'react-native'
 
 import { useApi } from '../context/AppContext'
 import {
+  balanceChange,
+  balanceChangeLine,
   buildBalanceAdjustmentPayload,
+  buildBalanceTargetPayload,
+  buildContributionPayload,
   buildExpensePayload,
   buildTransferPayload,
   firstMoneyValidationError,
   validateBalanceAdjustmentDraft,
+  validateBalanceTargetDraft,
+  validateContributionDraft,
   validateExpenseDraft,
   validateTransferDraft,
   validateVoidMovementDraft,
   EDIT_VOID_REASON,
   type BalanceAdjustmentDraft,
   type BalanceAdjustmentPayload,
+  type BalanceTargetPayload,
+  type ContributionPayload,
   type ExpenseEdit,
   type ExpensePayload,
   type MoneyAdjustmentDirection,
@@ -206,7 +214,86 @@ export interface BalanceAdjustmentDialogProps {
   replacing?: { id: string; draft: BalanceAdjustmentDraft }
 }
 
+/** "Owed $5,000" is a fact someone tells you; "+$4,800" is arithmetic. Default to the fact. */
+type AdjustMode = 'set' | 'change'
+
 export function BalanceAdjustmentDialog({ account, onClose, replacing }: BalanceAdjustmentDialogProps) {
+  const [mode, setMode] = useState<AdjustMode>('set')
+  // An edit replaces a posted change, so it stays in the terms it was posted in.
+  if (replacing || mode === 'change') {
+    return (
+      <BalanceChangeDialog
+        account={account}
+        onClose={onClose}
+        replacing={replacing}
+        onSetInstead={replacing ? undefined : () => setMode('set')}
+      />
+    )
+  }
+  return <BalanceTargetDialog account={account} onClose={onClose} onChangeInstead={() => setMode('change')} />
+}
+
+function BalanceTargetDialog({
+  account,
+  onClose,
+  onChangeInstead,
+}: {
+  account: Account
+  onClose: () => void
+  onChangeInstead: () => void
+}) {
+  const api = useApi()
+  // Prefilled with today's figure so a new number is "delete and type", like a spreadsheet cell.
+  const [target, setTarget] = useState(account.balance)
+  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const [notes, setNotes] = useState('')
+  const [validation, setValidation] = useState<MoneyValidation>({})
+  const mutation = useMoneyMutation((payload: BalanceTargetPayload) => api.createMoneyAdjustment(payload), onClose)
+  const change = balanceChange(account.balance, target)
+
+  function submit() {
+    const draft = { accountId: account.id, target, occurredOn, notes }
+    const payload = buildBalanceTargetPayload(draft, account.balance)
+    setValidation(payload ? {} : validateBalanceTargetDraft(draft, account.balance))
+    if (payload) mutation.mutate(payload)
+  }
+
+  return (
+    <MoneySheet
+      title={`Adjust ${account.name}`}
+      onClose={onClose}
+      onSubmit={submit}
+      busy={mutation.isPending}
+      submitLabel="Save"
+      error={mutation.error}
+      validation={validation}
+    >
+      <Card>
+        <Copy>{account.name}</Copy>
+        <Copy muted>Now {money(account.balance)} · {accountMeaning(account)}</Copy>
+      </Card>
+      <Field
+        label={account.balance_means === 'owed' ? 'Should be owed' : 'New balance'}
+        value={target}
+        onChangeText={setTarget}
+        keyboardType="numbers-and-punctuation"
+        selectTextOnFocus
+        autoFocus
+      />
+      <Copy muted>{change === null ? 'Type the balance it should be.' : balanceChangeLine(account, change)}</Copy>
+      <Button label="Enter a change instead" onPress={onChangeInstead} />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
+      <Field label="Audit note" value={notes} onChangeText={setNotes} multiline placeholder="Jason confirmed his balance" />
+    </MoneySheet>
+  )
+}
+
+function BalanceChangeDialog({
+  account,
+  onClose,
+  replacing,
+  onSetInstead,
+}: BalanceAdjustmentDialogProps & { onSetInstead?: () => void }) {
   const api = useApi()
   const [direction, setDirection] = useState<MoneyAdjustmentDirection>(replacing?.draft.direction ?? 'up')
   const [amount, setAmount] = useState(replacing?.draft.amount ?? '')
@@ -261,8 +348,58 @@ export function BalanceAdjustmentDialog({ account, onClose, replacing }: Balance
         onChange={(value) => setDirection(value as MoneyAdjustmentDirection)}
       />
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
+      {onSetInstead ? <Button label="Set the balance instead" onPress={onSetInstead} /> : null}
       <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
       <Field label="Audit note" value={notes} onChangeText={setNotes} multiline placeholder="Why this balance needs correcting" />
+    </MoneySheet>
+  )
+}
+
+export interface ContributionDialogProps {
+  accounts: Account[]
+  onClose: () => void
+}
+
+/** A partner buying in. Cash lands in Joint and nobody is owed it - ownership, not a loan. */
+export function ContributionDialog({ accounts, onClose }: ContributionDialogProps) {
+  const api = useApi()
+  const partners = accounts.filter((account) => account.kind === 'member' && account.member_id)
+  const [memberId, setMemberId] = useState(partners[0]?.member_id ?? '')
+  const [amount, setAmount] = useState('')
+  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const [notes, setNotes] = useState('')
+  const [validation, setValidation] = useState<MoneyValidation>({})
+  const mutation = useMoneyMutation((payload: ContributionPayload) => api.createContribution(payload), onClose)
+
+  function submit() {
+    const draft = { memberId, amount, occurredOn, notes }
+    const payload = buildContributionPayload(draft)
+    setValidation(payload ? {} : validateContributionDraft(draft))
+    if (payload) mutation.mutate(payload)
+  }
+
+  return (
+    <MoneySheet
+      title="Put money in for shares"
+      onClose={onClose}
+      onSubmit={submit}
+      busy={mutation.isPending}
+      submitLabel="Save buy-in"
+      error={mutation.error}
+      validation={validation}
+    >
+      <Card>
+        <Copy muted>The money goes into the joint account. The business does not owe it back - it is their share of the company.</Copy>
+      </Card>
+      <Choice
+        label="Whose shares"
+        value={memberId}
+        options={partners.map((account) => ({ value: account.member_id ?? '', label: account.name }))}
+        onChange={setMemberId}
+      />
+      <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
+      <Field label="Note" value={notes} onChangeText={setNotes} multiline placeholder="Optional" />
     </MoneySheet>
   )
 }
