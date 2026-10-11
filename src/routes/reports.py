@@ -242,6 +242,9 @@ class MonthRead(BaseModel):
 
     month: str
     spent: MoneyOut = Field(validation_alias="spent_cents")
+    house_spent: MoneyOut = Field(validation_alias="house_spent_cents")
+    own_spent: MoneyOut = Field(validation_alias="own_spent_cents")
+    untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
     revenue: MoneyOut = Field(validation_alias="revenue_cents")
     units_sold: int
@@ -276,6 +279,9 @@ class YearRead(BaseModel):
 
     year: int | None
     spent: MoneyOut = Field(validation_alias="spent_cents")
+    house_spent: MoneyOut = Field(validation_alias="house_spent_cents")
+    own_spent: MoneyOut = Field(validation_alias="own_spent_cents")
+    untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
     revenue: MoneyOut = Field(validation_alias="revenue_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
     expenses: MoneyOut = Field(validation_alias="expenses_cents")
