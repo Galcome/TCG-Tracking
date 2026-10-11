@@ -336,6 +336,11 @@ export interface GroupRow {
 export interface MonthRow {
   month: string
   spent: string
+  /** Who paid for `spent`: house money (joint account, store credit, paybacks) and partners'
+   * own money, from `Performance.tracked_from` on. The rest of the spend is untracked. */
+  house_spent: string
+  own_spent: string
+  untracked_spent: string
   realized_profit: string
   revenue: string
   units_sold: number
@@ -353,6 +358,10 @@ export interface ValuePoint {
 export interface YearRow {
   year: number | null
   spent: string
+  /** Split as on MonthRow. */
+  house_spent: string
+  own_spent: string
+  untracked_spent: string
   revenue: string
   realized_profit: string
   expenses: string

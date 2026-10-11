@@ -419,14 +419,15 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
   expect(latest.stats.quantity_on_hand).toBe(1);
 });
 
-test('dashboard leads with inventory value, who paid for the stock and year over year, in exact cents', async ({ page }) => {
+test('dashboard leads with inventory value, then net profit, then spent vs revenue split by who paid, in exact cents', async ({ page }) => {
   const fixtureId = '66666666-6666-4666-8666-666666666666';
   await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ json: {
     sales_missing_cost: 0, products_with_negative_stock: 1,
     negative_stock_products: [{ id: fixtureId, name: 'Dashboard correction fixture', quantity: -1 }],
   } }));
   await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
-    month: '2026-09-01', spent: '90071992547409.92', revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
+    month: '2026-09-01', spent: '90071992547409.92', house_spent: '90071992547400.00', own_spent: '9.92', untracked_spent: '0.00',
+    revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
   }] }));
   await page.route(API + '/api/v1/reports/performance', route => route.fulfill({ json: {
     value_history: [
@@ -435,8 +436,8 @@ test('dashboard leads with inventory value, who paid for the stock and year over
     ],
     market_value: '12.00', priced_cost: '10.01', tracked_from: '2026-10-11', own_money: '3.00', house_money: '9.01',
     years: [
-      { year: 2026, spent: '0.29', revenue: '0.00', realized_profit: '-0.01', expenses: '1.00' },
-      { year: null, spent: '66783.00', revenue: '0.00', realized_profit: '0.00', expenses: '0.00' },
+      { year: 2026, spent: '0.29', house_spent: '0.10', own_spent: '0.19', untracked_spent: '0.00', revenue: '0.00', realized_profit: '-0.01', expenses: '1.00' },
+      { year: null, spent: '66783.00', house_spent: '0.00', own_spent: '0.00', untracked_spent: '66783.00', revenue: '0.00', realized_profit: '0.00', expenses: '0.00' },
     ],
   } }));
   await page.route(API + '/api/v1/dashboard?*', route => route.fulfill({ json: {
@@ -455,18 +456,20 @@ test('dashboard leads with inventory value, who paid for the stock and year over
   await expect(page.getByLabel('Value over 2 days', { exact: true })).toBeVisible();
   await expect(page.getByText('Since 2026-10-08', { exact: true })).toBeVisible();
   await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
-  // Sales money that bought stock reads as reinvested, not as a loss.
-  await expect(page.getByText('Our own money $3.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('House money $9.01', { exact: true })).toBeVisible();
-  await expect(page.getByText('Since 2026-10-11. House money is sales money going back into stock: reinvested, not lost.', { exact: true })).toBeVisible();
   await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
   await expect(page.getByText('Expenses $1.00', { exact: true }).first()).toBeVisible();
+  // The period only changes net profit, so it lives in that card.
+  await expect(page.getByRole('button', { name: /^Reporting period/ })).toBeVisible();
+  // One spend and revenue card: the latest month's exact figures, spend split by who paid.
   await expect(page.getByLabel(/: spent \$90,071,992,547,409\.92, revenue \$0\.00$/)).toBeVisible();
-  const years = page.getByRole('table', { name: 'Year over year', exact: true });
-  await expect(years.getByText('2026', { exact: true })).toBeVisible();
-  await expect(years.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
-  await expect(years.getByText('Before dates', { exact: true })).toBeVisible();
-  await expect(years.getByText('Spent $66,783.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,409.92', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
+  await expect(page.getByText('House $90,071,992,547,400.00 · Own $9.92', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Year', exact: true }).click();
+  await expect(page.getByLabel('2026: spent $0.29, revenue $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('House $0.10 · Own $0.19 · Expenses $1.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Plus $66,783.00 of stock with no purchase date, not shown.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Year over year', { exact: true })).toHaveCount(0);
   // The detail lives in Reports now; the dashboard keeps none of the old disclosures.
   await expect(page.getByRole('button', { name: 'Lifetime cash context', exact: true })).toHaveCount(0);
   for (const width of [390, 768, 1536]) {

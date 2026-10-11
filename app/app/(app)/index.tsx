@@ -3,13 +3,13 @@ import { Text } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui';
 import { PeriodSelector } from '../../components/period-selector';
-import { FundingBar, SpendRevenueChart, ValueChart, YearTable } from '../../components/dashboard-charts';
+import { SpendRevenue, ValueChart } from '../../components/dashboard-charts';
 import { useApi } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
 import { useTypography } from '../../context/TypographyContext';
 import { usePeriodPreference } from '../../lib/period-preference';
 import { money, percent } from '../../lib/format';
-import type { Dashboard as DashboardData, Performance } from '../../lib/api';
+import type { Dashboard as DashboardData, Performance, Period } from '../../lib/api';
 
 /** Shrink unusually long figures to fit a phone card; normal values keep a large headline. */
 function Headline({ value, color, width }: { value: string; color?: string; width: number }) {
@@ -37,9 +37,11 @@ function InventoryValue({ data, history, width }: { data: DashboardData; history
   </Card>;
 }
 
-function Profit({ data, width }: { data: DashboardData; width: number }) {
+/** The reporting period sits in this card because it is the only one the period changes. */
+function Profit({ data, width, period, setPeriod }: { data: DashboardData; width: number; period: Period; setPeriod: (period: Period) => void }) {
   return <Card>
     <Copy muted>Net profit</Copy>
+    <PeriodSelector compact value={period} onChange={setPeriod} />
     <Headline value={money(data.net_profit)} color={toneColor(data.net_profit)} width={width} />
     <Row><Copy>Trading <Signed value={data.realized_profit}>{money(data.realized_profit)}</Signed></Copy><Copy>Expenses {money(data.expenses)}</Copy><Copy>ROI <Signed value={data.roi}>{percent(data.roi)}</Signed></Copy></Row>
     <Copy muted>{data.sale_count} sale{data.sale_count === 1 ? '' : 's'} · {money(data.total_sales)} revenue</Copy>
@@ -66,23 +68,11 @@ export default function Dashboard() {
     <ErrorNotice error={performance.error} retry={() => { void performance.refetch(); }} />
     {dashboard.isPending && <Loading />}
     {data ? <InventoryValue data={data} history={story?.value_history} width={width} /> : null}
-    {story ? <Card>
-      <Copy muted>Who paid for the stock</Copy>
-      <FundingBar data={story} />
-    </Card> : null}
-    <PeriodSelector compact value={period} onChange={setPeriod} />
-    {data ? <Profit data={data} width={width} /> : null}
+    {data ? <Profit data={data} width={width} period={period} setPeriod={setPeriod} /> : null}
     <Card>
-      <Copy muted>Spent vs revenue · last 12 months</Copy>
       <ErrorNotice error={months.error} retry={() => { void months.refetch(); }} />
-      {months.isPending ? <Loading /> : null}
-      {months.data?.length === 0 ? <Copy muted>No dated activity in the last year.</Copy> : null}
-      {months.data && months.data.length > 0 ? <SpendRevenueChart months={months.data} /> : null}
+      {months.isPending || performance.isPending ? <Loading /> : <SpendRevenue months={months.data ?? []} years={story?.years ?? []} trackedFrom={story?.tracked_from} />}
     </Card>
-    {story && story.years.length > 0 ? <Card>
-      <Copy muted>Year over year</Copy>
-      <YearTable years={story.years} />
-    </Card> : null}
     {issues.length > 0 ? <Card>
       <Copy>Data attention · {issues.join(' · ')}</Copy>
       <Button label="Review data attention" onPress={() => router.push('/reports')} />

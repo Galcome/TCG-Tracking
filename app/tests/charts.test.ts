@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { barHeights, linePaths, plotValue, shares } from '../lib/charts'
+import { linePaths, plotValue, stackHeights } from '../lib/charts'
 
 test('plot values read decimal strings and treat unknown as zero', () => {
   assert.equal(plotValue('1234.56'), 1234.56)
@@ -24,14 +24,13 @@ test('no points draw nothing', () => {
   assert.deepEqual(linePaths([[], []], 200, 60), ['', ''])
 })
 
-test('bars scale to the tallest and never go below the axis', () => {
-  assert.deepEqual(barHeights([50, 100, -20, 0], 80), [40, 80, 0, 0])
-  assert.deepEqual(barHeights([0, 0], 80), [0, 0])
-  assert.deepEqual(barHeights([], 80), [])
+test('stacks share one scale, the tallest stack fills the height', () => {
+  // Spent $100 of own money and $300 of house money, against $200 of revenue.
+  assert.deepEqual(stackHeights([[100, 300], [200]], 80), [[20, 60], [40]])
 })
 
-test('a stacked bar splits by share and gives a negative part no room', () => {
-  assert.deepEqual(shares(25, 75), [0.25, 0.75])
-  assert.deepEqual(shares(100, -40), [1, 0])
-  assert.deepEqual(shares(0, 0), [0, 0])
+test('a negative part takes no room and nothing draws when every stack is empty', () => {
+  assert.deepEqual(stackHeights([[50, -20], [25]], 100), [[100, 0], [50]])
+  assert.deepEqual(stackHeights([[0, 0], [0]], 80), [[0, 0], [0]])
+  assert.deepEqual(stackHeights([], 80), [])
 })

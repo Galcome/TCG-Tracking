@@ -37,21 +37,14 @@ export function linePaths(
   })
 }
 
-/** Bar heights against the largest value. Negative values draw as no bar. */
-export function barHeights(values: readonly number[], height: number): number[] {
-  const top = Math.max(0, ...values)
-  if (top === 0) return values.map(() => 0)
-  return values.map(value => round((Math.max(0, value) / top) * height))
-}
-
 /**
- * The two halves of a stacked bar, as fractions of the whole. A negative part takes no room:
- * when trading is behind, the bar is all personal money and the copy says by how much.
+ * Stacked bars on one scale: each stack's parts become pixel heights against the tallest
+ * stack, so a bar of one part and a bar of three can be compared. A negative part takes no
+ * room.
  */
-export function shares(first: number, second: number): [number, number] {
-  const a = Math.max(0, first)
-  const b = Math.max(0, second)
-  const total = a + b
-  if (total === 0) return [0, 0]
-  return [a / total, b / total]
+export function stackHeights(stacks: readonly (readonly number[])[], height: number): number[][] {
+  const positive = stacks.map(parts => parts.map(part => Math.max(0, part)))
+  const top = Math.max(0, ...positive.map(parts => parts.reduce((sum, part) => sum + part, 0)))
+  if (top === 0) return positive.map(parts => parts.map(() => 0))
+  return positive.map(parts => parts.map(part => round((part / top) * height)))
 }

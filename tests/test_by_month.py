@@ -11,6 +11,9 @@ flat line across a month nobody traded in reads as a bad month when it was no mo
 
 from datetime import date, timedelta
 
+from src.services.reporting import FUNDING_TRACKED_FROM, by_month
+from tests.test_money_ledger import joint
+
 TODAY = date.today()
 
 
@@ -18,7 +21,7 @@ def first_of(when: date) -> str:
     return date(when.year, when.month, 1).isoformat()
 
 
-def buy(client, product_id, quantity, amount, on):
+def buy(client, product_id, quantity, amount, on, **extra):
     response = client.post(
         "/api/v1/purchases",
         json={
@@ -26,6 +29,7 @@ def buy(client, product_id, quantity, amount, on):
             "quantity": quantity,
             "amount": amount,
             "purchase_date": on.isoformat(),
+            **extra,
         },
     )
     assert response.status_code == 201, response.text
@@ -63,6 +67,29 @@ def test_a_month_reports_what_was_spent_and_earned_in_it(client, make_product):
     assert row["revenue"] == "300.00"
     # $300 back against the $100 that one unit carried.
     assert row["realized_profit"] == "200.00"
+
+
+def test_spent_splits_into_house_and_own_money(client, make_product, db):
+    """House money is the joint account; own money is what a partner paid personally. Spend
+    from before tracking started has no split."""
+    product = make_product("Split Box")
+    buy(client, product["id"], 1, "200.00", TODAY)
+    buy(client, product["id"], 1, "300.00", TODAY, funding=[{"account_id": joint(client)["id"]}])
+    before = FUNDING_TRACKED_FROM - timedelta(days=70)
+    buy(client, product["id"], 1, "50.00", before)
+
+    rows = months(client)
+
+    row = rows[first_of(TODAY)]
+    assert (row["spent"], row["house_spent"], row["own_spent"], row["untracked_spent"]) == (
+        "500.00",
+        "300.00",
+        "200.00",
+        "0.00",
+    )
+    # Read as of the day tracking started, so the old month stays inside the 12-month window.
+    [old] = [row for row in by_month(db, FUNDING_TRACKED_FROM) if row.month == first_of(before)]
+    assert (old.house_spent_cents, old.own_spent_cents, old.untracked_spent_cents) == (0, 0, 5_000)
 
 
 def test_activity_lands_in_the_month_it_happened(client, make_product):

@@ -169,6 +169,31 @@ def test_history_before_tracking_and_voided_buys_are_left_out(client, make_produ
     assert body["house_money"] == "0.00"
 
 
+def split(db) -> list[tuple[date, int, int]]:
+    return [(day.on, day.own_cents, day.house_cents) for day in reporting.funded_days(db)]
+
+
+def test_a_payback_turns_the_oldest_own_money_into_house_money_first(client, make_product, db):
+    first = reporting.FUNDING_TRACKED_FROM
+    second = first + timedelta(days=1)
+    buy(client, make_product()["id"], "100.00", on=first)
+    buy(client, make_product()["id"], "200.00", on=second)
+    transfer(client, joint(client)["id"], me(client)["id"], "150.00")
+
+    assert split(db) == [(first, 0, 10_000), (second, 15_000, 5_000)]
+
+
+def test_cash_put_in_turns_the_oldest_house_money_into_own_money_first(client, make_product, db):
+    first = reporting.FUNDING_TRACKED_FROM
+    second = first + timedelta(days=1)
+    transfer(client, me(client)["id"], joint(client)["id"], "50.00")
+    funding = [{"account_id": joint(client)["id"]}]
+    buy(client, make_product()["id"], "100.00", on=first, funding=funding)
+    buy(client, make_product()["id"], "100.00", on=second, funding=funding)
+
+    assert split(db) == [(first, 5_000, 5_000), (second, 0, 10_000)]
+
+
 # ------------------------------------------------------------------ value over time
 
 
@@ -229,6 +254,7 @@ def test_years_are_newest_first_with_undated_last(client, make_product, db):
     opening_stock(db, make_product()["id"], 90_000)
     current = make_product()
     buy(client, current["id"], "40.00")
+    buy(client, current["id"], "60.00", funding=[{"account_id": joint(client)["id"]}])
     sell(client, current["id"], "25.00")
     client.post("/api/v1/money/expenses", json={"amount": "5.00", "category": "supplies"})
 
@@ -237,7 +263,10 @@ def test_years_are_newest_first_with_undated_last(client, make_product, db):
     assert years == [
         {
             "year": TODAY.year,
-            "spent": "40.00",
+            "spent": "100.00",
+            "house_spent": "60.00",
+            "own_spent": "40.00",
+            "untracked_spent": "0.00",
             "revenue": "25.00",
             "realized_profit": "-15.00",
             "expenses": "5.00",
@@ -245,6 +274,9 @@ def test_years_are_newest_first_with_undated_last(client, make_product, db):
         {
             "year": TODAY.year - 1,
             "spent": "100.00",
+            "house_spent": "0.00",
+            "own_spent": "0.00",
+            "untracked_spent": "100.00",
             "revenue": "150.00",
             "realized_profit": "50.00",
             "expenses": "0.00",
@@ -252,6 +284,9 @@ def test_years_are_newest_first_with_undated_last(client, make_product, db):
         {
             "year": None,
             "spent": "900.00",
+            "house_spent": "0.00",
+            "own_spent": "0.00",
+            "untracked_spent": "900.00",
             "revenue": "0.00",
             "realized_profit": "0.00",
             "expenses": "0.00",
