@@ -290,7 +290,7 @@ test('optional grading valuations retry separately from committed grading and pr
   expect(returns).toBe(1);
 });
 
-test('catalogue archive preserves money, history blocks deletion and mistaken empty products can be deleted', async ({ page, request }) => {
+test('catalogue archive preserves money and delete removes a product with its history in two taps', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
   const identity = { game_id: games[0].id, product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id };
@@ -299,12 +299,6 @@ test('catalogue archive preserves money, history blocks deletion and mistaken em
   await signIn(page);
   await page.goto('/products/' + tracked.id);
   await openProductSections(page);
-  await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Permanently delete', exact: true })).toBeDisabled();
-  await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
-  await page.getByRole('button', { name: 'Permanently delete', exact: true }).click();
-  await expect(page.getByText(/This product has transaction history and cannot be deleted/)).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Archive product', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm archive', exact: true }).click();
   await expect(page).toHaveURL(/\/inventory$/);
@@ -317,14 +311,10 @@ test('catalogue archive preserves money, history blocks deletion and mistaken em
   await page.getByRole('button', { name: 'Restore archived product', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Archive product', exact: true })).toBeVisible();
-  const mistaken = await (await request.post(API + '/api/v1/products', { data: { ...identity, name: 'Mistaken empty card' } })).json();
-  await page.goto('/products/' + mistaken.id);
-  await openProductSections(page);
-  await page.getByRole('button', { name: 'Delete mistaken product', exact: true }).click();
-  await page.getByLabel('Type DELETE to confirm', { exact: true }).fill('DELETE');
-  await page.getByRole('button', { name: 'Permanently delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete product', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page).toHaveURL(/\/inventory$/);
-  expect((await request.get(API + '/api/v1/products/' + mistaken.id)).status()).toBe(404);
+  expect((await request.get(API + '/api/v1/products/' + tracked.id)).status()).toBe(404);
 });
 
 test('pricing requires explicit printing confirmation and keeps mapping writes out of the ledger', async ({ page, request }) => {

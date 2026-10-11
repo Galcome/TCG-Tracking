@@ -21,7 +21,6 @@ from sqlalchemy.sql import Subquery
 from src.models.ledger import (
     BUCKETS,
     STATUS_ACTIVE,
-    CostAllocation,
     InventoryAdjustment,
     Purchase,
     Sale,
@@ -402,17 +401,3 @@ def quantity_on_hand(db: Session, product_id: uuid.UUID) -> int:
     """
     stats = product_stats(db, [product_id]).get(product_id)
     return stats.quantity_on_hand if stats else 0
-
-
-def has_any_transactions(db: Session, product_id: uuid.UUID) -> bool:
-    """True if anything financial references this product, voided rows included.
-
-    Used to decide whether a product may be deleted outright or must be archived - a
-    voided transaction is still history worth keeping.
-    """
-    for model in (Purchase, Sale, InventoryAdjustment, StockMove):
-        if db.scalar(select(model.id).where(model.product_id == product_id).limit(1)):
-            return True
-    return bool(
-        db.scalar(select(CostAllocation.id).where(CostAllocation.product_id == product_id).limit(1))
-    )

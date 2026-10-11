@@ -364,16 +364,6 @@ def test_product_stats_covers_many_products_at_once(db, product):
 def test_a_product_with_no_transactions_has_no_stats_row(db, product):
     assert inventory.product_stats(db, [product.id]) == {}
     assert inventory.quantity_on_hand(db, product.id) == 0
-    assert inventory.has_any_transactions(db, product.id) is False
-
-
-def test_has_any_transactions_sees_voided_history_too(db, product):
-    purchase = add_purchase(db, product, 1, 10000, date(2026, 1, 1))
-    ledger.void(db, purchase, entity_type="purchase", member_id=None, reason="oops")
-
-    assert inventory.has_any_transactions(db, product.id) is True, (
-        "voided history still counts - the product must not be deletable"
-    )
 
 
 def test_average_unit_cost_is_none_when_nothing_is_in_stock(db, product):

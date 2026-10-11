@@ -21,12 +21,13 @@ from src.database import Base
 ACTION_CREATE = "create"
 ACTION_UPDATE = "update"
 ACTION_VOID = "void"
+ACTION_DELETE = "delete"
 
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (
-        CheckConstraint("action IN ('create', 'update', 'void')", name="ck_audit_action"),
+        CheckConstraint("action IN ('create', 'update', 'void', 'delete')", name="ck_audit_action"),
         Index("ix_audit_entity", "entity_type", "entity_id"),
     )
 
