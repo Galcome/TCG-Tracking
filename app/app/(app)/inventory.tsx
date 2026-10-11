@@ -10,6 +10,7 @@ import { ProductForms } from '../../components/product-forms';
 import { EditCostDialog } from '../../components/cost-form';
 import { RecordSaleDialog } from '../../components/sale-form';
 import { StockCard } from '../../components/stock-card';
+import { DeleteProductDialog } from '../../components/product-lifecycle';
 import { RipDialog } from '../../components/rip-form';
 import { RecordValuationDialog } from '../../components/valuation-form';
 import { canRip } from '../../lib/product-types';
@@ -70,6 +71,7 @@ export default function Inventory() {
   const [ripping, setRipping] = useState<Product | null>(null);
   const [valuing, setValuing] = useState<Product | null>(null);
   const [costing, setCosting] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search); setOffset(0); }, 250); return () => clearTimeout(t); }, [search]);
   // Arriving from a new product: clear anything that could hide it and put the newest first.
   // Adjusted during render rather than in an effect, so the old view never fetches first.
@@ -175,7 +177,9 @@ export default function Inventory() {
       onSell={() => setSelling(p)} onMove={() => setOperation({ product: p, mode: 'move' })}
       onRip={canRip(p.product_type.slug) ? () => setRipping(p) : undefined}
       onEditCost={() => setCosting(p)}
-      onToggleHidden={toggleHidden.isPending ? undefined : () => toggleHidden.mutate(p)} />)}
+      onToggleHidden={toggleHidden.isPending ? undefined : () => toggleHidden.mutate(p)}
+      onDelete={() => setDeleting(p)} />)}
+    {deleting ? <DeleteProductDialog product={deleting} onClose={() => setDeleting(null)} /> : null}
     {products.data && <Row><Button label="Previous" disabled={offset===0} onPress={()=>setOffset(Math.max(0,offset-30))} />
       <Copy>{products.data.total} products</Copy><Button label="Next" disabled={offset+30>=products.data.total} onPress={()=>setOffset(offset+30)} /></Row>}
   </Page>;
