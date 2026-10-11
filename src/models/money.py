@@ -34,8 +34,9 @@ something the group owns and can spend - but it is never added into a cash figur
 $200 box for $500 of credit is $300 of realized profit and zero dollars, and both of those
 are true at the same time.
 
-Rows are never deleted, exactly as in the stock ledger: `status` moves to 'voided' and the
-balance query stops seeing them.
+Rows are voided, not deleted, exactly as in the stock ledger: `status` moves to 'voided' and
+the balance query stops seeing them. The same single exception applies: deleting a product
+removes the funding and proceeds of its own purchases and sales along with them.
 """
 
 import uuid

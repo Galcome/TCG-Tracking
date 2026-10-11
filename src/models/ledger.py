@@ -4,8 +4,10 @@ Every money column is BIGINT cents. Nothing here stores a quantity on hand or a 
 those are always derived from these rows by src/services/costing.py, so there is no second
 source of truth to drift.
 
-Rows are never deleted. `status` moves to 'voided' and the costing engine simply stops
-seeing them, which keeps financial history auditable.
+A mistake is voided: `status` moves to 'voided' and the costing engine simply stops seeing
+it, which keeps financial history auditable. The one exception is deleting a whole product
+that should never have existed (a test, a duplicate) - that removes its rows outright and
+leaves an audit_log entry listing what went. See `ledger.delete_product`.
 """
 
 import uuid

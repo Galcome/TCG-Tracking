@@ -3,13 +3,12 @@ import { router } from 'expo-router'
 import { useRef, useState } from 'react'
 import { useApi } from '../context/AppContext'
 import type { Product } from '../lib/api'
-import { Button, Card, Copy, ErrorNotice, Field, Row, Sheet } from './ui'
+import { Button, Card, Copy, ErrorNotice, Row, Sheet } from './ui'
 
 export function ProductLifecycle({ product }: { product: Product }) {
   const api = useApi()
   const queries = useQueryClient()
   const [mode, setMode] = useState<'archive' | 'delete' | null>(null)
-  const [confirmation, setConfirmation] = useState('')
   const running = useRef(false)
   const change = useMutation({
     mutationFn: async (action: 'archive' | 'delete') => {
@@ -28,26 +27,25 @@ export function ProductLifecycle({ product }: { product: Product }) {
     mutationFn: () => api.updateProduct(product.id, { is_hidden: !product.is_hidden }),
     onSuccess: () => { void queries.invalidateQueries() },
   })
-  function open(next: 'archive' | 'delete') { change.reset(); setConfirmation(''); setMode(next) }
+  function open(next: 'archive' | 'delete') { change.reset(); setMode(next) }
   function submit() {
-    if (!mode || running.current || (mode === 'delete' && confirmation !== 'DELETE')) return
+    if (!mode || running.current) return
     running.current = true
     change.mutate(mode)
   }
   return <Card>
     <Copy>Catalogue management</Copy>
-    <Copy muted>Archive hides a product without changing stock or losing financial history. Deletion is only for mistaken products with no history; the API enforces this even for voided transactions.</Copy>
+    <Copy muted>Archive hides a product and keeps its numbers. Delete is for tests and mistakes: it removes the product and everything recorded against it.</Copy>
     <Copy muted>{product.is_hidden ? 'Hidden: left off the stock list and the on-shelf totals. Still owned and sellable.' : 'Hide keeps the stock but leaves it off the stock list and the on-shelf totals.'}</Copy>
     <ErrorNotice error={hide.error} />
     <Row><Button label={product.is_hidden ? 'Unhide product' : 'Hide product'} disabled={hide.isPending} onPress={() => hide.mutate()} />
       <Button label={product.is_archived ? 'Restore archived product' : 'Archive product'} onPress={() => open('archive')} />
-      <Button label="Delete mistaken product" danger onPress={() => open('delete')} /></Row>
-    {mode ? <Sheet title={mode === 'delete' ? 'Delete product permanently' : product.is_archived ? 'Restore product' : 'Archive product'} open dismissDisabled={change.isPending} onClose={() => { if (!running.current) setMode(null) }}>
+      <Button label="Delete product" danger onPress={() => open('delete')} /></Row>
+    {mode ? <Sheet title={mode === 'delete' ? 'Delete product' : product.is_archived ? 'Restore product' : 'Archive product'} open dismissDisabled={change.isPending} onClose={() => { if (!running.current) setMode(null) }}>
       <Copy>{product.name}</Copy>
-      <Copy muted>{mode === 'delete' ? 'This cannot be undone. Transaction history prevents deletion; archive instead if this product has been used.' : 'Only catalogue visibility changes. Stock, cost, valuations and transaction history remain intact.'}</Copy>
-      {mode === 'delete' ? <Field label="Type DELETE to confirm" value={confirmation} onChangeText={setConfirmation} editable={!change.isPending} /> : null}
+      <Copy muted>{mode === 'delete' ? 'Removes it along with every purchase, sale and move recorded against it, voided ones included, and the money those moved. A log of what was removed is kept. This cannot be undone.' : 'Only catalogue visibility changes. Stock, cost, valuations and transaction history remain intact.'}</Copy>
       <ErrorNotice error={change.error} />
-      <Button label={change.isPending ? 'Saving…' : mode === 'delete' ? 'Permanently delete' : product.is_archived ? 'Confirm restore' : 'Confirm archive'} danger={mode === 'delete'} disabled={change.isPending || (mode === 'delete' && confirmation !== 'DELETE')} onPress={submit} />
+      <Button label={change.isPending ? 'Saving…' : mode === 'delete' ? 'Delete' : product.is_archived ? 'Confirm restore' : 'Confirm archive'} danger={mode === 'delete'} disabled={change.isPending} onPress={submit} />
     </Sheet> : null}
   </Card>
 }

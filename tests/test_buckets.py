@@ -267,15 +267,6 @@ def test_an_emptied_bucket_drops_out_of_its_view(client, make_product):
     assert stored["total"] == 0
 
 
-def test_a_product_with_only_a_move_cannot_be_deleted(client, make_product, db):
-    """A move is history. Deleting the product would orphan it."""
-    product = make_product()
-    buy(client, product["id"], 1, "100.00", bucket=BUCKET_STORE)
-    move(client, product["id"], 1, BUCKET_STORE, BUCKET_VAULT)
-
-    assert client.delete(f"/api/v1/products/{product['id']}").status_code == 409
-
-
 def test_a_sale_names_the_bucket_it_came_out_of(client, make_product):
     """The gap that shipped: the sale form never asked, so it always said Inventory.
 
