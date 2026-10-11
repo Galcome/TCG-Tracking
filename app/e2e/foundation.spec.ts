@@ -321,7 +321,7 @@ test('the stock list deletes a product shared by two partners in two taps, and i
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
   const identity = { game_id: games[0].id, product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id };
-  const name = 'Stock list delete fixture';
+  const name = 'Stock list delete fixture ' + Date.now();
   const product = await (await request.post(API + '/api/v1/products', { data: { ...identity, name,
     initial_purchase: { quantity: 1, amount: '12.00' } } })).json();
   expect((await request.post(API + '/api/v1/purchases', { data: { product_id: product.id, quantity: 1, amount: '8.00' } })).ok()).toBeTruthy();
@@ -330,7 +330,11 @@ test('the stock list deletes a product shared by two partners in two taps, and i
   await page.getByLabel('Search products', { exact: true }).fill(name);
   const card = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
   await card.getByRole('button', { name: 'Delete ' + name, exact: true }).click();
+  // The open sheet hides the list from the accessibility tree, so the card can read as gone
+  // before the delete lands. Wait for the request itself.
+  const deleted = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().endsWith('/api/v1/products/' + product.id));
   await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  expect((await deleted).status()).toBe(204);
   await expect(card).toHaveCount(0);
   expect((await request.get(API + '/api/v1/products/' + product.id)).status()).toBe(404);
   await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
