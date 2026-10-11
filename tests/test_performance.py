@@ -68,89 +68,105 @@ def value(client, product_id, amount):
 
 # ------------------------------------------------------------------ who paid for it
 
+BEFORE_TRACKING = reporting.FUNDING_TRACKED_FROM - timedelta(days=1)
+
+
+def transfer(client, source, destination, amount) -> None:
+    response = client.post(
+        "/api/v1/money/transfers",
+        json={"from_account_id": source, "to_account_id": destination, "amount": amount},
+    )
+    assert response.status_code == 201, response.text
+
 
 def test_an_empty_store_reports_zeroes(client):
     body = performance(client)
 
-    assert body["personal_money"] == "0.00"
-    assert body["from_sales"] == "0.00"
+    assert body["tracked_from"] == reporting.FUNDING_TRACKED_FROM.isoformat()
+    assert body["own_money"] == "0.00"
+    assert body["house_money"] == "0.00"
     assert body["years"] == []
     assert [point["market_value"] for point in body["value_history"]] == ["0.00"]
 
 
-def test_stock_bought_with_a_partners_card_is_personal_money(client, make_product):
+def test_stock_paid_personally_is_own_money(client, make_product):
     buy(client, make_product()["id"], "200.00")
 
     body = performance(client)
 
-    assert body["stock_at_cost"] == "200.00"
-    assert body["personal_money"] == "200.00"
-    assert body["from_sales"] == "0.00"
+    assert body["own_money"] == "200.00"
+    assert body["house_money"] == "0.00"
 
 
-def test_a_buy_in_is_personal_money_held_as_cash(client):
-    member_id = client.get("/api/v1/members/me").json()["id"]
-    client.post("/api/v1/money/contributions", json={"member_id": member_id, "amount": "500.00"})
-
-    body = performance(client)
-
-    assert body["cash"] == "500.00"
-    assert body["personal_money"] == "500.00"
-    assert body["from_sales"] == "0.00"
-
-
-def test_stock_with_no_money_record_was_paid_for_by_sales(client, make_product, db):
-    """The opening stock: bought with earlier takings, before the app existed."""
-    opening_stock(db, make_product()["id"], 90_000)
-
-    body = performance(client)
-
-    assert body["personal_money"] == "0.00"
-    assert body["from_sales"] == "900.00"
-
-
-def test_profit_kept_and_spent_again_counts_as_sales_money(client, make_product):
-    """$100 of my money buys a card, it sells for $300 into the joint account, and that $300
-    buys the next one. Only the first $100 was anyone's own money."""
-    first = make_product()
-    buy(client, first["id"], "100.00")
-    sell(client, first["id"], "300.00", proceeds=[{"account_id": joint(client)["id"]}])
-    buy(client, make_product()["id"], "300.00", funding=[{"account_id": joint(client)["id"]}])
-
-    body = performance(client)
-
-    assert body["stock_at_cost"] == "300.00"
-    assert body["cash"] == "0.00"
-    assert body["personal_money"] == "100.00"
-    assert body["from_sales"] == "200.00"
-
-
-def test_paying_a_partner_back_takes_their_money_out(client, make_product):
-    buy(client, make_product()["id"], "200.00")
-    client.post(
-        "/api/v1/money/adjustments", json={"account_id": me(client)["id"], "target": 0}
-    )
-
-    assert performance(client)["personal_money"] == "0.00"
-
-
-def test_store_credit_is_held_value(client, make_product):
+def test_stock_paid_from_joint_or_store_credit_is_house_money(client, make_product):
+    """Sales money going back into stock: reinvested, not lost."""
     product = make_product()
-    buy(client, product["id"], "50.00", funding=[])
+    buy(client, product["id"], "20.00", funding=[])
     sell(client, product["id"], "80.00", proceeds=[{"store": "Vintage Cards"}])
+    credit = next(
+        item
+        for item in client.get("/api/v1/money/accounts").json()["items"]
+        if item["kind"] == "store_credit"
+    )
+    buy(client, make_product()["id"], "300.00", funding=[{"account_id": joint(client)["id"]}])
+    buy(client, make_product()["id"], "50.00", funding=[{"account_id": credit["id"]}])
 
     body = performance(client)
 
-    assert body["store_credit"] == "80.00"
-    assert body["from_sales"] == "80.00"
+    assert body["own_money"] == "0.00"
+    assert body["house_money"] == "350.00"
 
 
-def test_hidden_stock_still_counts_toward_what_was_paid_for(client, make_product):
-    product = make_product()
-    buy(client, product["id"], "70.00", funding=[])
-    client.patch(f"/api/v1/products/{product['id']}", json={"is_hidden": True})
+def test_paying_a_partner_back_turns_their_money_into_house_money(client, make_product):
+    buy(client, make_product()["id"], "200.00")
+    transfer(client, joint(client)["id"], me(client)["id"], "150.00")
 
-    assert performance(client)["stock_at_cost"] == "70.00"
+    body = performance(client)
+
+    assert body["own_money"] == "50.00"
+    assert body["house_money"] == "150.00"
+
+
+def test_cash_a_partner_puts_in_and_spends_from_joint_stays_their_money(client, make_product):
+    transfer(client, me(client)["id"], joint(client)["id"], "100.00")
+    buy(client, make_product()["id"], "100.00", funding=[{"account_id": joint(client)["id"]}])
+
+    body = performance(client)
+
+    assert body["own_money"] == "100.00"
+    assert body["house_money"] == "0.00"
+
+
+def test_paying_back_old_debt_never_makes_own_money_negative(client, make_product):
+    buy(client, make_product()["id"], "500.00", on=BEFORE_TRACKING)
+    buy(client, make_product()["id"], "100.00")
+    transfer(client, joint(client)["id"], me(client)["id"], "500.00")
+
+    body = performance(client)
+
+    assert body["own_money"] == "0.00"
+    assert body["house_money"] == "100.00"
+
+
+def test_cash_put_in_but_not_spent_is_not_stock(client):
+    transfer(client, me(client)["id"], joint(client)["id"], "100.00")
+
+    body = performance(client)
+
+    assert body["own_money"] == "0.00"
+    assert body["house_money"] == "0.00"
+
+
+def test_history_before_tracking_and_voided_buys_are_left_out(client, make_product, db):
+    opening_stock(db, make_product()["id"], 90_000)
+    buy(client, make_product()["id"], "400.00", on=BEFORE_TRACKING)
+    voided = buy(client, make_product()["id"], "60.00")
+    client.post(f"/api/v1/purchases/{voided['id']}/void", json={"reason": "typo"})
+
+    body = performance(client)
+
+    assert body["own_money"] == "0.00"
+    assert body["house_money"] == "0.00"
 
 
 # ------------------------------------------------------------------ value over time

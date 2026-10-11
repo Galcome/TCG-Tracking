@@ -346,21 +346,18 @@ export interface YearRow {
 }
 
 /**
- * The dashboard's charts. `personal_money + from_sales` is everything the business holds at
- * cost (`stock_at_cost + cash + store_credit`): what partners put in and are still owed, and
- * what sales paid for and kept in the business.
+ * The dashboard's charts. `own_money + house_money` is what the stock bought since
+ * `tracked_from` cost: paid personally and not yet paid back, or paid by the house (the joint
+ * account, store credit, and every payback).
  */
 export interface Performance {
   /** Oldest first, up to a year; the last point is always now. */
   value_history: ValuePoint[]
   market_value: string
   priced_cost: string
-  stock_at_cost: string
-  cash: string
-  store_credit: string
-  personal_money: string
-  /** Negative when trading is behind what partners put in. */
-  from_sales: string
+  tracked_from: string
+  own_money: string
+  house_money: string
   /** Newest first, undated last. */
   years: YearRow[]
 }

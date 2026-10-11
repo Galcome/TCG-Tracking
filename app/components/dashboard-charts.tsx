@@ -37,25 +37,19 @@ export function ValueChart({ points }: { points: ValuePoint[] }) {
   </View>;
 }
 
-/** Who paid for what the business holds: partners' own money, or money sales brought in. */
+/** Who paid for the stock bought since tracking started: partners' own money, or the house. */
 export function FundingBar({ data }: { data: Performance }) {
-  const [personal, sales] = shares(plotValue(data.personal_money), plotValue(data.from_sales));
-  const behind = plotValue(data.from_sales) < 0;
-  const held = [
-    `stock ${money(data.stock_at_cost)}`,
-    plotValue(data.cash) !== 0 ? `cash ${money(data.cash)}` : null,
-    plotValue(data.store_credit) !== 0 ? `store credit ${money(data.store_credit)}` : null,
-  ].filter(Boolean).join(' · ');
+  const [own, house] = shares(plotValue(data.own_money), plotValue(data.house_money));
+  const empty = own === 0 && house === 0;
   return <View style={{ gap: 10 }}>
     <View accessible={false} style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: colors.raised }}>
-      <View style={{ flex: personal, backgroundColor: colors.accent }} />
-      <View style={{ flex: sales, backgroundColor: colors.gain }} />
+      <View style={{ flex: own, backgroundColor: colors.accent }} />
+      <View style={{ flex: house, backgroundColor: colors.gain }} />
     </View>
-    <Row><Swatch color={colors.accent} label={`Our own money ${money(data.personal_money)}`} /><Swatch color={colors.gain} label={`Paid by sales ${money(data.from_sales)}`} /></Row>
-    <Copy muted>Held at cost: {held}</Copy>
-    <Copy muted>{behind
-      ? 'Trading is behind what partners put in.'
-      : 'Stock bought with sales money is reinvested, not lost: it is still on the shelf.'}</Copy>
+    <Row><Swatch color={colors.accent} label={`Our own money ${money(data.own_money)}`} /><Swatch color={colors.gain} label={`House money ${money(data.house_money)}`} /></Row>
+    <Copy muted>{empty
+      ? `Counting from ${data.tracked_from}. Paid from the joint account is house money; paid yourself is your own money until you are paid back.`
+      : `Since ${data.tracked_from}. House money is sales money going back into stock: reinvested, not lost.`}</Copy>
   </View>;
 }
 

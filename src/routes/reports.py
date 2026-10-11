@@ -287,13 +287,10 @@ class PerformanceRead(BaseModel):
     value_history: list[ValuePointRead]
     market_value: MoneyOut = Field(validation_alias="market_value_cents")
     priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
-    stock_at_cost: MoneyOut = Field(validation_alias="stock_at_cost_cents")
-    cash: MoneyOut = Field(validation_alias="cash_cents")
-    store_credit: MoneyOut = Field(validation_alias="store_credit_cents")
-    #: Partners' own money still in the business: what they are owed plus their buy-ins.
-    personal_money: MoneyOut = Field(validation_alias="personal_money_cents")
-    #: Everything held beyond that, which sales paid for.
-    from_sales: MoneyOut = Field(validation_alias="from_sales_cents")
+    #: Who paid for the stock bought since `tracked_from`; the two add up to its cost.
+    tracked_from: date
+    own_money: MoneyOut = Field(validation_alias="own_money_cents")
+    house_money: MoneyOut = Field(validation_alias="house_money_cents")
     years: list[YearRead]
 
 
