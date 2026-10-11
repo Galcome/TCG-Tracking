@@ -23,6 +23,8 @@ from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.market_price import QUOTE_FRESH, QUOTE_UNAVAILABLE
 from src.models.member import Member
 from src.models.money import (
+    ACCOUNT_JOINT,
+    ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     MOVEMENT_EXPENSE,
     MOVEMENT_PROCEEDS,
@@ -30,10 +32,11 @@ from src.models.money import (
     MoneyMovement,
     MoneyPosting,
 )
+from src.models.portfolio import PortfolioSnapshot
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
-from src.services import vault
+from src.services import money, vault
 from src.services.inventory import product_stats
 from src.services.pricing import current_estimates
 
@@ -1010,3 +1013,172 @@ __all__ = [
     "dashboard",
     "period_start",
 ]
+
+
+# ---------------------------------------------------------------------------- performance
+
+#: A year of daily points: a trend, and still small enough to draw on a phone.
+VALUE_HISTORY_DAYS = 365
+
+
+def record_portfolio(db: Session, today: date | None = None) -> PortfolioSnapshot:
+    """Write today's row of the value chart, replacing one already written today.
+
+    Taken from `dashboard` rather than recomputed, so the chart's last point and the
+    headline above it are the same number.
+    """
+    today = today or date.today()
+    board = dashboard(db, today=today)
+    row = db.scalar(select(PortfolioSnapshot).where(PortfolioSnapshot.captured_on == today))
+    if row is None:
+        row = PortfolioSnapshot(captured_on=today)
+        db.add(row)
+    row.market_value_cents = board.market_value_cents
+    row.priced_cost_cents = board.priced_cost_cents
+    db.flush()
+    return row
+
+
+@dataclass
+class ValuePoint:
+    captured_on: date
+    market_value_cents: int
+    priced_cost_cents: int
+
+
+@dataclass
+class YearRow:
+    """One calendar year of trading. `year` is None for rows with no date at all."""
+
+    year: int | None
+    spent_cents: int = 0
+    revenue_cents: int = 0
+    realized_profit_cents: int = 0
+    expenses_cents: int = 0
+
+
+@dataclass
+class Performance:
+    value_history: list[ValuePoint]
+    market_value_cents: int
+    priced_cost_cents: int
+    #: Everything the business holds, at cost: stock on hand, joint cash, store credit.
+    stock_at_cost_cents: int
+    cash_cents: int
+    store_credit_cents: int
+    #: Who paid for it. Personal money is what partners put in and have not been paid back
+    #: - money owed to members plus buy-ins. Whatever the business holds beyond that was paid
+    #: for by sales: profit kept and spent again, and stock bought before the app existed.
+    personal_money_cents: int
+    from_sales_cents: int
+    years: list[YearRow]
+
+
+def performance(db: Session, today: date | None = None) -> Performance:
+    """The dashboard's three charts: value over time, who paid for the stock, year by year.
+
+    The funding split is an accounting identity, not an estimate. What the business holds
+    (stock at cost plus its cash) equals what partners are owed, plus what they bought in
+    with, plus what trading earned and kept. So `from_sales` is everything held minus the
+    personal money - which is how a shelf worth $60k can have been bought with $6k of anyone's
+    own money.
+    """
+    today = today or date.today()
+    board = dashboard(db, today=today)
+
+    earliest = today - timedelta(days=VALUE_HISTORY_DAYS - 1)
+    history = [
+        ValuePoint(row.captured_on, row.market_value_cents, row.priced_cost_cents)
+        for row in db.scalars(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.captured_on >= earliest, PortfolioSnapshot.captured_on < today)
+            .order_by(PortfolioSnapshot.captured_on)
+        )
+    ]
+    # Today is always live, so the chart ends on the number in the headline even before the
+    # nightly job has run.
+    history.append(ValuePoint(today, board.market_value_cents, board.priced_cost_cents))
+
+    flows = money.balances(db)
+    owed = cash = credit = 0
+    for account in db.scalars(select(MoneyAccount)):
+        balance = money.balance_for(account, flows.get(account.id, 0))
+        if account.kind == ACCOUNT_MEMBER:
+            owed += balance
+        elif account.kind == ACCOUNT_JOINT:
+            cash += balance
+        else:
+            credit += balance
+    personal = owed + sum(money.contributions(db).values())
+    # Hidden products are off the shelf figures but were still paid for, so the identity
+    # counts them.
+    stock = sum(stats.remaining_cost_cents for stats in product_stats(db).values())
+
+    return Performance(
+        value_history=history,
+        market_value_cents=board.market_value_cents,
+        priced_cost_cents=board.priced_cost_cents,
+        stock_at_cost_cents=stock,
+        cash_cents=cash,
+        store_credit_cents=credit,
+        personal_money_cents=personal,
+        from_sales_cents=stock + cash + credit - personal,
+        years=by_year(db),
+    )
+
+
+def by_year(db: Session) -> list[YearRow]:
+    """Spend, revenue, profit and overhead per calendar year, newest first, undated last.
+
+    Undated rows get their own row instead of being dropped: most of the opening stock has
+    no purchase date, and leaving it out would make the years add up to a fraction of what
+    was spent.
+    """
+    years: dict[int | None, YearRow] = {}
+
+    def row_for(year) -> YearRow:
+        key = None if year is None else int(year)
+        return years.setdefault(key, YearRow(year=key))
+
+    # Same rule as the dashboard: carried cost is not new money, its add-ons are.
+    spent = case(
+        (
+            Purchase.is_derived.is_(True),
+            Purchase.shipping_cents + Purchase.tax_cents + Purchase.fees_cents,
+        ),
+        else_=_LANDED,
+    )
+    purchase_year = func.extract("year", Purchase.purchase_date)
+    for year, amount in db.execute(
+        select(purchase_year, func.sum(spent))
+        .where(Purchase.status == STATUS_ACTIVE)
+        .group_by(purchase_year)
+    ):
+        row_for(year).spent_cents += int(amount or 0)
+
+    sale_year = func.extract("year", Sale.sale_date)
+    for year, gross, net_known, cost in db.execute(
+        select(
+            sale_year,
+            func.sum(Sale.gross_amount_cents),
+            func.sum(_NET_KNOWN),
+            func.sum(func.coalesce(Sale.cost_basis_cents, 0)),
+        )
+        .where(Sale.status == STATUS_ACTIVE)
+        .group_by(sale_year)
+    ):
+        row = row_for(year)
+        row.revenue_cents += int(gross or 0)
+        row.realized_profit_cents += int(net_known or 0) - int(cost or 0)
+
+    expense_year = func.extract("year", MoneyMovement.occurred_on)
+    for year, amount in db.execute(
+        select(expense_year, func.sum(-MoneyPosting.delta_cents))
+        .select_from(MoneyPosting)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.kind == MOVEMENT_EXPENSE)
+        .group_by(expense_year)
+    ):
+        row_for(year).expenses_cents += int(amount or 0)
+
+    return sorted(years.values(), key=lambda row: (row.year is None, -(row.year or 0)))

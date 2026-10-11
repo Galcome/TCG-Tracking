@@ -395,25 +395,27 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
   expect(latest.stats.quantity_on_hand).toBe(1);
 });
 
-test('dashboard separates period trading from lifetime cash and preserves exact cents', async ({ page }) => {
+test('dashboard leads with inventory value, who paid for the stock and year over year, in exact cents', async ({ page }) => {
   const fixtureId = '66666666-6666-4666-8666-666666666666';
   await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ json: {
     sales_missing_cost: 0, products_with_negative_stock: 1,
     negative_stock_products: [{ id: fixtureId, name: 'Dashboard correction fixture', quantity: -1 }],
   } }));
-  await page.route(API + '/api/v1/reports/by-marketplace?*', route => route.fulfill({ json: [{
-    key: 'fixture', label: 'Fixture channel', revenue: '20.00', realized_profit: '9.00',
-  }] }));
-  await page.route(API + '/api/v1/sales?*', route => route.fulfill({ json: { total: 1, items: [{
-    id: fixtureId, product_id: fixtureId, product: { id: fixtureId, name: 'Dashboard sale fixture' },
-    quantity: 1, amount: '20.00', platform_fees: '1.00', payment_fees: '0.00', shipping_paid: '0.00',
-    net_proceeds: '19.00', cost_basis: '10.00', realized_profit: '9.00', has_unknown_cost: false,
-    days_held_weighted: null, sale_date: '2026-09-13', sold_by_member_id: null,
-    marketplace: 'Fixture channel', notes: null, status: 'active',
-  }] } }));
   await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
     month: '2026-09-01', spent: '90071992547409.92', revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
   }] }));
+  await page.route(API + '/api/v1/reports/performance', route => route.fulfill({ json: {
+    value_history: [
+      { captured_on: '2026-10-08', market_value: '11.00', priced_cost: '10.01' },
+      { captured_on: '2026-10-09', market_value: '12.00', priced_cost: '10.01' },
+    ],
+    market_value: '12.00', priced_cost: '10.01', stock_at_cost: '10.01', cash: '0.00', store_credit: '2.00',
+    personal_money: '3.00', from_sales: '9.01',
+    years: [
+      { year: 2026, spent: '0.29', revenue: '0.00', realized_profit: '-0.01', expenses: '1.00' },
+      { year: null, spent: '66783.00', revenue: '0.00', realized_profit: '0.00', expenses: '0.00' },
+    ],
+  } }));
   await page.route(API + '/api/v1/dashboard?*', route => route.fulfill({ json: {
     realized_profit: '90071992547409.91', roi: null, inventory_at_cost: '10.01', total_invested: '20.01',
     purchases_in_period: '0.29', cost_of_sales: '0.00', cost_written_off: '3.01', total_sales: '0.00',
@@ -424,34 +426,26 @@ test('dashboard separates period trading from lifetime cash and preserves exact 
     market_value: '12.00', priced_cost: '10.01', unrealized_gain: '1.99', priced_units: 1, stale_units: 1,
   } }));
   await signIn(page);
-  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toBeVisible();
-  await expect(page.getByText('Expenses $1.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('Market value of stock', { exact: true })).toBeVisible();
+  await expect(page.getByText('Inventory value', { exact: true })).toBeVisible();
   await expect(page.getByText('$12.00', { exact: true })).toBeVisible();
   await expect(page.getByText('$1.99', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByLabel('Value over 2 days', { exact: true })).toBeVisible();
+  await expect(page.getByText('Since 2026-10-08', { exact: true })).toBeVisible();
   await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.getByRole('button', { name: 'Lifetime cash context', exact: true }).click();
-  await expect(page.getByText('Bulk cost written off · lifetime, not cash', { exact: true })).toBeVisible();
-  await expect(page.getByText('Store credit received · not cash', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Sales insights', exact: true }).click();
-  await expect(page.getByText('Where it sold', { exact: true })).toBeVisible();
-  await expect(page.getByText('Fixture channel', { exact: true })).toBeVisible();
-  await expect(page.getByText('$20.00 gross', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Recent sales', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit sale: Dashboard sale fixture', exact: true }).click();
-  await expect(page.getByLabel('Total received', { exact: true })).toHaveValue('20.00');
-  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Monthly trend', exact: true }).click();
-  const trend = page.getByRole('group', { name: 'Monthly trading trend', exact: true });
-  await expect(trend.getByText('Spent $90,071,992,547,409.92', { exact: true })).toBeVisible();
-  await expect(trend.getByText('Revenue $0.00', { exact: true })).toBeVisible();
-  await expect(trend.getByText('Realized profit -$0.01', { exact: true })).toBeVisible();
-  // Signed figures carry the theme's gain/loss tones; costs stay neutral.
-  await expect(trend.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
+  // Sales money that bought stock reads as reinvested, not as a loss.
+  await expect(page.getByText('Our own money $3.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Paid by sales $9.01', { exact: true })).toBeVisible();
+  await expect(page.getByText('Held at cost: stock $10.01 · store credit $2.00', { exact: true })).toBeVisible();
   await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
-  await page.getByRole('button', { name: 'Period cost and trading', exact: true }).click();
-  await expect(page.getByText('Expenses · Supplies', { exact: true })).toBeVisible();
+  await expect(page.getByText('Expenses $1.00', { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel(/: spent \$90,071,992,547,409\.92, revenue \$0\.00$/)).toBeVisible();
+  const years = page.getByRole('table', { name: 'Year over year', exact: true });
+  await expect(years.getByText('2026', { exact: true })).toBeVisible();
+  await expect(years.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
+  await expect(years.getByText('Before dates', { exact: true })).toBeVisible();
+  await expect(years.getByText('Spent $66,783.00', { exact: true })).toBeVisible();
+  // The detail lives in Reports now; the dashboard keeps none of the old disclosures.
+  await expect(page.getByRole('button', { name: 'Lifetime cash context', exact: true })).toHaveCount(0);
   for (const width of [390, 768, 1536]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();

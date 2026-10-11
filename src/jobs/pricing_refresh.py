@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
 from src.database import get_db
-from src.services import pricing, set_sync
+from src.services import pricing, reporting, set_sync
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,26 @@ def sync_sets(
     return summary
 
 
+def snapshot_portfolio(
+    *,
+    record_fn: Callable[..., object] = reporting.record_portfolio,
+    db_factory: Callable[[], AbstractContextManager] = get_db,
+) -> bool:
+    """Write today's point on the dashboard's value chart, from the prices just refreshed.
+
+    Best-effort, like the set sync: a missed day is a gap in a line, never a reason to fail
+    the job. It runs even after a failed refresh - yesterday's prices are still a value.
+    """
+    try:
+        with db_factory() as db:
+            record_fn(db)
+    except SQLAlchemyError as error:
+        logger.warning("portfolio_snapshot_failed error=%s", type(error).__name__)
+        return False
+    logger.info("portfolio_snapshot_complete")
+    return True
+
+
 def run(
     *,
     refresh_fn: RefreshFn = pricing.refresh,
@@ -144,12 +164,14 @@ def main() -> int:
         logger.error("pricing_refresh_refused app_role=%s expected=worker", settings.app_role)
         return 2
     sync_sets()
+    outcome = 0
     try:
         run()
     except PricingJobError as error:
         logger.error("pricing_refresh_aborted error=%s", error)
-        return 1
-    return 0
+        outcome = 1
+    snapshot_portfolio()
+    return outcome
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised by Railway, not import tests
@@ -166,5 +188,6 @@ __all__ = [
     "RETRY_DELAYS_SECONDS",
     "main",
     "run",
+    "snapshot_portfolio",
     "sync_sets",
 ]

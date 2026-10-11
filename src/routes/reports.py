@@ -261,6 +261,54 @@ def read_by_month(
     return reporting.by_month(db)
 
 
+class ValuePointRead(BaseModel):
+    model_config = _CONFIG
+
+    captured_on: date
+    market_value: MoneyOut = Field(validation_alias="market_value_cents")
+    priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
+
+
+class YearRead(BaseModel):
+    """One calendar year of trading. A null year holds everything with no date."""
+
+    model_config = _CONFIG
+
+    year: int | None
+    spent: MoneyOut = Field(validation_alias="spent_cents")
+    revenue: MoneyOut = Field(validation_alias="revenue_cents")
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    expenses: MoneyOut = Field(validation_alias="expenses_cents")
+
+
+class PerformanceRead(BaseModel):
+    model_config = _CONFIG
+
+    value_history: list[ValuePointRead]
+    market_value: MoneyOut = Field(validation_alias="market_value_cents")
+    priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
+    stock_at_cost: MoneyOut = Field(validation_alias="stock_at_cost_cents")
+    cash: MoneyOut = Field(validation_alias="cash_cents")
+    store_credit: MoneyOut = Field(validation_alias="store_credit_cents")
+    #: Partners' own money still in the business: what they are owed plus their buy-ins.
+    personal_money: MoneyOut = Field(validation_alias="personal_money_cents")
+    #: Everything held beyond that, which sales paid for.
+    from_sales: MoneyOut = Field(validation_alias="from_sales_cents")
+    years: list[YearRead]
+
+
+@router.get("/reports/performance", response_model=PerformanceRead)
+def read_performance(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+):
+    """Value over time, who paid for the stock, and year by year: the dashboard's charts.
+
+    No period parameter, like by-month: each of these is already its own time axis.
+    """
+    return reporting.performance(db)
+
+
 @router.get("/reports/aging", response_model=list[AgingLotRead])
 def read_aging(
     set_id: uuid.UUID | None = SetQuery,

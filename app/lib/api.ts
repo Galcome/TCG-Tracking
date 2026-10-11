@@ -329,6 +329,42 @@ export interface MonthRow {
   units_bought: number
 }
 
+/** One day of the value chart. */
+export interface ValuePoint {
+  captured_on: string
+  market_value: string
+  priced_cost: string
+}
+
+/** One calendar year of trading. `year` is null for records with no date. */
+export interface YearRow {
+  year: number | null
+  spent: string
+  revenue: string
+  realized_profit: string
+  expenses: string
+}
+
+/**
+ * The dashboard's charts. `personal_money + from_sales` is everything the business holds at
+ * cost (`stock_at_cost + cash + store_credit`): what partners put in and are still owed, and
+ * what sales paid for and kept in the business.
+ */
+export interface Performance {
+  /** Oldest first, up to a year; the last point is always now. */
+  value_history: ValuePoint[]
+  market_value: string
+  priced_cost: string
+  stock_at_cost: string
+  cash: string
+  store_credit: string
+  personal_money: string
+  /** Negative when trading is behind what partners put in. */
+  from_sales: string
+  /** Newest first, undated last. */
+  years: YearRow[]
+}
+
 export type GroupBy =
   | 'game'
   | 'product'
@@ -1316,6 +1352,8 @@ export function createApi(request: ApiRequest) { return {
     request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period, ...filters })}`),
   /** The last twelve months, oldest first. No period: the point of it is the trend. */
   byMonth: () => request<MonthRow[]>('/api/v1/reports/by-month'),
+  /** Not period-scoped: value over time, who paid for the stock, and year by year. */
+  performance: () => request<Performance>('/api/v1/reports/performance'),
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
