@@ -10,11 +10,11 @@ import { VaultDetails, VaultSummary } from './vault-valuation';
 
 // The app ships no icon font, so the row shortcuts are glyphs with a one-word caption,
 // named in full for screen readers.
-function IconButton({ glyph, caption, label, onPress }: { glyph: string; caption: string; label: string; onPress: () => void }) {
+function IconButton({ glyph, caption, label, onPress, danger = false }: { glyph: string; caption: string; label: string; onPress: () => void; danger?: boolean }) {
   const fonts = useTypography();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={4}
     style={({ pressed }) => ({ minWidth: 52, height: 52, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.raised, opacity: pressed ? 0.7 : 1 })}>
-    <Text accessible={false} style={{ color: colors.accent, fontSize: 18, lineHeight: 22 }}>{glyph}</Text>
+    <Text accessible={false} style={{ color: danger ? colors.loss : colors.accent, fontSize: 18, lineHeight: 22 }}>{glyph}</Text>
     <Text accessible={false} style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 11 }}>{caption}</Text>
   </Pressable>;
 }
@@ -25,10 +25,10 @@ function IconButton({ glyph, caption, label, onPress }: { glyph: string; caption
 // On the Vault tab the row carries the Vault holding, so manual worth and appreciation
 // replace the market position: the Vault is valued, not priced. Elsewhere, anything no
 // feed can price (graded cards, lots) takes a typed value, which then shows as its price.
-export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden }: {
+export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden, onDelete }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
   onDetails: () => void; onEdit: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
-  onEditCost?: () => void; onToggleHidden?: () => void;
+  onEditCost?: () => void; onToggleHidden?: () => void; onDelete?: () => void;
 }) {
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
@@ -48,6 +48,7 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
         <IconButton glyph="✎" caption="Edit" label="Edit product" onPress={onEdit} />
         {onEditCost ? <IconButton glyph="$" caption="Cost" label="Edit cost" onPress={onEditCost} /> : null}
         {onToggleHidden ? <IconButton glyph={p.is_hidden ? '◉' : '⊘'} caption={p.is_hidden ? 'Unhide' : 'Hide'} label={p.is_hidden ? 'Unhide product' : 'Hide product'} onPress={onToggleHidden} /> : null}
+        {onDelete ? <IconButton glyph="✕" caption="Delete" label={'Delete ' + p.name} onPress={onDelete} danger /> : null}
       </View></Row>
       <Row>{BUCKETS.map(b => <Text key={b} style={{ fontFamily: fonts.medium, fontSize: 12, color: colors[b], backgroundColor: colors.raised, padding: 8, borderRadius: 8 }}>{BUCKET_LABELS[b]} {p.stats.by_bucket[b]}</Text>)}</Row>
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}
