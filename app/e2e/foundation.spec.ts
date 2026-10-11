@@ -409,8 +409,7 @@ test('dashboard leads with inventory value, who paid for the stock and year over
       { captured_on: '2026-10-08', market_value: '11.00', priced_cost: '10.01' },
       { captured_on: '2026-10-09', market_value: '12.00', priced_cost: '10.01' },
     ],
-    market_value: '12.00', priced_cost: '10.01', stock_at_cost: '10.01', cash: '0.00', store_credit: '2.00',
-    personal_money: '3.00', from_sales: '9.01',
+    market_value: '12.00', priced_cost: '10.01', tracked_from: '2026-10-11', own_money: '3.00', house_money: '9.01',
     years: [
       { year: 2026, spent: '0.29', revenue: '0.00', realized_profit: '-0.01', expenses: '1.00' },
       { year: null, spent: '66783.00', revenue: '0.00', realized_profit: '0.00', expenses: '0.00' },
@@ -434,8 +433,8 @@ test('dashboard leads with inventory value, who paid for the stock and year over
   await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
   // Sales money that bought stock reads as reinvested, not as a loss.
   await expect(page.getByText('Our own money $3.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('Paid by sales $9.01', { exact: true })).toBeVisible();
-  await expect(page.getByText('Held at cost: stock $10.01 · store credit $2.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('House money $9.01', { exact: true })).toBeVisible();
+  await expect(page.getByText('Since 2026-10-11. House money is sales money going back into stock: reinvested, not lost.', { exact: true })).toBeVisible();
   await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
   await expect(page.getByText('Expenses $1.00', { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel(/: spent \$90,071,992,547,409\.92, revenue \$0\.00$/)).toBeVisible();

@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from src.models.card_set import CardSet
@@ -23,11 +23,12 @@ from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.market_price import QUOTE_FRESH, QUOTE_UNAVAILABLE
 from src.models.member import Member
 from src.models.money import (
-    ACCOUNT_JOINT,
     ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     MOVEMENT_EXPENSE,
+    MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
+    MOVEMENT_TRANSFER,
     MoneyAccount,
     MoneyMovement,
     MoneyPosting,
@@ -36,7 +37,7 @@ from src.models.portfolio import PortfolioSnapshot
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
-from src.services import money, vault
+from src.services import vault
 from src.services.inventory import product_stats
 from src.services.pricing import current_estimates
 
@@ -1020,6 +1021,11 @@ __all__ = [
 #: A year of daily points: a trend, and still small enough to draw on a phone.
 VALUE_HISTORY_DAYS = 365
 
+#: The day the group started tracking who pays for stock. Older money was never recorded
+#: reliably - most of the opening stock has no money record at all - so rather than guess
+#: at it, the split only counts what was bought from this day on.
+FUNDING_TRACKED_FROM = date(2026, 10, 11)
+
 
 def record_portfolio(db: Session, today: date | None = None) -> PortfolioSnapshot:
     """Write today's row of the value chart, replacing one already written today.
@@ -1062,27 +1068,17 @@ class Performance:
     value_history: list[ValuePoint]
     market_value_cents: int
     priced_cost_cents: int
-    #: Everything the business holds, at cost: stock on hand, joint cash, store credit.
-    stock_at_cost_cents: int
-    cash_cents: int
-    store_credit_cents: int
-    #: Who paid for it. Personal money is what partners put in and have not been paid back
-    #: - money owed to members plus buy-ins. Whatever the business holds beyond that was paid
-    #: for by sales: profit kept and spent again, and stock bought before the app existed.
-    personal_money_cents: int
-    from_sales_cents: int
+    #: Who paid for the stock bought since `tracked_from`. Own money is what partners paid
+    #: from their own pockets and have not been paid back; house money is the joint account
+    #: and store credit - sales money going back into stock - plus every payback.
+    tracked_from: date
+    own_money_cents: int
+    house_money_cents: int
     years: list[YearRow]
 
 
 def performance(db: Session, today: date | None = None) -> Performance:
-    """The dashboard's three charts: value over time, who paid for the stock, year by year.
-
-    The funding split is an accounting identity, not an estimate. What the business holds
-    (stock at cost plus its cash) equals what partners are owed, plus what they bought in
-    with, plus what trading earned and kept. So `from_sales` is everything held minus the
-    personal money - which is how a shelf worth $60k can have been bought with $6k of anyone's
-    own money.
-    """
+    """The dashboard's three charts: value over time, who paid for the stock, year by year."""
     today = today or date.today()
     board = dashboard(db, today=today)
 
@@ -1099,32 +1095,63 @@ def performance(db: Session, today: date | None = None) -> Performance:
     # nightly job has run.
     history.append(ValuePoint(today, board.market_value_cents, board.priced_cost_cents))
 
-    flows = money.balances(db)
-    owed = cash = credit = 0
-    for account in db.scalars(select(MoneyAccount)):
-        balance = money.balance_for(account, flows.get(account.id, 0))
-        if account.kind == ACCOUNT_MEMBER:
-            owed += balance
-        elif account.kind == ACCOUNT_JOINT:
-            cash += balance
-        else:
-            credit += balance
-    personal = owed + sum(money.contributions(db).values())
-    # Hidden products are off the shelf figures but were still paid for, so the identity
-    # counts them.
-    stock = sum(stats.remaining_cost_cents for stats in product_stats(db).values())
-
+    own, house = funding_split(db)
     return Performance(
         value_history=history,
         market_value_cents=board.market_value_cents,
         priced_cost_cents=board.priced_cost_cents,
-        stock_at_cost_cents=stock,
-        cash_cents=cash,
-        store_credit_cents=credit,
-        personal_money_cents=personal,
-        from_sales_cents=stock + cash + credit - personal,
+        tracked_from=FUNDING_TRACKED_FROM,
+        own_money_cents=own,
+        house_money_cents=house,
         years=by_year(db),
     )
+
+
+def funding_split(db: Session) -> tuple[int, int]:
+    """Stock bought since tracking started, split into partners' own money and house money.
+
+    The rules are the group's: stock paid from the joint account (or with store credit) is
+    house money, stock a partner paid for personally is their own money, and when the joint
+    account pays a partner back, that much of their money becomes house money.
+
+    Transfers are netted per member account: a payback adds to it, a partner putting cash
+    into the joint account takes from it. The own share is held between zero and the total,
+    so paying back money spent before tracking started cannot push it negative, and the two
+    parts always add up to what the stock cost.
+    """
+    tracked = (
+        func.coalesce(MoneyMovement.occurred_on, cast(MoneyMovement.created_at, Date))
+        >= FUNDING_TRACKED_FROM
+    )
+    rows = db.execute(
+        select(
+            MoneyMovement.kind,
+            MoneyAccount.kind,
+            func.sum(MoneyPosting.delta_cents),
+        )
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyMovement.kind.in_((MOVEMENT_FUNDING, MOVEMENT_TRANSFER)),
+            tracked,
+        )
+        .group_by(MoneyMovement.kind, MoneyAccount.kind)
+    ).all()
+
+    personal = house = paid_back = 0
+    for kind, account_kind, delta in rows:
+        is_member = account_kind == ACCOUNT_MEMBER
+        if kind == MOVEMENT_TRANSFER:
+            paid_back += delta if is_member else 0
+        elif is_member:
+            personal -= delta
+        else:
+            house -= delta
+
+    total = personal + house
+    own = min(max(personal - paid_back, 0), total)
+    return own, total - own
 
 
 def by_year(db: Session) -> list[YearRow]:
