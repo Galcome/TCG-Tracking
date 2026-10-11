@@ -317,7 +317,7 @@ test('catalogue archive preserves money and delete removes a product with its hi
   expect((await request.get(API + '/api/v1/products/' + tracked.id)).status()).toBe(404);
 });
 
-test('the stock list deletes a product shared by two partners in two taps', async ({ page, request }) => {
+test('the stock list deletes a product shared by two partners in two taps, and it can be recovered', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
   const identity = { game_id: games[0].id, product_type_id: types.find((item: { slug: string }) => item.slug === 'single').id };
@@ -333,6 +333,12 @@ test('the stock list deletes a product shared by two partners in two taps', asyn
   await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(card).toHaveCount(0);
   expect((await request.get(API + '/api/v1/products/' + product.id)).status()).toBe(404);
+  await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
+  await page.getByRole('button', { name: 'Recover ' + name, exact: true }).first().click();
+  await expect(page).toHaveURL(new RegExp('/products/' + product.id + '$'));
+  const recovered = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(recovered.stats.quantity_on_hand).toBe(2);
+  expect(recovered.stats.remaining_cost).toBe('20.00');
 });
 
 test('pricing requires explicit printing confirmation and keeps mapping writes out of the ledger', async ({ page, request }) => {

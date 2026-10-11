@@ -7,6 +7,7 @@ How to add a new feature:
 
 from fastapi import APIRouter
 
+from src.routes.audit import router as audit_router
 from src.routes.grading import router as grading_router
 from src.routes.ledger import router as ledger_router
 from src.routes.members import router as members_router
@@ -21,6 +22,7 @@ from src.routes.vision import router as vision_router
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(audit_router, prefix="/audit", tags=["audit"])
 router.include_router(members_router, prefix="/members", tags=["members"])
 router.include_router(products_router, prefix="/products", tags=["products"])
 router.include_router(pricing_router, prefix="/pricing", tags=["pricing"])

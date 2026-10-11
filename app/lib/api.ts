@@ -236,6 +236,19 @@ export interface ProductCandidate {
   matched_fields: string[]
 }
 
+/** A product that is deleted right now, from the audit log. `id` is the delete's entry. */
+export interface DeletedProduct {
+  id: string
+  product_id: string
+  name: string
+  deleted_at: string
+  deleted_by: string | null
+  purchases: number
+  sales: number
+  /** False for deletes made before a full copy was kept. */
+  recoverable: boolean
+}
+
 export interface ProductDetail extends Product {
   history: Transaction[]
 }
@@ -1247,6 +1260,12 @@ export function createApi(request: ApiRequest) { return {
 
   deleteProduct: (id: string) =>
     request<void>(`/api/v1/products/${id}`, { method: 'DELETE' }),
+
+  deletedProducts: () => request<DeletedProduct[]>('/api/v1/audit/deleted-products'),
+
+  /** Puts a deleted product back with everything it had. `id` is the delete's audit entry. */
+  restoreDeletedProduct: (id: string) =>
+    request<{ product_id: string }>(`/api/v1/audit/deleted-products/${id}/restore`, { method: 'POST' }),
 
   createPurchase: (purchase: NewPurchase) =>
     request<unknown>('/api/v1/purchases', { method: 'POST', body: JSON.stringify(purchase) }),

@@ -160,6 +160,7 @@ export default function Inventory() {
         onPress={() => { setHidden(showingHidden ? 'exclude' : 'only'); setOffset(0); }} />
       {bulkLabel ? <Button label={setAllHidden.isPending ? 'Working...' : bulkLabel} danger={!showingHidden} disabled={setAllHidden.isPending || products.isFetching}
         onPress={() => setAllHidden.mutate(!showingHidden)} /> : null}
+      <Button variant="link" label="Recently deleted" onPress={() => router.push('/deleted')} />
     </View>
     {lastBulk && lastBulk.ids.length > 0 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
       <Copy>{lastBulk.hid ? 'Hid' : 'Unhid'} {lastBulk.ids.length} products.</Copy>
