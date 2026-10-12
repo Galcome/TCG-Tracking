@@ -885,7 +885,7 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   await page.goto('/products/' + product.id);
   await openProductSections(page);
   await expect(page.getByRole('button', { name: 'Record valuation', exact: true })).toBeVisible();
-  await expect(page.getByText('Remaining cost $10.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $10.00', { exact: true })).toBeVisible();
   await expect(page.getByText('Realized profit $0.00', { exact: true })).toBeVisible();
   const after = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   expect(after.stats.quantity_on_hand).toBe(2);
@@ -1155,12 +1155,12 @@ test('transformation history links outputs and reverses the whole cost chain', a
   await expect(history.getByText('Inherited purchase date 2025-01-02 · Bulk write-off $0.00', { exact: true })).toBeVisible();
   await history.getByRole('button', { name: 'Output: ' + child.name, exact: true }).first().click();
   await openProductSections(page);
-  await expect(page.getByText('Remaining cost $900.01', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $900.01', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Undo crack', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Reverse complete case opening');
   await page.getByRole('button', { name: 'Undo transformation', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByText('Remaining cost $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $0.00', { exact: true })).toBeVisible();
   const restored = await (await request.get(API + '/api/v1/products/' + source.id)).json();
   expect(restored.stats.quantity_on_hand).toBe(1);
   expect(restored.stats.remaining_cost).toBe('900.01');
@@ -1385,7 +1385,7 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByRole('button', { name: 'Expo mutation journey', exact: true }).first().click();
   await expect(page).toHaveURL(new RegExp('/products/' + productId + '$'));
   await openProductSections(page);
-  await expect(page.getByText('Remaining cost $84.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $84.33', { exact: true })).toBeVisible();
   const readProduct = async () => (await request.get(API + '/api/v1/products/' + productId)).json();
   expect((await readProduct()).collector_number).toBe('042');
   expect((await readProduct()).set_name).toBe(knownSets.items[0].name);
@@ -1398,14 +1398,14 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Quantity', { exact: true }).fill('1');
   await page.getByLabel('Total paid', { exact: true }).fill('10.00');
   await page.getByRole('button', { name: 'Save purchase', exact: true }).click();
-  await expect(page.getByText('Remaining cost $94.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $94.33', { exact: true })).toBeVisible();
   await expect(page.getByText('On hand 3', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Move stock', exact: true }).click();
   await page.getByLabel('How many', { exact: true }).fill('1');
   await page.getByRole('dialog', { name: /^Move stock/ }).getByRole('button', { name: 'Move stock', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Move stock/ })).toHaveCount(0);
   expect((await readProduct()).stats.by_bucket).toMatchObject({ inventory: 2, store: 1, vault: 0 });
-  await expect(page.getByText('Remaining cost $94.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $94.33', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Void move', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Wrong shelf in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
@@ -1418,7 +1418,7 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Total paid', { exact: true }).fill('20.00');
   await page.getByLabel('Why the change?', { exact: true }).fill('Receipt correction in test');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByText('Remaining cost $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $104.33', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Adjust stock', exact: true }).click();
   await page.getByLabel('Change', { exact: true }).fill('-1');
   await page.getByRole('button', { name: 'Save adjustment', exact: true }).click();
@@ -1427,7 +1427,15 @@ test('product, purchase, move and audited reversal preserve exact server totals'
   await page.getByLabel('Reason', { exact: true }).fill('Count verified in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
   await expect(page.getByText('On hand 3', { exact: true })).toBeVisible();
-  await expect(page.getByText('Remaining cost $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Total paid $104.33', { exact: true })).toBeVisible();
+  // A sale moves cost out of what is on hand; the total ever paid stays put.
+  const sale = await request.post(API + '/api/v1/sales', { data: { product_id: productId, quantity: 1, amount: '50.00', proceeds: [] } });
+  expect(sale.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText('On hand 2', { exact: true })).toBeVisible();
+  await expect(page.getByText('Total paid $104.33', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost on hand $104.33', { exact: true })).toHaveCount(0);
 });
 const API = 'http://127.0.0.1:8101';
 async function firebaseFixture(page: Page) {
@@ -1528,7 +1536,7 @@ for(const width of [390,768,1536]) {
     await page.screenshot({ path: 'output/playwright/expo-inventory-' + width + '.png', fullPage: true });
     await page.getByRole('button',{name,exact:true}).click();
     await expect(page.getByRole('heading',{name,exact:true})).toBeVisible();
-    await expect(page.getByText('Remaining cost $83.33',{exact:true})).toBeVisible();
+    await expect(page.getByText('Cost on hand $83.33',{exact:true})).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading',{name,exact:true})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
@@ -1720,7 +1728,7 @@ test('combining a set filters to it, trims the list and carries the cost into on
   expect(detail.stats.quantity_on_hand).toBe(1);
   expect(detail.stats.remaining_cost).toBe('15.00');
   await page.goto('/products/' + bundle);
-  await expect(page.getByText('Avg cost $15.00 / unit')).toBeVisible();
+  await expect(page.getByText('Paid / unit $15.00', { exact: true })).toBeVisible();
   for (const name of ['Combine Mew', 'Combine Charizard']) {
     expect((await (await request.get(API + '/api/v1/products/' + ids[name])).json()).stats.quantity_on_hand).toBe(0);
   }
