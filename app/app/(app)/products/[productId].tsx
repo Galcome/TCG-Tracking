@@ -18,7 +18,7 @@ import { EditCostDialog } from '../../../components/cost-form';
 import { openPurchases } from '../../../lib/cost-drafts';
 import { money, perUnit, transactionLine } from '../../../lib/format';
 import { canCrack, canRip } from '../../../lib/product-types';
-import { isManualEstimate } from '../../../lib/pricing-drafts';
+import { isManualEstimate, marketPosition } from '../../../lib/pricing-drafts';
 
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
@@ -29,6 +29,7 @@ export default function ProductDetail() {
   const [costing, setCosting] = useState(false);
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
+  const position = p ? marketPosition(p) : null;
   return <Page title={p?.name ?? 'Product'}>
     <Button variant="link" label="Back to stock" onPress={() => router.push('/inventory')} />
     <ErrorNotice error={product.error} retry={()=>{void product.refetch();}} />{product.isPending&&<Loading />}
@@ -38,6 +39,8 @@ export default function ProductDetail() {
       <Copy>On hand {p.stats.quantity_on_hand}</Copy>
       {/* What was originally paid, which a sale never changes; cost on hand is what the units still held cost. */}
       <Row><Copy>Total paid {money(p.stats.total_invested)}</Copy>{p.stats.quantity_purchased > 0 ? <Copy>Paid / unit {money(perUnit(p.stats.total_invested, p.stats.quantity_purchased))}</Copy> : null}<Copy>Cost on hand {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
+      {/* Unrealized is the estimate on what is still held, less its cost; a sale moves that unit into realized. */}
+      {position ? <Row><Copy>Value {money(position.value)}</Copy><Copy>Unrealized <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy></Row> : null}
       {openPurchases(p.history).length > 0 ? <Button variant="link" label="Edit what this cost" onPress={() => setCosting(true)} /> : null}
       {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
       <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>

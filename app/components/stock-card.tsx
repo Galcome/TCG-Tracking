@@ -2,7 +2,7 @@ import { Pressable, Text, View } from 'react-native';
 import { colors } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
 import { BUCKETS, BUCKET_LABELS, type Bucket, type Product, type VaultHolding } from '../lib/api';
-import { money } from '../lib/format';
+import { money, perUnit } from '../lib/format';
 import { canUseFreeMarketPricing, isManualEstimate, marketPosition, unitPosition } from '../lib/pricing-drafts';
 import { GameIdentity } from './game-identity';
 import { Button, Card, Copy, Row, Signed } from './ui';
@@ -56,9 +56,11 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
     </View>
     <View style={{ flexGrow: 1, flexBasis: dense ? 250 : undefined, gap: 6 }}>
       {vault ? <VaultSummary holding={vault} /> : <>
-      <Row><Copy>Cost {money(p.stats.remaining_cost)}</Copy><Copy>Profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
+      {/* What was originally paid never changes with a sale; cost on hand is what the units still held cost. */}
+      <Row><Copy>Total paid {money(p.stats.total_invested)}</Copy>{p.stats.quantity_purchased > 0 ? <Copy>Paid / unit {money(perUnit(p.stats.total_invested, p.stats.quantity_purchased))}</Copy> : null}</Row>
+      <Row><Copy>Cost on hand {money(p.stats.remaining_cost)}</Copy><Copy>Realized <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
       {position ? <Row><Copy>{bucket && p.stats.by_bucket[bucket] !== p.stats.quantity_on_hand ? `Value of all ${p.stats.quantity_on_hand}` : 'Value'} {money(position.value)}</Copy><Copy>Unrealized <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy></Row> : null}
-      {unit ? <Row><Copy>Cost <Text style={{ color: colors.loss }}>{money(unit.cost)}</Text> each</Copy>
+      {unit ? <Row><Copy>Avg cost <Text style={{ color: colors.loss }}>{money(unit.cost)}</Text> each</Copy>
         {unit.price !== null ? <Copy>Price <Text style={{ color: colors.gain }}>{money(unit.price)}</Text> each{isManualEstimate(p) ? ' · your value' : p.market_estimate?.status === 'stale' ? ' · stale' : ''}</Copy> : null}
         {unit.profit !== null ? <Copy>Profit <Signed value={unit.profit}>{money(unit.profit)}</Signed> each</Copy> : null}</Row> : null}
       {!position && !noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}
