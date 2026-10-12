@@ -1712,11 +1712,15 @@ test('combining a set filters to it, trims the list and carries the cost into on
   await expect(rows).toHaveCount(2);
   await expect(form.getByText(/2 products, 3 units · Cost \$15\.00/)).toBeVisible();
   await form.getByRole('button', { name: 'Combine 2 products', exact: true }).click();
+  // Back on the stock list like a new product: in the bucket it went to, newest first.
+  await expect(page).toHaveURL(/\/inventory\?bucket=inventory&added=[0-9a-f-]+$/);
   await expect(page.getByText('Combine E2E Master Set').first()).toBeVisible();
-  const bundle = page.url().split('/products/')[1];
+  const bundle = new URL(page.url()).searchParams.get('added');
   const detail = await (await request.get(API + '/api/v1/products/' + bundle)).json();
   expect(detail.stats.quantity_on_hand).toBe(1);
   expect(detail.stats.remaining_cost).toBe('15.00');
+  await page.goto('/products/' + bundle);
+  await expect(page.getByText('Avg cost $15.00 / unit')).toBeVisible();
   for (const name of ['Combine Mew', 'Combine Charizard']) {
     expect((await (await request.get(API + '/api/v1/products/' + ids[name])).json()).stats.quantity_on_hand).toBe(0);
   }

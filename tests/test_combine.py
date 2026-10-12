@@ -14,6 +14,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import select
 
+from src.models.ledger import StockMove
 from src.models.price_snapshot import PriceSnapshot
 from src.models.taxonomy import Game, ProductType
 
@@ -370,6 +371,37 @@ def test_breaking_it_apart_puts_every_card_back(client, db, make_product):
 
     again = client.post(f"/api/v1/transformations/{body['id']}/void", json={"reason": "x"})
     assert again.status_code == 409
+
+
+def test_a_moved_bundle_is_brought_back_and_broken_apart(client, db, make_product):
+    mew, charizard = two_cards(client, make_product)
+    body = combine(
+        client, db, [{"product_id": mew["id"], "quantity": 2}, {"product_id": charizard["id"]}]
+    ).json()
+    bundle = body["outputs"][0]["product_id"]
+    moved = client.post(
+        "/api/v1/moves",
+        json={
+            "product_id": bundle,
+            "quantity": 1,
+            "from_bucket": "inventory",
+            "to_bucket": "vault",
+        },
+    )
+    assert moved.status_code == 201, moved.text
+
+    response = client.post(f"/api/v1/transformations/{body['id']}/void", json={"reason": "x"})
+
+    assert response.status_code == 200, response.text
+    assert stats(client, bundle)["by_bucket"] == {"inventory": 0, "store": 0, "vault": 0}
+    assert stats(client, mew["id"])["by_bucket"]["inventory"] == 2
+    assert stats(client, charizard["id"])["quantity_on_hand"] == 1
+    # The trip back is on the record, not erased: Vault, then back to Inventory.
+    history = db.scalars(select(StockMove).where(StockMove.product_id == uuid.UUID(bundle)))
+    assert sorted((m.from_bucket, m.bucket) for m in history) == [
+        ("inventory", "vault"),
+        ("vault", "inventory"),
+    ]
 
 
 def test_a_sold_bundle_cannot_be_broken_apart(client, db, make_product):

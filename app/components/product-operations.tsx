@@ -26,7 +26,7 @@ function VoidTransformationDialog({ transformation, onClose }: { transformation:
   const combine = transformation.kind === 'combine';
   return <Sheet title={combine ? 'Break apart' : 'Undo ' + transformation.kind} open onClose={onClose} dismissDisabled={mutation.isPending}>
     <Copy>{combine
-      ? 'Every product goes back where it came from and the bundle is emptied. The server refuses this once the bundle has been sold or moved.'
+      ? 'Every product goes back where it came from and the bundle is emptied. If the bundle was moved, it is moved back first. This is refused once the bundle has been sold.'
       : 'This reverses the source and its outputs together. The server will refuse a reversal if later transactions depend on it.'}</Copy>
     <Field label="Reason" value={reason} onChangeText={setReason} editable={!mutation.isPending} />
     <ErrorNotice error={mutation.error} />

@@ -91,8 +91,9 @@ export function CombineDialog({ onClose }: { onClose: () => void }) {
     onSuccess: async (record) => {
       await queries.invalidateQueries();
       onClose();
+      // Like adding a product: land where it was stored, newest first, so the bundle is on top.
       const bundle = record.outputs[0]?.product_id;
-      if (bundle) router.push({ pathname: '/products/[productId]', params: { productId: bundle } });
+      if (bundle) router.push({ pathname: '/inventory', params: { bucket, added: bundle } });
     },
   });
   const busy = submit.isPending || addAll.isPending;
