@@ -159,7 +159,7 @@ test('a location view says its value covers every unit on hand', async ({ page, 
     initial_purchase: { quantity: 1, amount: '10.00', funding: [] },
   } })).json();
   const valued = { ...product,
-    stats: { ...product.stats, quantity_on_hand: 36, by_bucket: { inventory: 10, store: 26, vault: 0 }, remaining_cost: '360.00' },
+    stats: { ...product.stats, quantity_on_hand: 36, quantity_purchased: 40, by_bucket: { inventory: 10, store: 26, vault: 0 }, total_invested: '400.00', remaining_cost: '360.00' },
     market_estimate: { value: '15.00', captured_on: '2026-09-20', status: 'fresh', provider: 'tcgcsv', source_revision: 'test' } };
   await page.route(API + '/api/v1/products?*', route => route.fulfill({ json: {
     items: [valued], total: 1, bucket_totals: { inventory: 10, store: 26, vault: 0 } } }));
@@ -168,8 +168,21 @@ test('a location view says its value covers every unit on hand', async ({ page, 
   await page.goto('/inventory?bucket=inventory');
   await expect(card.getByText('In Inventory', { exact: true })).toBeVisible();
   await expect(card.getByText('Value of all 36 $540.00', { exact: true })).toBeVisible();
+  // The whole cost and profit picture is on the card, so the product page is not needed for it.
+  await expect(card.getByText('Total paid $400.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('Paid / unit $10.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('Cost on hand $360.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('Realized $0.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('Unrealized $180.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('Avg cost $10.00 each', { exact: true })).toBeVisible();
   await page.goto('/inventory');
   await expect(card.getByText('Value $540.00', { exact: true })).toBeVisible();
+  const detail = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  await page.route(API + '/api/v1/products/' + product.id, route => route.fulfill({ json: {
+    ...detail, stats: { ...detail.stats, ...valued.stats }, market_estimate: valued.market_estimate } }));
+  await page.goto('/products/' + product.id);
+  await expect(page.getByText('Value $540.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Unrealized $180.00', { exact: true })).toBeVisible();
 });
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
