@@ -1669,3 +1669,57 @@ test('stock sorts by holding value across the whole list, not just the page', as
   await expect(cards.nth(2)).toHaveAccessibleName('Stock product: Sorted worth low');
   expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
+
+test('combining a set filters to it, trims the list and carries the cost into one bundle', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const single = types.find((item: { slug: string }) => item.slug === 'single').id;
+  const ids: Record<string, string> = {};
+  for (const [name, quantity, amount, value, setName] of [
+    ['Combine Mew', 2, '10.00', '30.00', 'Combine E2E Set'],
+    ['Combine Charizard', 1, '5.00', '100.00', 'Combine E2E Set'],
+    ['Combine Outsider', 1, '7.00', null, null],
+  ] as const) {
+    const product = await (await request.post(API + '/api/v1/products', { data: {
+      name, game_id: games[0].id, product_type_id: single, set_name: setName,
+      initial_purchase: { quantity, amount, funding: [] },
+    } })).json();
+    ids[name] = product.id;
+    if (value) expect((await request.post(API + '/api/v1/valuations', { data: { product_id: product.id, value } })).ok()).toBeTruthy();
+  }
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('/inventory');
+  await page.getByRole('button', { name: 'Combine products', exact: true }).click();
+  const form = page.getByRole('dialog', { name: 'Combine products', exact: true });
+  await form.getByLabel('Bundle name', { exact: true }).fill('Combine E2E Master Set');
+  await form.getByRole('button', { name: 'Game: All games', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Game', exact: true }).getByRole('button', { name: games[0].name, exact: true }).click();
+  await form.getByRole('button', { name: 'Set: All sets', exact: true }).click();
+  const setPicker = page.getByRole('dialog', { name: 'Set', exact: true });
+  if (await setPicker.getByLabel('Find option', { exact: true }).count()) await setPicker.getByLabel('Find option', { exact: true }).fill('Combine E2E');
+  await setPicker.getByRole('button', { name: 'Combine E2E Set', exact: true }).click();
+  // The set filter leaves the outsider out, and picking it names the bundle's set.
+  await expect(form.getByLabel('Bundle set (optional)', { exact: true })).toHaveValue('Combine E2E Set');
+  await form.getByRole('button', { name: 'Add every copy (2)', exact: true }).click();
+  const rows = form.getByRole('group', { name: /^Combining / });
+  await expect(rows).toHaveCount(2);
+  await expect(form.getByRole('group', { name: 'Combining Combine Mew', exact: true }).getByLabel('Quantity', { exact: true })).toHaveValue('2');
+  await expect(form.getByText(/2 products, 3 units · Cost \$15\.00 · Worth \$160\.00/)).toBeVisible();
+  await form.getByRole('group', { name: 'Combining Combine Charizard', exact: true }).getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await form.getByRole('button', { name: 'Add one of each (2)', exact: true }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(form.getByText(/2 products, 3 units · Cost \$15\.00/)).toBeVisible();
+  await form.getByRole('button', { name: 'Combine 2 products', exact: true }).click();
+  await expect(page.getByText('Combine E2E Master Set').first()).toBeVisible();
+  const bundle = page.url().split('/products/')[1];
+  const detail = await (await request.get(API + '/api/v1/products/' + bundle)).json();
+  expect(detail.stats.quantity_on_hand).toBe(1);
+  expect(detail.stats.remaining_cost).toBe('15.00');
+  for (const name of ['Combine Mew', 'Combine Charizard']) {
+    expect((await (await request.get(API + '/api/v1/products/' + ids[name])).json()).stats.quantity_on_hand).toBe(0);
+  }
+  expect((await (await request.get(API + '/api/v1/products/' + ids['Combine Outsider'])).json()).stats.quantity_on_hand).toBe(1);
+  expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBeTruthy();
+});

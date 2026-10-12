@@ -11,7 +11,7 @@ import {
   type Product,
   type ProductDetail,
   type Taxonomy,
-  type Transformation,
+  type SourcedTransformation,
 } from '../lib/api'
 import {
   EMPTY_CRACK_SPLIT,
@@ -34,7 +34,7 @@ export interface CrackCaseDialogProps {
   product: ProductDetail
   onClose: () => void
   /** A recorded crack being corrected: saving replaces it instead of cracking again. */
-  editing?: Transformation
+  editing?: SourcedTransformation
 }
 
 interface CrackSheetProps {
@@ -91,7 +91,7 @@ function childOptions(candidates: Product[], source: ProductDetail, setName: str
 }
 
 /** What a recorded crack put where, as the split fields show it. */
-function recordedSplit(editing: Transformation): CrackSplit {
+function recordedSplit(editing: SourcedTransformation): CrackSplit {
   const split = { ...EMPTY_CRACK_SPLIT }
   for (const output of editing.outputs) {
     split[output.bucket] = String(Number(split[output.bucket] || '0') + output.quantity)
@@ -99,7 +99,7 @@ function recordedSplit(editing: Transformation): CrackSplit {
   return split
 }
 
-function recordedChildrenPerSource(editing: Transformation): string {
+function recordedChildrenPerSource(editing: SourcedTransformation): string {
   const total = editing.outputs.reduce((sum, output) => sum + output.quantity, 0)
   return editing.source_quantity > 0 && total % editing.source_quantity === 0
     ? String(total / editing.source_quantity)

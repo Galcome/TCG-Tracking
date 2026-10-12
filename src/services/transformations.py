@@ -38,7 +38,12 @@ from src.models.ledger import (
     Purchase,
 )
 from src.models.product import Product
-from src.models.transformation import Transformation, TransformationOutput
+from src.models.transformation import (
+    TRANSFORM_COMBINE,
+    Transformation,
+    TransformationInput,
+    TransformationOutput,
+)
 from src.services import inventory, ledger
 from src.services.costing import split_cost
 from src.services.money import proportional_split
@@ -356,6 +361,139 @@ def transform(
     return record
 
 
+@dataclass(frozen=True)
+class InputSpec:
+    """One product going into a combine, out of one bucket."""
+
+    product_id: uuid.UUID
+    quantity: int
+    bucket: str
+
+
+def combine(
+    db: Session,
+    *,
+    product_id: uuid.UUID,
+    bucket: str,
+    inputs: list[InputSpec],
+    occurred_on: date | None,
+    member_id: uuid.UUID | None,
+    notes: str | None = None,
+) -> Transformation:
+    """Consume every input and produce one unit of the bundle, carrying their cost across.
+
+    The bundle's cost is the sum of what FIFO says each input cost - nothing added, nothing
+    lost - so selling the bundle later reports the same profit selling the cards would
+    have. If any input's cost is unknown the bundle's cost is unknown, because a sum with a
+    hole in it is not a cost.
+
+    The bundle is dated from the oldest of its inputs: the money went in when the first card
+    was bought, not on the day they were put in a binder.
+    """
+    ledger.lock_products(db, [product_id, *(spec.product_id for spec in inputs)])
+    for spec in inputs:
+        available = available_in_bucket(db, spec.product_id, spec.bucket)
+        if spec.quantity > available:
+            name = db.scalar(select(Product.name).where(Product.id == spec.product_id))
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{name}: {spec.bucket} holds {available}, so {spec.quantity} cannot "
+                    "be combined"
+                ),
+            )
+
+    dates = [source_purchase_date(db, spec.product_id) for spec in inputs]
+    record = Transformation(
+        kind=TRANSFORM_COMBINE,
+        source_product_id=None,
+        source_quantity=sum(spec.quantity for spec in inputs),
+        source_bucket=None,
+        occurred_on=occurred_on,
+        # An undated input makes the bundle undated rather than younger than it is.
+        inherited_purchase_date=None if None in dates else min(dates),
+        notes=notes,
+        created_by_member_id=member_id,
+    )
+    db.add(record)
+    db.flush()
+
+    total: int | None = 0
+    for spec in inputs:
+        consuming = InventoryAdjustment(
+            product_id=spec.product_id,
+            quantity_delta=-spec.quantity,
+            reason=REASON_TRANSFORMED,
+            adjustment_date=occurred_on,
+            bucket=spec.bucket,
+            member_id=member_id,
+            created_by_member_id=member_id,
+            notes=notes,
+        )
+        db.add(consuming)
+        db.flush()
+        ledger.recompute_product(db, spec.product_id)
+        db.refresh(consuming)
+
+        cost = None if consuming.has_unknown_cost else consuming.cost_removed_cents
+        if cost is None or total is None:
+            total = None
+        else:
+            total += cost
+        db.add(
+            TransformationInput(
+                transformation_id=record.id,
+                product_id=spec.product_id,
+                quantity=spec.quantity,
+                bucket=spec.bucket,
+                cost_cents=cost,
+                consuming_adjustment_id=consuming.id,
+            )
+        )
+    record.source_cost_cents = total
+
+    produced = Purchase(
+        product_id=product_id,
+        quantity=1,
+        gross_amount_cents=total or 0,
+        purchase_date=record.inherited_purchase_date,
+        purchased_by_member_id=member_id,
+        created_by_member_id=member_id,
+        bucket=bucket,
+        source=f"{TRANSFORM_COMBINE} of {len(inputs)} products",
+        is_derived=True,
+    )
+    db.add(produced)
+    db.flush()
+    db.add(
+        TransformationOutput(
+            transformation_id=record.id,
+            product_id=product_id,
+            quantity=1,
+            bucket=bucket,
+            cost_cents=total,
+            purchase_id=produced.id,
+        )
+    )
+    ledger.recompute_product(db, product_id)
+
+    db.flush()
+    ledger.record_audit(
+        db,
+        entity_type="transformation",
+        entity_id=record.id,
+        action="create",
+        member_id=member_id,
+        after={
+            "kind": TRANSFORM_COMBINE,
+            "source_quantity": record.source_quantity,
+            "inputs": len(inputs),
+            "source_cost_cents": total,
+        },
+    )
+    return record
+
+
 def _shares(source_cost: int | None, outputs: list[OutputSpec]) -> list[int | None]:
     """Each output row's share of the source's cost, by unit count."""
     if source_cost is None:
@@ -390,7 +528,17 @@ def void(
             TransformationOutput.transformation_id == record.id
         )
     ).all()
-    ledger.lock_products(db, [record.source_product_id, *output_ids])
+    inputs = list(
+        db.scalars(
+            select(TransformationInput).where(TransformationInput.transformation_id == record.id)
+        )
+    )
+    sources = (
+        [spec.product_id for spec in inputs]
+        if record.source_product_id is None
+        else [record.source_product_id]
+    )
+    ledger.lock_products(db, [*sources, *output_ids])
     # The route's status check happens before this service acquires the related product
     # locks. Refresh the transformation after those locks so concurrent void requests do
     # not both mutate the same historical row or write competing audit reasons.
@@ -400,10 +548,14 @@ def void(
     record.status = STATUS_VOIDED
     record.void_reason = reason
 
-    touched = {record.source_product_id}
+    touched = set(sources)
 
-    if record.consuming_adjustment_id is not None:
-        consuming = db.get(InventoryAdjustment, record.consuming_adjustment_id)
+    # One consuming adjustment for a single source, one per input for a combine.
+    consuming_ids = [record.consuming_adjustment_id, *(i.consuming_adjustment_id for i in inputs)]
+    for consuming_id in consuming_ids:
+        if consuming_id is None:
+            continue
+        consuming = db.get(InventoryAdjustment, consuming_id)
         if consuming is not None and consuming.status == STATUS_ACTIVE:
             consuming.status = STATUS_VOIDED
             consuming.void_reason = reason

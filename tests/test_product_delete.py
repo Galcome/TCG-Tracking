@@ -127,7 +127,7 @@ def test_an_opened_case_and_its_boxes_cannot_be_deleted(client, make_product):
     for product in (case, box):
         response = client.delete(f"/api/v1/products/{product['id']}")
         assert response.status_code == 409
-        assert "opened or sent for grading" in response.json()["detail"]
+        assert "combined or sent for grading" in response.json()["detail"]
 
 
 def test_a_card_sent_for_grading_cannot_be_deleted(client, make_product):

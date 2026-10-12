@@ -15,7 +15,11 @@ from src.models.portfolio import PortfolioSnapshot
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
-from src.models.transformation import Transformation, TransformationOutput
+from src.models.transformation import (
+    Transformation,
+    TransformationInput,
+    TransformationOutput,
+)
 
 __all__ = [
     "AuditLog",
@@ -38,6 +42,7 @@ __all__ = [
     "Purchase",
     "Sale",
     "Transformation",
+    "TransformationInput",
     "TransformationOutput",
     "StockMove",
 ]
