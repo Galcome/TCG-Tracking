@@ -36,7 +36,7 @@ export default function ProductDetail() {
       <Copy>{[p.set_name && p.name.includes(p.set_name) ? null : p.set_name,p.collector_number,p.variant,p.language,p.condition,p.grading_company,p.grade,p.cert_number].filter(Boolean).join(' · ')}</Copy>
       <Row>{(['inventory', 'store', 'vault'] as const).map(bucket => <View key={bucket} style={{ padding: 8, borderRadius: 8, backgroundColor: colors.raised }}><Text style={{ color: colors[bucket], fontSize: 14 }}>{bucket === 'inventory' ? 'Inventory' : bucket === 'store' ? 'Store' : 'Vault'} {p.stats.by_bucket[bucket]}</Text></View>)}</Row>
       <Copy>On hand {p.stats.quantity_on_hand}</Copy>
-      <Row><Copy>Remaining cost {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
+      <Row><Copy>Remaining cost {money(p.stats.remaining_cost)}</Copy>{p.stats.average_unit_cost !== null ? <Copy>Avg cost {money(p.stats.average_unit_cost)} / unit</Copy> : null}<Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
       {openPurchases(p.history).length > 0 ? <Button variant="link" label="Edit what this cost" onPress={() => setCosting(true)} /> : null}
       {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
       <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>

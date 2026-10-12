@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
-from src.models.ledger import BUCKET_INVENTORY, BUCKETS, STATUS_ACTIVE
+from src.models.ledger import BUCKET_INVENTORY, BUCKETS, STATUS_ACTIVE, StockMove
 from src.models.member import Member
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
@@ -951,14 +951,63 @@ def void_transformation(
     # Breaking a bundle apart after it was sold would put the cards back and leave the
     # bundle owing one. Refuse that, exactly as a correction would.
     with db.begin_nested():
-        produced = set(
+        outputs = list(
             db.scalars(
-                select(TransformationOutput.product_id).where(
+                select(TransformationOutput).where(
                     TransformationOutput.transformation_id == record.id
                 )
             )
         )
+        produced = {output.product_id for output in outputs}
+        ledger.lock_products(db, produced)
+        for output in outputs:
+            _bring_back(db, output, member)
         before = _held(db, produced)
         transformations.void(db, record, member_id=member.id, reason=payload.reason)
         _refuse_overdrawn(db, produced, before)
     return _read(db, record)
+
+
+def _bring_back(db: Session, output: TransformationOutput, member: Member) -> None:
+    """Move a bundle back to where it was combined into, so it can be taken out of there.
+
+    A bundle is stock like any other and gets moved to Store to be sold. Breaking it apart
+    takes it out of the bucket it arrived in, so wherever it sits now, it goes back there
+    first - as a recorded move, so the history still shows where it actually was.
+    """
+    held = _held(db, {output.product_id})
+    short = output.quantity - held.get((output.product_id, output.bucket), 0)
+    total = sum(held.values())
+    if total < output.quantity:
+        name = db.scalar(select(Product.name).where(Product.id == output.product_id))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{name} has already been sold, so it cannot be broken apart.",
+        )
+    for (_, bucket), quantity in sorted(held.items()):
+        if short <= 0:
+            break
+        if bucket == output.bucket or quantity <= 0:
+            continue
+        step = min(quantity, short)
+        move = StockMove(
+            product_id=output.product_id,
+            quantity=step,
+            from_bucket=bucket,
+            bucket=output.bucket,
+            moved_on=date.today(),
+            member_id=member.id,
+            notes="Brought back to be broken apart",
+            created_by_member_id=member.id,
+        )
+        db.add(move)
+        db.flush()
+        ledger.record_audit(
+            db,
+            entity_type="move",
+            entity_id=move.id,
+            action="create",
+            member_id=member.id,
+            after=ledger.snapshot(move, ["quantity", "from_bucket", "bucket", "moved_on"]),
+        )
+        short -= step
