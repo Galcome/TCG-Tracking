@@ -819,13 +819,19 @@ export interface GradingSubmission {
   notes: string | null
 }
 
-export interface Transformation {
+/** One product that went into a combine, and what FIFO said it cost going in. */
+export interface CombinedInput {
+  product_id: string
+  product_name: string
+  quantity: number
+  bucket: Bucket
+  cost: string | null
+}
+
+interface TransformationBase {
   id: string
-  kind: 'crack' | 'rip' | 'grade'
-  source_product_id: string
-  source_product_name: string
+  /** For a combine, every unit across all its inputs. */
   source_quantity: number
-  source_bucket: Bucket
   occurred_on: string | null
   /** What the outputs are dated from — the lot the source came out of, not the day it
    *  was opened. This is what stops cracking from resetting the ageing clock. */
@@ -836,6 +842,50 @@ export interface Transformation {
   outputs: TransformationOutput[]
   notes: string | null
   status: string
+}
+
+/** One product opened (or graded) into others. */
+export interface SourcedTransformation extends TransformationBase {
+  kind: 'crack' | 'rip' | 'grade'
+  source_product_id: string
+  source_product_name: string
+  source_bucket: Bucket
+  inputs: CombinedInput[]
+}
+
+/** Many products bundled into one. There is no single source: `inputs` are the sources. */
+export interface CombineTransformation extends TransformationBase {
+  kind: 'combine'
+  source_product_id: null
+  source_product_name: null
+  source_bucket: null
+  inputs: CombinedInput[]
+}
+
+export type Transformation = SourcedTransformation | CombineTransformation
+
+export interface CombineLine {
+  product_id: string
+  quantity: number
+  bucket: Bucket
+}
+
+export interface CombinePreview {
+  inputs: (CombineLine & {
+    product_name: string
+    /** What that bucket holds now. Less than `quantity` and the combine will be refused. */
+    available: number
+    cost: string | null
+    /** The row's estimated worth. null when nothing prices it. */
+    value: string | null
+  })[]
+  /** Every input's FIFO cost added up. null when any is unknown. */
+  total_cost: string | null
+  has_unknown_cost: boolean
+  /** What the priced inputs are worth together - a floor when some have no price. */
+  estimated_value: string
+  unpriced: number
+  nonbinding: true
 }
 
 export interface TierRow {
@@ -1162,6 +1212,7 @@ export function createApi(request: ApiRequest) { return {
     /** Omitted: hidden products are left out. Pickers that sell or open stock include them. */
     hidden?: 'exclude' | 'include' | 'only'
     priced?: 'yes' | 'no'
+    set_id?: string
     /** Per unit, inclusive. A product with no value fails either bound. */
     min_unit_value?: string
     max_unit_value?: string
@@ -1185,6 +1236,7 @@ export function createApi(request: ApiRequest) { return {
     include_archived?: boolean
     hidden?: 'exclude' | 'include' | 'only'
     priced?: 'yes' | 'no'
+    set_id?: string
     min_unit_value?: string
     max_unit_value?: string
     min_quantity?: number
@@ -1428,8 +1480,9 @@ export function createApi(request: ApiRequest) { return {
   aging: (filters: ReportFilters = {}) => request<AgingLot[]>(`/api/v1/reports/aging${query({ ...filters })}`),
   attention: () => request<Attention>('/api/v1/reports/attention'),
 
-  /** Sets worth offering for one game, best first. Scoped to a game on purpose. */
-  sets: (params: { game: string; q?: string; limit?: number }) =>
+  /** Sets worth offering for one game, best first. Scoped to a game on purpose.
+   *  `used` lists only the sets some product already uses, by name - the stock filter. */
+  sets: (params: { game: string; q?: string; limit?: number; used?: boolean }) =>
     request<SetSuggestions>(`/api/v1/sets${query(params)}`),
 
   /** Send cards to a grader. Nothing moves — the card is flagged where it sits. */
@@ -1503,6 +1556,29 @@ export function createApi(request: ApiRequest) { return {
   /** Estimate FIFO allocation without creating products, ledger rows, or reservations. */
   previewRip: (input: RipPreviewInput) =>
     request<RipPreview>('/api/v1/transformations/rip/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** What combining these would cost and be worth. Writes nothing. */
+  previewCombine: (input: { inputs: CombineLine[]; occurred_on?: string }) =>
+    request<CombinePreview>('/api/v1/transformations/combine/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** Bundle products into one new product carrying their summed cost and worth. */
+  combineProducts: (input: {
+    name: string
+    product_type_id: string
+    game_id?: string
+    set_name?: string | null
+    bucket?: Bucket
+    inputs: CombineLine[]
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<CombineTransformation>('/api/v1/transformations/combine', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

@@ -33,7 +33,11 @@ from src.models.ledger import (
 from src.models.money import MoneyMovement
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
-from src.models.transformation import Transformation, TransformationOutput
+from src.models.transformation import (
+    Transformation,
+    TransformationInput,
+    TransformationOutput,
+)
 from src.services import recovery
 from src.services.costing import Event, allocate
 
@@ -263,7 +267,7 @@ def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None
     funded or came from them all go, voided rows included. The audit row left behind lists
     what was removed, and keeps a full copy of it so `restore_product` can put it back.
 
-    A product that was opened or sent for grading is refused: those link it to other
+    A product that was opened, combined or sent for grading is refused: those link it to other
     products' stock and cost, and removing one side would corrupt the other.
     """
     lock_products(db, [product.id])
@@ -271,13 +275,14 @@ def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None
     linked = (
         select(Transformation.id).where(Transformation.source_product_id == product.id),
         select(TransformationOutput.id).where(TransformationOutput.product_id == product.id),
+        select(TransformationInput.id).where(TransformationInput.product_id == product.id),
         select(GradingSubmission.id).where(GradingSubmission.product_id == product.id),
     )
     if any(db.scalar(query.limit(1)) for query in linked):
         raise HTTPException(
             status_code=409,
             detail=(
-                "This product was opened or sent for grading, which ties it to other "
+                "This product was opened, combined or sent for grading, which ties it to other "
                 "products. Void that first, or archive the product instead."
             ),
         )

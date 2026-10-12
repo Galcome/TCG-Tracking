@@ -86,6 +86,7 @@ def suggestions(
     query: str = "",
     limit: int = DEFAULT_SUGGESTION_LIMIT,
     today: date | None = None,
+    used_only: bool = False,
 ) -> list[tuple[CardSet, int]]:
     """Sets worth offering for this game, best first, with how many products use each.
 
@@ -93,6 +94,9 @@ def suggestions(
     or when something already uses it. The window is what makes pre-orders one tap: a case
     bought weeks before release day finds its set in the list. Anything further out stays
     hidden until somebody uses it, so a far-off guess never crowds out real sets.
+
+    `used_only` is for filtering stock rather than tagging it: only sets something already
+    uses, alphabetically, because a filter is looked up by name rather than by recency.
     """
     when = today or date.today()
     horizon = when + timedelta(days=UPCOMING_DAYS)
@@ -119,6 +123,10 @@ def suggestions(
             CardSet.name.ilike(pattern, escape="\\")
             | (func.word_similarity(search, CardSet.name) >= SIMILARITY_THRESHOLD)
         )
+
+    if used_only:
+        statement = statement.having(uses > 0).order_by(CardSet.name).limit(limit)
+        return [(record, int(count)) for record, count in db.execute(statement)]
 
     # Fresh releases lead, newest first, then what is about to release, soonest first. Then
     # used sets, most recent first; the calendar fills whatever is left, newest release
