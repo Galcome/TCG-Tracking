@@ -167,22 +167,18 @@ test('a location view says its value covers every unit on hand', async ({ page, 
   const card = page.getByRole('group', { name: 'Stock product: ' + product.name, exact: true });
   await page.goto('/inventory?bucket=inventory');
   await expect(card.getByText('In Inventory', { exact: true })).toBeVisible();
-  await expect(card.getByText('Value of all 36 $540.00', { exact: true })).toBeVisible();
-  // The whole cost and profit picture is on the card, so the product page is not needed for it.
-  await expect(card.getByText('Total paid $400.00', { exact: true })).toBeVisible();
-  await expect(card.getByText('Paid / unit $10.00', { exact: true })).toBeVisible();
-  await expect(card.getByText('Cost on hand $360.00', { exact: true })).toBeVisible();
-  await expect(card.getByText('Realized $0.00', { exact: true })).toBeVisible();
-  await expect(card.getByText('Unrealized $180.00', { exact: true })).toBeVisible();
-  await expect(card.getByText('Avg cost $10.00 each', { exact: true })).toBeVisible();
-  await page.goto('/inventory');
-  await expect(card.getByText('Value $540.00', { exact: true })).toBeVisible();
+  // Est value covers every unit on hand, like Total paid, whichever location is in view.
+  for (const text of ['Total paid $400.00', 'Est value $540.00', 'Avg cost $10.00 each', 'Est price $15.00 each',
+    'Cost on hand $360.00', 'Realized $0.00', 'Est profit $5.00 each']) {
+    await expect(card.getByText(text, { exact: true })).toBeVisible();
+  }
+  for (const text of ['Paid / unit $10.00', 'Unrealized $180.00', 'Value of all 36 $540.00']) await expect(card.getByText(text)).toHaveCount(0);
   const detail = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   await page.route(API + '/api/v1/products/' + product.id, route => route.fulfill({ json: {
     ...detail, stats: { ...detail.stats, ...valued.stats }, market_estimate: valued.market_estimate } }));
   await page.goto('/products/' + product.id);
-  await expect(page.getByText('Value $540.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('Unrealized $180.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Est value $540.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Est profit $5.00 each', { exact: true })).toBeVisible();
 });
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
@@ -899,7 +895,7 @@ test('Vault manual valuations preserve zero, dated estimates and accounting for 
   await openProductSections(page);
   await expect(page.getByRole('button', { name: 'Record valuation', exact: true })).toBeVisible();
   await expect(page.getByText('Cost on hand $10.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('Realized profit $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Realized $0.00', { exact: true })).toBeVisible();
   const after = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   expect(after.stats.quantity_on_hand).toBe(2);
   expect(after.stats.remaining_cost).toBe('10.00');
@@ -1306,7 +1302,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   expect((await saleResponse).ok()).toBeTruthy();
   await expect(page.getByRole('dialog', { name: /^Record sale/ })).toHaveCount(0);
   await expect(page.getByText('On hand 1', { exact: true })).toBeVisible();
-  await expect(page.getByText('Realized profit $25.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Realized $25.00', { exact: true })).toBeVisible();
   const accountsAfterSale = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterSale.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('75.00');
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
@@ -1741,7 +1737,7 @@ test('combining a set filters to it, trims the list and carries the cost into on
   expect(detail.stats.quantity_on_hand).toBe(1);
   expect(detail.stats.remaining_cost).toBe('15.00');
   await page.goto('/products/' + bundle);
-  await expect(page.getByText('Paid / unit $15.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Avg cost $15.00 each', { exact: true })).toBeVisible();
   for (const name of ['Combine Mew', 'Combine Charizard']) {
     expect((await (await request.get(API + '/api/v1/products/' + ids[name])).json()).stats.quantity_on_hand).toBe(0);
   }
