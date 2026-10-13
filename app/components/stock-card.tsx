@@ -25,6 +25,8 @@ function IconButton({ glyph, caption, label, onPress, danger = false }: { glyph:
 // On the Vault tab the row carries the Vault holding, so manual worth and appreciation
 // replace the market position: the Vault is valued, not priced. Elsewhere, anything no
 // feed can price (graded cards, lots) takes a typed value, which then shows as its price.
+// On desktop the actions column has a fixed width and the other two split what is left
+// evenly, so a card without Rip lines its figures up with one that has it.
 export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden, onDelete }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
   onDetails: () => void; onEdit: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
@@ -34,7 +36,7 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
   const setRepeatsName = Boolean(p.set_name && p.name.toLocaleLowerCase().includes(p.set_name.toLocaleLowerCase()));
   return <View role="group" accessibilityLabel={'Stock product: ' + p.name}><Card><View style={{ flexDirection: dense ? 'row' : 'column', flexWrap: 'wrap', alignItems: dense ? 'center' : 'stretch', gap: 16 }}>
-    <View style={{ flexGrow: 1, flexBasis: dense ? 260 : undefined, gap: 8 }}>
+    <View style={{ flexGrow: 1, flexBasis: dense ? 0 : undefined, minWidth: dense ? 260 : undefined, gap: 8 }}>
       <Row><View style={{ flex: 1, minWidth: 160 }}>
         <Button variant="link" label={p.name} onPress={onDetails} />
         <GameIdentity slug={p.game.slug} name={p.game.name} />
@@ -52,13 +54,13 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}
       {p.is_hidden ? <Copy muted>Hidden · left out of stock totals</Copy> : null}
     </View>
-    <View style={{ flexGrow: 1, flexBasis: dense ? 250 : undefined, gap: 6 }}>
+    <View style={{ flexGrow: 1, flexBasis: dense ? 0 : undefined, minWidth: dense ? 250 : undefined, gap: 6 }}>
       {vault ? <VaultSummary holding={vault} /> : <>
       <CostSummary product={p} />
       {!noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}
       {onValue && !noStock && !canUseFreeMarketPricing(p) ? <Button variant="link" label={p.market_estimate?.value ? 'Change value' : 'Set value'} onPress={onValue} /> : null}</>}
     </View>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button variant="primary" style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, width: dense ? 200 : undefined }}><Button variant="primary" style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Sell" disabled={noStock} onPress={onSell} />
       <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Move" disabled={noStock} onPress={onMove} />
       {onRip ? <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Rip" disabled={noStock} onPress={onRip} /> : null}
       {vault && onValue ? <Button style={{ flexGrow: 1, paddingHorizontal: 10 }} label="Record valuation" onPress={onValue} /> : null}</View>

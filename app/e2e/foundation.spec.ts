@@ -180,6 +180,26 @@ test('a location view says its value covers every unit on hand', async ({ page, 
   await expect(page.getByText('Est value $540.00', { exact: true })).toBeVisible();
   await expect(page.getByText('Est profit $5.00 each', { exact: true })).toBeVisible();
 });
+test('stock cards line their figures up whether or not they can be ripped', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const made = await Promise.all(['box-set', 'single'].map(async slug => (await request.post(API + '/api/v1/products', { data: {
+    name: 'Aligned ' + slug + ' ' + Date.now(), game_id: games[0].id,
+    product_type_id: types.find((item: { slug: string }) => item.slug === slug).id,
+    initial_purchase: { quantity: 1, amount: '10.00', funding: [] } } })).json()));
+  await page.route(API + '/api/v1/products?*', route => route.fulfill({ json: {
+    items: made, total: 2, bucket_totals: { inventory: 2, store: 0, vault: 0 } } }));
+  await signIn(page);
+  await page.goto('/inventory');
+  const [sealed, single] = made.map(p => page.getByRole('group', { name: 'Stock product: ' + p.name, exact: true }));
+  await expect(sealed.getByRole('button', { name: 'Rip', exact: true })).toBeVisible();
+  await expect(single.getByRole('button', { name: 'Rip', exact: true })).toHaveCount(0);
+  // The count, the action icons and the cost block all sit at the same x on both cards.
+  const left = async (card: typeof sealed) => Promise.all([card.getByText(/^In (Inventory|stock)$/),
+    card.getByRole('button', { name: 'Edit product', exact: true }), card.getByText('Total paid $10.00', { exact: true })]
+    .map(async item => (await item.boundingBox())?.x));
+  expect(await left(single)).toEqual(await left(sealed));
+});
 test('split purchase funding and mixed sale proceeds create exact separate account postings', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
   const types = await (await request.get(API + '/api/v1/product-types')).json();
