@@ -6,8 +6,9 @@ import { isManualEstimate, marketPosition, unitPosition } from '../lib/pricing-d
 import { Copy, Row, Signed } from './ui';
 
 // What was paid beside what it is estimated to be worth, then the same per unit, then what
-// is still held beside what sales made. Every figure covers all units on hand, wherever they
-// sit, so Est value lines up with Total paid. The stock card and the product page share it.
+// is still held beside what sales made, then the estimated profit each and in total. Every
+// figure covers all units on hand, wherever they sit, so Est value lines up with Total paid.
+// The stock card and the product page share it.
 export function CostSummary({ product: p }: { product: Pick<Product, 'stats' | 'market_estimate'> }) {
   const position = marketPosition(p);
   const unit = unitPosition(p);
@@ -21,6 +22,7 @@ export function CostSummary({ product: p }: { product: Pick<Product, 'stats' | '
       {unit?.price ? <Copy>Est price <Text style={{ color: colors.gain }}>{money(unit.price)}</Text> each{note}</Copy> : null}</Row> : null}
     <Row><Copy>Cost on hand {money(p.stats.remaining_cost)}</Copy>
       <Copy>Realized <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
-    {unit?.profit ? <Row><Copy>Est profit <Signed value={unit.profit}>{money(unit.profit)}</Signed> each</Copy></Row> : null}
+    {unit?.profit ? <Row><Copy>Est profit <Signed value={unit.profit}>{money(unit.profit)}</Signed> each</Copy>
+      {position ? <Copy>Est profit total <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy> : null}</Row> : null}
   </>;
 }

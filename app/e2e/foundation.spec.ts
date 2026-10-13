@@ -169,16 +169,17 @@ test('a location view says its value covers every unit on hand', async ({ page, 
   await expect(card.getByText('In Inventory', { exact: true })).toBeVisible();
   // Est value covers every unit on hand, like Total paid, whichever location is in view.
   for (const text of ['Total paid $400.00', 'Est value $540.00', 'Avg cost $10.00 each', 'Est price $15.00 each',
-    'Cost on hand $360.00', 'Realized $0.00', 'Est profit $5.00 each']) {
+    'Cost on hand $360.00', 'Realized $0.00', 'Est profit $5.00 each', 'Est profit total $180.00']) {
     await expect(card.getByText(text, { exact: true })).toBeVisible();
   }
-  for (const text of ['Paid / unit $10.00', 'Unrealized $180.00', 'Value of all 36 $540.00']) await expect(card.getByText(text)).toHaveCount(0);
+  for (const text of ['Paid / unit $10.00', 'Unrealized $180.00', 'Value of all 36 $540.00', 'Est profit total $5.00']) await expect(card.getByText(text)).toHaveCount(0);
   const detail = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   await page.route(API + '/api/v1/products/' + product.id, route => route.fulfill({ json: {
     ...detail, stats: { ...detail.stats, ...valued.stats }, market_estimate: valued.market_estimate } }));
   await page.goto('/products/' + product.id);
   await expect(page.getByText('Est value $540.00', { exact: true })).toBeVisible();
   await expect(page.getByText('Est profit $5.00 each', { exact: true })).toBeVisible();
+  await expect(page.getByText('Est profit total $180.00', { exact: true })).toBeVisible();
 });
 test('stock cards line their figures up whether or not they can be ripped', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();
