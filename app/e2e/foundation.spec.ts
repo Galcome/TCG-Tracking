@@ -489,6 +489,9 @@ test('dashboard leads with inventory value, then net profit, then spent vs reven
   await expect(page.getByText('$1.99', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
   await expect(page.getByLabel('Value over 2 days', { exact: true })).toBeVisible();
   await expect(page.getByText('Since 2026-10-08', { exact: true })).toBeVisible();
+  await expect(page.getByText('+$1.00', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
+  await expect(page.getByText('+$1.00 since yesterday', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
   await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
   await expect(page.getByText('Expenses $1.00', { exact: true }).first()).toBeVisible();

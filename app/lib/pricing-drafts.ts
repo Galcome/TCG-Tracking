@@ -121,7 +121,7 @@ export function pricingRefreshSummary(result: PricingRefresh): string {
   return result.errors.length > 0 ? `${summary} ${result.errors.join(' ')}` : summary
 }
 
-function centsString(cents: bigint): string {
+export function centsString(cents: bigint): string {
   const sign = cents < 0n ? '-' : ''
   const abs = cents < 0n ? -cents : cents
   return `${sign}${abs / 100n}.${String(abs % 100n).padStart(2, '0')}`

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { linePaths, plotValue, stackHeights } from '../lib/charts'
+import { lastChange, linePaths, plotValue, stackHeights } from '../lib/charts'
 
 test('plot values read decimal strings and treat unknown as zero', () => {
   assert.equal(plotValue('1234.56'), 1234.56)
@@ -33,4 +33,16 @@ test('a negative part takes no room and nothing draws when every stack is empty'
   assert.deepEqual(stackHeights([[50, -20], [25]], 100), [[100, 0], [50]])
   assert.deepEqual(stackHeights([[0, 0], [0]], 80), [[0, 0], [0]])
   assert.deepEqual(stackHeights([], 80), [])
+})
+
+const point = (captured_on: string, market_value: string) => ({ captured_on, market_value, priced_cost: '1.00' })
+
+test('the last change is exact cents since yesterday, or since the earlier date across a gap', () => {
+  assert.equal(lastChange([]), null)
+  assert.equal(lastChange([point('2026-10-12', '1.00')]), null)
+  assert.deepEqual(lastChange([point('2026-10-01', '5.00'), point('2026-10-12', '105042.83'), point('2026-10-13', '104949.32')]),
+    { amount: '-93.51', since: 'yesterday' })
+  assert.deepEqual(lastChange([point('2026-09-30', '0.10'), point('2026-10-01', '0.30')]), { amount: '0.20', since: 'yesterday' })
+  assert.deepEqual(lastChange([point('2026-10-09', '10.00'), point('2026-10-12', '10.00')]), { amount: '0.00', since: '2026-10-09' })
+  assert.equal(lastChange([point('2026-10-12', 'n/a'), point('2026-10-13', '1.00')]), null)
 })

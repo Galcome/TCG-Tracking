@@ -8,6 +8,7 @@ import { useApi } from '../../context/AppContext';
 import { colors, useResponsiveLayout } from '../../context/ThemeContext';
 import { useTypography } from '../../context/TypographyContext';
 import { usePeriodPreference } from '../../lib/period-preference';
+import { lastChange } from '../../lib/charts';
 import { money, percent } from '../../lib/format';
 import type { Dashboard as DashboardData, Performance, Period } from '../../lib/api';
 
@@ -27,9 +28,11 @@ function InventoryValue({ data, history, width }: { data: DashboardData; history
     <Button variant="primary" label="Set up prices" onPress={() => router.push('/pricing')} />
   </Card>;
   const partial = data.priced_units < data.units_in_stock;
+  const change = history ? lastChange(history) : null;
   return <Card accent>
     <Copy muted>Inventory value</Copy>
     <Headline value={money(data.market_value)} width={width} />
+    {change ? <Copy><Signed value={change.amount}>{(change.amount.startsWith('-') ? '' : '+') + money(change.amount)}</Signed> since {change.since}</Copy> : null}
     <Row><Copy>Unrealized <Signed value={data.unrealized_gain}>{money(data.unrealized_gain)}</Signed></Copy><Copy muted>vs {money(data.priced_cost)} cost</Copy></Row>
     {history ? <ValueChart points={history} /> : null}
     <Copy muted>Priced {data.priced_units} of {data.units_in_stock} unit{data.units_in_stock === 1 ? '' : 's'}{data.stale_units > 0 ? ` · ${data.stale_units} on stale quotes` : ''}</Copy>

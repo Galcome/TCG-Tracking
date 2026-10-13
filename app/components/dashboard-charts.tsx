@@ -9,31 +9,31 @@ import { monthLabel } from '../lib/reports';
 import type { MonthRow, ValuePoint, YearRow } from '../lib/api';
 import { Button, Copy, Row, toneColor } from './ui';
 
-function Swatch({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) {
+function Swatch({ color, label }: { color: string; label: string }) {
   const fonts = useTypography();
   return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-    <View accessible={false} style={{ width: 14, height: dashed ? 0 : 8, borderRadius: 2, backgroundColor: dashed ? undefined : color, borderTopWidth: dashed ? 2 : 0, borderStyle: dashed ? 'dashed' : 'solid', borderColor: color }} />
+    <View accessible={false} style={{ width: 14, height: 8, borderRadius: 2, backgroundColor: color }} />
     <Text style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 12 }}>{label}</Text>
   </View>;
 }
 
 const VALUE_HEIGHT = 120;
 
-/** Market value over time, with what the same stock cost underneath. */
+/** Market value over time, scaled to its own range so a day's move is visible. Cost sits
+ * far below and barely moves, so on the same scale it flattened the value line; the
+ * headline states it instead. */
 export function ValueChart({ points }: { points: ValuePoint[] }) {
   const fonts = useTypography();
   const [width, setWidth] = useState(0);
-  const [value, cost] = linePaths([points.map(point => plotValue(point.market_value)), points.map(point => plotValue(point.priced_cost))], width, VALUE_HEIGHT);
+  const [value] = linePaths([points.map(point => plotValue(point.market_value))], width, VALUE_HEIGHT);
   const first = points[0];
   return <View style={{ gap: 8 }}>
     <View accessibilityLabel={`Value over ${points.length} day${points.length === 1 ? '' : 's'}`} onLayout={event => setWidth(Math.floor(event.nativeEvent.layout.width))} style={{ height: VALUE_HEIGHT }}>
       {width > 0 ? <Svg width={width} height={VALUE_HEIGHT}>
-        <Path d={cost} stroke={colors.muted} strokeWidth={1.5} strokeDasharray="4 4" fill="none" />
         <Path d={value} stroke={colors.accent} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" fill="none" />
       </Svg> : null}
     </View>
-    <Row><Swatch color={colors.accent} label="Market value" /><Swatch color={colors.muted} label="Cost" dashed />
-      <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 12, marginLeft: 'auto' }}>{points.length > 1 && first ? `Since ${first.captured_on}` : 'A point is added every day'}</Text></Row>
+    <Row><Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 12, marginLeft: 'auto' }}>{points.length > 1 && first ? `Since ${first.captured_on}` : 'A point is added every day'}</Text></Row>
   </View>;
 }
 
