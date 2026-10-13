@@ -173,6 +173,10 @@ test('a location view says its value covers every unit on hand', async ({ page, 
     await expect(card.getByText(text, { exact: true })).toBeVisible();
   }
   for (const text of ['Paid / unit $10.00', 'Unrealized $180.00', 'Value of all 36 $540.00', 'Est profit total $5.00']) await expect(card.getByText(text)).toHaveCount(0);
+  // The right-hand figures form one column.
+  const starts = await Promise.all(['Est value $540.00', 'Est price $15.00 each', 'Realized $0.00', 'Est profit total $180.00']
+    .map(async text => (await card.getByText(text, { exact: true }).boundingBox())?.x));
+  expect(new Set(starts).size).toBe(1);
   const detail = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   await page.route(API + '/api/v1/products/' + product.id, route => route.fulfill({ json: {
     ...detail, stats: { ...detail.stats, ...valued.stats }, market_estimate: valued.market_estimate } }));
