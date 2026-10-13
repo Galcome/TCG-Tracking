@@ -3,6 +3,11 @@
  * a float here is fine because the only output is a pixel position.
  */
 
+import type { ValuePoint } from './api'
+import { dateFromIso, yesterdayIso } from './format'
+import { decimalCents } from './money-drafts'
+import { centsString } from './pricing-drafts'
+
 export function plotValue(value: string | null | undefined): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
@@ -47,4 +52,18 @@ export function stackHeights(stacks: readonly (readonly number[])[], height: num
   const top = Math.max(0, ...positive.map(parts => parts.reduce((sum, part) => sum + part, 0)))
   if (top === 0) return positive.map(parts => parts.map(() => 0))
   return positive.map(parts => parts.map(part => round((part / top) * height)))
+}
+
+/**
+ * How far market value moved from the point before the last one, in exact cents, and since
+ * when: "yesterday" when the two points are a day apart, else the earlier date.
+ */
+export function lastChange(points: readonly ValuePoint[]): { amount: string; since: string } | null {
+  if (points.length < 2) return null
+  const [before, last] = points.slice(-2)
+  const from = decimalCents(before.market_value)
+  const to = decimalCents(last.market_value)
+  const lastDay = dateFromIso(last.captured_on)
+  if (from === null || to === null) return null
+  return { amount: centsString(to - from), since: lastDay && yesterdayIso(lastDay) === before.captured_on ? 'yesterday' : before.captured_on }
 }
