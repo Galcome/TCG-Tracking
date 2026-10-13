@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Button, Card, Copy, Disclosure, ErrorNotice, Loading, Page, Row, Signed } from '../../../components/ui';
+import { Button, Card, Copy, Disclosure, ErrorNotice, Loading, Page, Row } from '../../../components/ui';
 import { View, Text } from 'react-native';
 import { colors } from '../../../context/ThemeContext';
 import { ProductForms, type ProductFormsProps } from '../../../components/product-forms';
@@ -16,9 +16,10 @@ import { GameIdentity } from '../../../components/game-identity';
 import { useApi } from '../../../context/AppContext';
 import { EditCostDialog } from '../../../components/cost-form';
 import { openPurchases } from '../../../lib/cost-drafts';
-import { money, perUnit, transactionLine } from '../../../lib/format';
+import { money, transactionLine } from '../../../lib/format';
 import { canCrack, canRip } from '../../../lib/product-types';
-import { isManualEstimate, marketPosition } from '../../../lib/pricing-drafts';
+import { isManualEstimate } from '../../../lib/pricing-drafts';
+import { CostSummary } from '../../../components/cost-summary';
 
 export default function ProductDetail() {
   const { productId } = useLocalSearchParams<{productId:string}>();
@@ -29,7 +30,6 @@ export default function ProductDetail() {
   const [costing, setCosting] = useState(false);
   const product = useQuery({queryKey:['product',productId],queryFn:()=>api.product(productId),enabled:Boolean(productId)});
   const p=product.data;
-  const position = p ? marketPosition(p) : null;
   return <Page title={p?.name ?? 'Product'}>
     <Button variant="link" label="Back to stock" onPress={() => router.push('/inventory')} />
     <ErrorNotice error={product.error} retry={()=>{void product.refetch();}} />{product.isPending&&<Loading />}
@@ -37,10 +37,7 @@ export default function ProductDetail() {
       <Copy>{[p.set_name && p.name.includes(p.set_name) ? null : p.set_name,p.collector_number,p.variant,p.language,p.condition,p.grading_company,p.grade,p.cert_number].filter(Boolean).join(' · ')}</Copy>
       <Row>{(['inventory', 'store', 'vault'] as const).map(bucket => <View key={bucket} style={{ padding: 8, borderRadius: 8, backgroundColor: colors.raised }}><Text style={{ color: colors[bucket], fontSize: 14 }}>{bucket === 'inventory' ? 'Inventory' : bucket === 'store' ? 'Store' : 'Vault'} {p.stats.by_bucket[bucket]}</Text></View>)}</Row>
       <Copy>On hand {p.stats.quantity_on_hand}</Copy>
-      {/* What was originally paid, which a sale never changes; cost on hand is what the units still held cost. */}
-      <Row><Copy>Total paid {money(p.stats.total_invested)}</Copy>{p.stats.quantity_purchased > 0 ? <Copy>Paid / unit {money(perUnit(p.stats.total_invested, p.stats.quantity_purchased))}</Copy> : null}<Copy>Cost on hand {money(p.stats.remaining_cost)}</Copy><Copy>Realized profit <Signed value={p.stats.realized_profit}>{money(p.stats.realized_profit)}</Signed></Copy></Row>
-      {/* Unrealized is the estimate on what is still held, less its cost; a sale moves that unit into realized. */}
-      {position ? <Row><Copy>Value {money(position.value)}</Copy><Copy>Unrealized <Signed value={position.unrealized}>{money(position.unrealized)}</Signed></Copy></Row> : null}
+      <CostSummary product={p} />
       {openPurchases(p.history).length > 0 ? <Button variant="link" label="Edit what this cost" onPress={() => setCosting(true)} /> : null}
       {p.notes ? <Copy muted>{p.notes}</Copy> : null}</Card>
       <Row><Button variant="primary" label="Record sale" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setSelling(true)} /><Button label="Add purchase" disabled={p.is_archived} onPress={() => setForm({ mode: 'purchase' })} /><Button label="Move stock" disabled={p.stats.quantity_on_hand <= 0 || p.is_archived} onPress={() => setForm({ mode: 'move' })} /></Row>
