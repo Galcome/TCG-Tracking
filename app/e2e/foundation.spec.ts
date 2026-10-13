@@ -357,7 +357,12 @@ test('the stock list deletes a product shared by two partners in two taps, and i
   expect((await request.post(API + '/api/v1/purchases', { data: { product_id: product.id, quantity: 1, amount: '8.00' } })).ok()).toBeTruthy();
   await signIn(page);
   await page.goto('/inventory');
+  // Let the debounced search land first. A delete that commits while the search's first read is
+  // still in flight would leave that read's pre-delete page on screen.
+  const searched = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products'
+    && new URL(response.url()).searchParams.get('q') === name);
   await page.getByLabel('Search products', { exact: true }).fill(name);
+  await searched;
   const card = page.getByRole('group', { name: 'Stock product: ' + name, exact: true });
   await card.getByRole('button', { name: 'Delete ' + name, exact: true }).click();
   // The open sheet hides the list from the accessibility tree, so the card can read as gone
