@@ -177,6 +177,13 @@ test('a location view says its value covers every unit on hand', async ({ page, 
   const starts = await Promise.all(['Est value $540.00', 'Est price $15.00 each', 'Realized $0.00', 'Est profit total $180.00']
     .map(async text => (await card.getByText(text, { exact: true }).boundingBox())?.x));
   expect(new Set(starts).size).toBe(1);
+  // On a phone the pairs share the card's width and stay inside it, still lined up.
+  await page.setViewportSize({ width: 360, height: 900 });
+  const cardBox = (await card.boundingBox())!;
+  const narrow = await Promise.all(['Est value $540.00', 'Est price $15.00 each', 'Realized $0.00', 'Est profit total $180.00']
+    .map(async text => (await card.getByText(text, { exact: true }).boundingBox())!));
+  expect(new Set(narrow.map(box => box.x)).size).toBe(1);
+  for (const box of narrow) expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
   const detail = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   await page.route(API + '/api/v1/products/' + product.id, route => route.fulfill({ json: {
     ...detail, stats: { ...detail.stats, ...valued.stats }, market_estimate: valued.market_estimate } }));
@@ -1502,7 +1509,6 @@ async function openProductSections(page: Page) {
 }
 
 test('the desktop rail keeps the brand and the account link off each other', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
   const brand = page.getByText('TCG Investments', { exact: true });
   const account = page.getByRole('button', { name: 'Account', exact: true });
@@ -1640,7 +1646,6 @@ test('bulk price set-up takes a certain listing on its own and stops only for a 
 });
 
 test('desktop sidebar actions are one width', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
   const widths = await Promise.all(['New product', 'New sale', 'New expense'].map(async (name) => {
     const button = page.getByRole('button', { name, exact: true });
