@@ -236,6 +236,19 @@ export interface ProductCandidate {
   matched_fields: string[]
 }
 
+/** A product that is deleted right now, from the audit log. `id` is the delete's entry. */
+export interface DeletedProduct {
+  id: string
+  product_id: string
+  name: string
+  deleted_at: string
+  deleted_by: string | null
+  purchases: number
+  sales: number
+  /** False for deletes made before a full copy was kept. */
+  recoverable: boolean
+}
+
 export interface ProductDetail extends Product {
   history: Transaction[]
 }
@@ -323,10 +336,52 @@ export interface GroupRow {
 export interface MonthRow {
   month: string
   spent: string
+  /** Who paid for `spent`: house money (joint account, store credit, paybacks) and partners'
+   * own money, from `Performance.tracked_from` on. The rest of the spend is untracked. */
+  house_spent: string
+  own_spent: string
+  untracked_spent: string
   realized_profit: string
   revenue: string
   units_sold: number
   units_bought: number
+}
+
+/** One day of the value chart. */
+export interface ValuePoint {
+  captured_on: string
+  market_value: string
+  priced_cost: string
+}
+
+/** One calendar year of trading. `year` is null for records with no date. */
+export interface YearRow {
+  year: number | null
+  spent: string
+  /** Split as on MonthRow. */
+  house_spent: string
+  own_spent: string
+  untracked_spent: string
+  revenue: string
+  realized_profit: string
+  expenses: string
+}
+
+/**
+ * The dashboard's charts. `own_money + house_money` is what the stock bought since
+ * `tracked_from` cost: paid personally and not yet paid back, or paid by the house (the joint
+ * account, store credit, and every payback).
+ */
+export interface Performance {
+  /** Oldest first, up to a year; the last point is always now. */
+  value_history: ValuePoint[]
+  market_value: string
+  priced_cost: string
+  tracked_from: string
+  own_money: string
+  house_money: string
+  /** Newest first, undated last. */
+  years: YearRow[]
 }
 
 export type GroupBy =
@@ -764,13 +819,19 @@ export interface GradingSubmission {
   notes: string | null
 }
 
-export interface Transformation {
+/** One product that went into a combine, and what FIFO said it cost going in. */
+export interface CombinedInput {
+  product_id: string
+  product_name: string
+  quantity: number
+  bucket: Bucket
+  cost: string | null
+}
+
+interface TransformationBase {
   id: string
-  kind: 'crack' | 'rip' | 'grade'
-  source_product_id: string
-  source_product_name: string
+  /** For a combine, every unit across all its inputs. */
   source_quantity: number
-  source_bucket: Bucket
   occurred_on: string | null
   /** What the outputs are dated from — the lot the source came out of, not the day it
    *  was opened. This is what stops cracking from resetting the ageing clock. */
@@ -781,6 +842,50 @@ export interface Transformation {
   outputs: TransformationOutput[]
   notes: string | null
   status: string
+}
+
+/** One product opened (or graded) into others. */
+export interface SourcedTransformation extends TransformationBase {
+  kind: 'crack' | 'rip' | 'grade'
+  source_product_id: string
+  source_product_name: string
+  source_bucket: Bucket
+  inputs: CombinedInput[]
+}
+
+/** Many products bundled into one. There is no single source: `inputs` are the sources. */
+export interface CombineTransformation extends TransformationBase {
+  kind: 'combine'
+  source_product_id: null
+  source_product_name: null
+  source_bucket: null
+  inputs: CombinedInput[]
+}
+
+export type Transformation = SourcedTransformation | CombineTransformation
+
+export interface CombineLine {
+  product_id: string
+  quantity: number
+  bucket: Bucket
+}
+
+export interface CombinePreview {
+  inputs: (CombineLine & {
+    product_name: string
+    /** What that bucket holds now. Less than `quantity` and the combine will be refused. */
+    available: number
+    cost: string | null
+    /** The row's estimated worth. null when nothing prices it. */
+    value: string | null
+  })[]
+  /** Every input's FIFO cost added up. null when any is unknown. */
+  total_cost: string | null
+  has_unknown_cost: boolean
+  /** What the priced inputs are worth together - a floor when some have no price. */
+  estimated_value: string
+  unpriced: number
+  nonbinding: true
 }
 
 export interface TierRow {
@@ -893,6 +998,8 @@ export interface Account {
   is_active: boolean
   balance: string
   balance_means: 'cash' | 'owed' | 'credit'
+  /** Put in for shares - ownership, never owed back. Partner accounts only. */
+  contributed: string | null
 }
 
 export interface AccountsPage {
@@ -904,9 +1011,11 @@ export interface AccountsPage {
   total_credit: string
   /** Shops with credit left, for "$2,400 across 2 stores". */
   credit_stores: number
+  /** Everything partners have put in for their shares. Not a debt, so apart from total_owed. */
+  total_contributed: string
 }
 
-export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense'
+export type MovementKind = 'funding' | 'proceeds' | 'transfer' | 'adjustment' | 'expense' | 'contribution'
 
 export const EXPENSE_CATEGORIES = [
   'supplies',
@@ -950,6 +1059,8 @@ export interface Movement {
   product_name: string | null
   /** Set on expenses only. */
   expense_category: ExpenseCategory | null
+  /** Set on buy-ins only: whose shares it paid for. */
+  contributed_by_member_id?: string | null
   notes: string | null
   status: string
 }
@@ -983,6 +1094,7 @@ export const MOVEMENT_LABELS: Record<MovementKind, string> = {
   transfer: 'Transfer',
   adjustment: 'Adjustment',
   expense: 'Expense',
+  contribution: 'Buy-in',
 }
 
 export interface NewProduct {
@@ -1100,6 +1212,7 @@ export function createApi(request: ApiRequest) { return {
     /** Omitted: hidden products are left out. Pickers that sell or open stock include them. */
     hidden?: 'exclude' | 'include' | 'only'
     priced?: 'yes' | 'no'
+    set_id?: string
     /** Per unit, inclusive. A product with no value fails either bound. */
     min_unit_value?: string
     max_unit_value?: string
@@ -1123,6 +1236,7 @@ export function createApi(request: ApiRequest) { return {
     include_archived?: boolean
     hidden?: 'exclude' | 'include' | 'only'
     priced?: 'yes' | 'no'
+    set_id?: string
     min_unit_value?: string
     max_unit_value?: string
     min_quantity?: number
@@ -1207,6 +1321,12 @@ export function createApi(request: ApiRequest) { return {
 
   deleteProduct: (id: string) =>
     request<void>(`/api/v1/products/${id}`, { method: 'DELETE' }),
+
+  deletedProducts: () => request<DeletedProduct[]>('/api/v1/audit/deleted-products'),
+
+  /** Puts a deleted product back with everything it had. `id` is the delete's audit entry. */
+  restoreDeletedProduct: (id: string) =>
+    request<{ product_id: string }>(`/api/v1/audit/deleted-products/${id}/restore`, { method: 'POST' }),
 
   createPurchase: (purchase: NewPurchase) =>
     request<unknown>('/api/v1/purchases', { method: 'POST', body: JSON.stringify(purchase) }),
@@ -1309,6 +1429,8 @@ export function createApi(request: ApiRequest) { return {
     request<GroupRow[]>(`/api/v1/reports/by-${by}${query({ period, ...filters })}`),
   /** The last twelve months, oldest first. No period: the point of it is the trend. */
   byMonth: () => request<MonthRow[]>('/api/v1/reports/by-month'),
+  /** Not period-scoped: value over time, who paid for the stock, and year by year. */
+  performance: () => request<Performance>('/api/v1/reports/performance'),
   byGame: (period: Period) => request<GroupRow[]>(`/api/v1/reports/by-game${query({ period })}`),
   bySeller: (period: Period) =>
     request<GroupRow[]>(`/api/v1/reports/by-seller${query({ period })}`),
@@ -1358,8 +1480,9 @@ export function createApi(request: ApiRequest) { return {
   aging: (filters: ReportFilters = {}) => request<AgingLot[]>(`/api/v1/reports/aging${query({ ...filters })}`),
   attention: () => request<Attention>('/api/v1/reports/attention'),
 
-  /** Sets worth offering for one game, best first. Scoped to a game on purpose. */
-  sets: (params: { game: string; q?: string; limit?: number }) =>
+  /** Sets worth offering for one game, best first. Scoped to a game on purpose.
+   *  `used` lists only the sets some product already uses, by name - the stock filter. */
+  sets: (params: { game: string; q?: string; limit?: number; used?: boolean }) =>
     request<SetSuggestions>(`/api/v1/sets${query(params)}`),
 
   /** Send cards to a grader. Nothing moves — the card is flagged where it sits. */
@@ -1437,6 +1560,29 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(input),
     }),
 
+  /** What combining these would cost and be worth. Writes nothing. */
+  previewCombine: (input: { inputs: CombineLine[]; occurred_on?: string }) =>
+    request<CombinePreview>('/api/v1/transformations/combine/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** Bundle products into one new product carrying their summed cost and worth. */
+  combineProducts: (input: {
+    name: string
+    product_type_id: string
+    game_id?: string
+    set_name?: string | null
+    bucket?: Bucket
+    inputs: CombineLine[]
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<CombineTransformation>('/api/v1/transformations/combine', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   /** What a product was opened into, and what it came out of. */
   transformations: (params: { product_id?: string } = {}) =>
     request<Transformation[]>(`/api/v1/transformations${query(params)}`),
@@ -1478,17 +1624,28 @@ export function createApi(request: ApiRequest) { return {
       body: JSON.stringify(transfer),
     }),
 
-  /** Signed integer cents in the account's own terms: +5000 adds $50 owed to a member. */
+  /** Signed integer cents in the account's own terms: +5000 adds $50 owed to a member.
+   *  Give `target` instead of `amount` to set the balance outright; the server works out the change. */
   createMoneyAdjustment: (adjustment: {
     account_id: string
-    /** This endpoint uniquely accepts signed integer cents, not decimal dollars. */
-    amount: number
     occurred_on?: string
     notes?: string | null
-  }) =>
+  } & ({ amount: number } | { target: number })) =>
     request<Movement>('/api/v1/money/adjustments', {
       method: 'POST',
       body: JSON.stringify(adjustment),
+    }),
+
+  /** A partner buying into the business: cash into Joint, owed back to nobody. */
+  createContribution: (contribution: {
+    member_id: string
+    amount: string
+    occurred_on?: string
+    notes?: string | null
+  }) =>
+    request<Movement>('/api/v1/money/contributions', {
+      method: 'POST',
+      body: JSON.stringify(contribution),
     }),
 
   voidMovement: (id: string, reason: string) =>

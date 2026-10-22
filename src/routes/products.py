@@ -660,27 +660,17 @@ def update_product(
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(
     product_id: uuid.UUID,
-    _: Member = Depends(get_current_member),
+    member: Member = Depends(get_current_member),
     db: Session = Depends(db_session, scope="function"),
 ) -> Response:
-    """Delete a product created by mistake.
+    """Delete a product and everything recorded against it, in one step.
 
-    Only when nothing financial references it, voided rows included. A product with
-    history gets archived instead - deleting it would take the money with it.
+    For tests and mistakes. A real product that is no longer stocked should be archived,
+    which hides it and keeps its numbers; this takes the numbers with it.
     """
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    if inventory.has_any_transactions(db, product_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This product has transaction history and cannot be deleted. "
-                "Archive it instead to hide it without losing the record."
-            ),
-        )
-
-    db.delete(product)
-    db.flush()
+    ledger.delete_product(db, product, member_id=member.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

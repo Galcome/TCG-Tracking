@@ -127,6 +127,38 @@ def test_the_number_matches_without_its_leading_zeros(monkeypatch):
     assert ids(found) == [6]
 
 
+def test_a_numbered_card_matches_past_the_catalogs_treatment(monkeypatch):
+    chooser = Chooser(monkeypatch)
+    catalog = [
+        listing(1, "Avatar Aang (Borderless)", "0308"),
+        listing(2, "Avatar Aang", "0300"),
+        listing(3, "Avatar Aang (Showcase) (Foil Etched)", "0350"),
+    ]
+
+    found = price_match.suggest(
+        product("Avatar Aang", type_name="Raw Single", number="308"), FakeProvider(catalog)
+    )
+    etched = price_match.suggest(
+        product("Avatar Aang", type_name="Raw Single", number="350"), FakeProvider(catalog)
+    )
+
+    assert (ids(found), found.method) == ([1], "exact")
+    assert (ids(etched), etched.method) == ([3], "exact")
+    assert chooser.asked == []
+
+
+def test_without_a_number_the_treatment_still_tells_printings_apart(monkeypatch):
+    chooser = Chooser(monkeypatch)
+
+    found = price_match.suggest(
+        product("Avatar Aang", type_name="Raw Single"),
+        FakeProvider([listing(1, "Avatar Aang (Borderless)", "0308")]),
+    )
+
+    assert (ids(found), found.method) == ([1], None)
+    assert len(chooser.asked) == 1
+
+
 def test_the_clean_name_counts_as_the_name(monkeypatch):
     Chooser(monkeypatch)
 

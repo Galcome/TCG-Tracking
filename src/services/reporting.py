@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from src.models.card_set import CardSet
@@ -23,13 +23,17 @@ from src.models.ledger import STATUS_ACTIVE, CostAllocation, Purchase, Sale
 from src.models.market_price import QUOTE_FRESH, QUOTE_UNAVAILABLE
 from src.models.member import Member
 from src.models.money import (
+    ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     MOVEMENT_EXPENSE,
+    MOVEMENT_FUNDING,
     MOVEMENT_PROCEEDS,
+    MOVEMENT_TRANSFER,
     MoneyAccount,
     MoneyMovement,
     MoneyPosting,
 )
+from src.models.portfolio import PortfolioSnapshot
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
 from src.models.taxonomy import Game, ProductType
@@ -837,6 +841,12 @@ class MonthRow:
     #: ISO first-of-month, so the client sorts and labels without parsing anything.
     month: str
     spent_cents: int = 0
+    #: Who paid for `spent_cents`, by the account each purchase was funded from at the time:
+    #: house money (the joint account or store credit) and partners' own money. Only buys
+    #: from FUNDING_TRACKED_FROM on are split; the rest of the spend is untracked.
+    house_spent_cents: int = 0
+    own_spent_cents: int = 0
+    untracked_spent_cents: int = 0
     realized_profit_cents: int = 0
     revenue_cents: int = 0
     units_sold: int = 0
@@ -862,8 +872,11 @@ def by_month(db: Session, today: date | None = None) -> list[MonthRow]:
 
     months: dict[str, MonthRow] = {}
 
+    def first_of_month(when: date) -> str:
+        return date(when.year, when.month, 1).isoformat()
+
     def row_for(when: date) -> MonthRow:
-        key = date(when.year, when.month, 1).isoformat()
+        key = first_of_month(when)
         return months.setdefault(key, MonthRow(month=key))
 
     spent = (
@@ -883,6 +896,16 @@ def by_month(db: Session, today: date | None = None) -> list[MonthRow]:
         row = row_for(when)
         row.spent_cents += int(amount or 0)
         row.units_bought += int(quantity)
+
+    for day in funded_days(db):
+        if day.on >= earliest:
+            row = row_for(day.on)
+            row.own_spent_cents += day.own_cents
+            row.house_spent_cents += day.house_cents
+    for row in months.values():
+        row.untracked_spent_cents = max(
+            row.spent_cents - row.house_spent_cents - row.own_spent_cents, 0
+        )
 
     sales = select(
         Sale.sale_date,
@@ -1010,3 +1033,239 @@ __all__ = [
     "dashboard",
     "period_start",
 ]
+
+
+# ---------------------------------------------------------------------------- performance
+
+#: A year of daily points: a trend, and still small enough to draw on a phone.
+VALUE_HISTORY_DAYS = 365
+
+#: The day the group started tracking who pays for stock. Older money was never recorded
+#: reliably - most of the opening stock has no money record at all - so rather than guess
+#: at it, the split only counts what was bought from this day on.
+FUNDING_TRACKED_FROM = date(2026, 10, 11)
+
+
+def record_portfolio(db: Session, today: date | None = None) -> PortfolioSnapshot:
+    """Write today's row of the value chart, replacing one already written today.
+
+    Taken from `dashboard` rather than recomputed, so the chart's last point and the
+    headline above it are the same number.
+    """
+    today = today or date.today()
+    board = dashboard(db, today=today)
+    row = db.scalar(select(PortfolioSnapshot).where(PortfolioSnapshot.captured_on == today))
+    if row is None:
+        row = PortfolioSnapshot(captured_on=today)
+        db.add(row)
+    row.market_value_cents = board.market_value_cents
+    row.priced_cost_cents = board.priced_cost_cents
+    db.flush()
+    return row
+
+
+@dataclass
+class ValuePoint:
+    captured_on: date
+    market_value_cents: int
+    priced_cost_cents: int
+
+
+@dataclass
+class YearRow:
+    """One calendar year of trading. `year` is None for rows with no date at all."""
+
+    year: int | None
+    spent_cents: int = 0
+    #: Split as on MonthRow: house and own money from FUNDING_TRACKED_FROM on, the rest untracked.
+    house_spent_cents: int = 0
+    own_spent_cents: int = 0
+    untracked_spent_cents: int = 0
+    revenue_cents: int = 0
+    realized_profit_cents: int = 0
+    expenses_cents: int = 0
+
+
+@dataclass
+class Performance:
+    value_history: list[ValuePoint]
+    market_value_cents: int
+    priced_cost_cents: int
+    #: Who paid for the stock bought since `tracked_from`. Own money is what partners paid
+    #: from their own pockets and have not been paid back; house money is the joint account
+    #: and store credit - sales money going back into stock - plus every payback.
+    tracked_from: date
+    own_money_cents: int
+    house_money_cents: int
+    years: list[YearRow]
+
+
+def performance(db: Session, today: date | None = None) -> Performance:
+    """The dashboard's three charts: value over time, who paid for the stock, year by year."""
+    today = today or date.today()
+    board = dashboard(db, today=today)
+
+    earliest = today - timedelta(days=VALUE_HISTORY_DAYS - 1)
+    history = [
+        ValuePoint(row.captured_on, row.market_value_cents, row.priced_cost_cents)
+        for row in db.scalars(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.captured_on >= earliest, PortfolioSnapshot.captured_on < today)
+            .order_by(PortfolioSnapshot.captured_on)
+        )
+    ]
+    # Today is always live, so the chart ends on the number in the headline even before the
+    # nightly job has run.
+    history.append(ValuePoint(today, board.market_value_cents, board.priced_cost_cents))
+
+    own, house = funding_split(db)
+    return Performance(
+        value_history=history,
+        market_value_cents=board.market_value_cents,
+        priced_cost_cents=board.priced_cost_cents,
+        tracked_from=FUNDING_TRACKED_FROM,
+        own_money_cents=own,
+        house_money_cents=house,
+        years=by_year(db),
+    )
+
+
+@dataclass
+class FundedDay:
+    on: date
+    own_cents: int
+    house_cents: int
+
+
+def funded_days(db: Session) -> list[FundedDay]:
+    """Stock bought each day since tracking started, split into partners' own money and
+    house money. Oldest first.
+
+    The rules are the group's: stock paid from the joint account (or with store credit) is
+    house money, stock a partner paid for personally is their own money, and when the joint
+    account pays a partner back, that much of their money becomes house money.
+
+    Transfers are netted per member account: a payback adds to it, a partner putting cash
+    into the joint account takes from it. Paybacks turn the oldest own money into house money
+    first; cash put in and spent from the joint account turns the oldest house money into own
+    money. Neither can move more than there is, so paying back money spent before tracking
+    started cannot push own money negative, and each day still adds up to what it cost.
+    """
+    when = func.coalesce(MoneyMovement.occurred_on, cast(MoneyMovement.created_at, Date))
+    rows = db.execute(
+        select(
+            MoneyMovement.kind,
+            when,
+            MoneyAccount.kind,
+            func.sum(MoneyPosting.delta_cents),
+        )
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyMovement.kind.in_((MOVEMENT_FUNDING, MOVEMENT_TRANSFER)),
+            when >= FUNDING_TRACKED_FROM,
+        )
+        .group_by(MoneyMovement.kind, when, MoneyAccount.kind)
+    ).all()
+
+    days: dict[date, FundedDay] = {}
+    paid_back = 0
+    for kind, on, account_kind, total in rows:
+        is_member = account_kind == ACCOUNT_MEMBER
+        delta = int(total)
+        if kind == MOVEMENT_TRANSFER:
+            paid_back += delta if is_member else 0
+            continue
+        day = days.setdefault(on, FundedDay(on, 0, 0))
+        # Funding legs take money out of an account, so they are negative.
+        if is_member:
+            day.own_cents -= delta
+        else:
+            day.house_cents -= delta
+
+    ordered = sorted(days.values(), key=lambda day: day.on)
+    for day in ordered:
+        if paid_back > 0:
+            moved = min(paid_back, day.own_cents)
+            day.own_cents -= moved
+            day.house_cents += moved
+            paid_back -= moved
+        elif paid_back < 0:
+            moved = min(-paid_back, day.house_cents)
+            day.house_cents -= moved
+            day.own_cents += moved
+            paid_back += moved
+    return ordered
+
+
+def funding_split(db: Session) -> tuple[int, int]:
+    """All stock bought since tracking started: (own money, house money)."""
+    days = funded_days(db)
+    return sum(day.own_cents for day in days), sum(day.house_cents for day in days)
+
+
+def by_year(db: Session) -> list[YearRow]:
+    """Spend, revenue, profit and overhead per calendar year, newest first, undated last.
+
+    Undated rows get their own row instead of being dropped: most of the opening stock has
+    no purchase date, and leaving it out would make the years add up to a fraction of what
+    was spent.
+    """
+    years: dict[int | None, YearRow] = {}
+
+    def row_for(year) -> YearRow:
+        key = None if year is None else int(year)
+        return years.setdefault(key, YearRow(year=key))
+
+    # Same rule as the dashboard: carried cost is not new money, its add-ons are.
+    spent = case(
+        (
+            Purchase.is_derived.is_(True),
+            Purchase.shipping_cents + Purchase.tax_cents + Purchase.fees_cents,
+        ),
+        else_=_LANDED,
+    )
+    purchase_year = func.extract("year", Purchase.purchase_date)
+    for year, amount in db.execute(
+        select(purchase_year, func.sum(spent))
+        .where(Purchase.status == STATUS_ACTIVE)
+        .group_by(purchase_year)
+    ):
+        row_for(year).spent_cents += int(amount or 0)
+
+    sale_year = func.extract("year", Sale.sale_date)
+    for year, gross, net_known, cost in db.execute(
+        select(
+            sale_year,
+            func.sum(Sale.gross_amount_cents),
+            func.sum(_NET_KNOWN),
+            func.sum(func.coalesce(Sale.cost_basis_cents, 0)),
+        )
+        .where(Sale.status == STATUS_ACTIVE)
+        .group_by(sale_year)
+    ):
+        row = row_for(year)
+        row.revenue_cents += int(gross or 0)
+        row.realized_profit_cents += int(net_known or 0) - int(cost or 0)
+
+    expense_year = func.extract("year", MoneyMovement.occurred_on)
+    for year, amount in db.execute(
+        select(expense_year, func.sum(-MoneyPosting.delta_cents))
+        .select_from(MoneyPosting)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.kind == MOVEMENT_EXPENSE)
+        .group_by(expense_year)
+    ):
+        row_for(year).expenses_cents += int(amount or 0)
+
+    for day in funded_days(db):
+        row = row_for(day.on.year)
+        row.own_spent_cents += day.own_cents
+        row.house_spent_cents += day.house_cents
+    for row in years.values():
+        row.untracked_spent_cents = max(
+            row.spent_cents - row.house_spent_cents - row.own_spent_cents, 0
+        )
+
+    return sorted(years.values(), key=lambda row: (row.year is None, -(row.year or 0)))

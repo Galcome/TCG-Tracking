@@ -177,7 +177,7 @@ function AgingRowCard({ lot }: { lot: AgingLot }) {
             />
             <Copy muted>{plural(lot.units, 'unit')} · {lot.game_slug}</Copy>
           </View>
-          <Metric label="Remaining cost" value={reportMoney(lot.cost)} />
+          <Metric label="Cost on hand" value={reportMoney(lot.cost)} />
         </Row>
         <Copy muted>{agingDescription(lot.days_held)} · {purchaseDateDescription(lot.purchase_date)}</Copy>
       </Card>

@@ -11,3 +11,22 @@ test('photo uploads validate actual type and size; unknown size remains server-l
   const body = photoBody({ ...photo, type: file.type, file })
   assert.equal((body.get('photo') as File).name, photo.name)
 })
+
+test('native photos upload their bytes, since Expo fetch cannot send a uri part', async () => {
+  // Node's FormData stringifies non-Blob parts; Expo's keeps them, so record what is appended.
+  const appended: unknown[] = []
+  const NodeFormData = globalThis.FormData
+  globalThis.FormData = class { append(_name: string, value: unknown) { appended.push(value) } } as never
+  const photo = { uri: 'file:///frame.jpg', name: 'frame.jpg', type: 'image/jpeg' }
+  const bytes = new Uint8Array([0xff, 0xd8])
+  try {
+    photoBody({ ...photo, read: async () => bytes })
+    assert.throws(() => photoBody(photo), /could not be read/)
+  } finally {
+    globalThis.FormData = NodeFormData
+  }
+  const part = appended[0] as { name: string; type: string; bytes: () => Promise<Uint8Array> }
+  assert.equal(part.name, 'frame.jpg')
+  assert.equal(part.type, 'image/jpeg')
+  assert.equal(await part.bytes(), bytes)
+})

@@ -104,23 +104,6 @@ def test_a_product_with_no_history_can_be_deleted(client, make_product):
     assert client.get(f"/api/v1/products/{product['id']}").status_code == 404
 
 
-def test_a_product_with_history_cannot_be_deleted(client, make_product):
-    product = make_product()
-    buy(client, product["id"], 1, "100.00")
-
-    response = client.delete(f"/api/v1/products/{product['id']}")
-    assert response.status_code == 409
-    assert "Archive it instead" in response.json()["detail"]
-
-
-def test_voided_history_still_blocks_deletion(client, make_product):
-    product = make_product()
-    purchase = buy(client, product["id"], 1, "100.00")
-    client.post(f"/api/v1/purchases/{purchase['id']}/void", json={"reason": "mistake"})
-
-    assert client.delete(f"/api/v1/products/{product['id']}").status_code == 409
-
-
 def test_deleting_a_missing_product_is_404(client):
     assert client.delete(f"/api/v1/products/{uuid.uuid4()}").status_code == 404
 

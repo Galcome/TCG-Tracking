@@ -106,6 +106,14 @@ def _listed_names(item: CatalogProduct) -> set[str]:
     }
 
 
+#: "Avatar Aang (Borderless)": a treatment the catalog adds that is not printed on the card.
+_TREATMENT = re.compile(r"(\s*\([^()]*\))+\s*$")
+
+
+def _untreated(item: CatalogProduct) -> set[str]:
+    return {_normalise(_TREATMENT.sub("", text)) for text in (item.name, item.clean_name) if text}
+
+
 def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProduct]:
     names = {_normalise(wanted.name), _normalise(f"{wanted.set_name} {wanted.name}")}
     number = _card_number(wanted.number)
@@ -115,7 +123,8 @@ def _exact(wanted: Identity, catalog: list[CatalogProduct]) -> list[CatalogProdu
     return [
         item
         for item in catalog
-        if _listed_names(item) & names
+        # A printed number already pins the card, so the catalog's treatment can go.
+        if (_listed_names(item) | (_untreated(item) if number else set())) & names
         and (number is None or _card_number(item.number) == number)
         and (card or _card_number(item.number) is None)
     ]

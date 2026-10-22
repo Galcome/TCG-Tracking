@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import { File } from 'expo-file-system'
 import * as Haptics from 'expo-haptics'
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import { useQuery } from '@tanstack/react-query'
@@ -10,13 +11,21 @@ import { useApi } from '../context/AppContext'
 import { colors } from '../context/ThemeContext'
 import { ApiError } from '../lib/transport'
 import { photoBody } from '../lib/photo'
-import { newCards, scanReducer, scanTotal, type ScanItem } from '../lib/scan-session'
+import { photographed, scanReducer, scanTotal, sight, type ScanItem } from '../lib/scan-session'
 import { Button, Choice, Copy, ErrorNotice, Field, Row, styles as ui } from './ui'
 
-/** One frame this often. The server allows one a second per person; slower saves spend. */
-const FRAME_INTERVAL_MS = 1200
+/**
+ * One frame this often. Faster outruns the free vision tiers, which then fall through to a
+ * paid model, and a card takes a second or two to bring into view anyway.
+ */
+const FRAME_INTERVAL_MS = 2500
 /** Wide enough to read a card name and number, small enough to upload in a blink. */
 const FRAME_WIDTH = 640
+/** One card on a tap: worth the extra pixels, since the small set code and number decide the match. */
+const PHOTO_WIDTH = 1280
+
+/** One card per tap, which never double-counts, or a live read of whatever is in view. */
+type ScanMode = 'one' | 'many'
 
 /** Live scanning needs a native camera; the web build keeps the photo picker. */
 export const canLiveScan = Platform.OS !== 'web'
@@ -62,13 +71,16 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
   const camera = useRef<CameraView>(null)
   const [ready, setReady] = useState(false)
   const [paused, setPaused] = useState(false)
+  const [mode, setMode] = useState<ScanMode>('one')
+  const [reading, setReading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [stopped, setStopped] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<unknown>(null)
 
-  const scanning = open && ready && !paused && !stopped && !saving &&
+  const canRead = open && ready && !stopped && !saving &&
     Boolean(permission?.granted) && status.data?.available === true
+  const scanning = canRead && mode === 'many' && !paused
 
   function price(item: ScanItem) {
     void api.lookupCard({
@@ -83,25 +95,59 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
     )
   }
 
+  /** The cards in one photo, or null when the camera gave nothing or the read was abandoned. */
+  async function readPhoto(width: number, cancelled: () => boolean) {
+    const picture = await camera.current?.takePictureAsync({ quality: 0.8, shutterSound: false })
+    if (!picture || cancelled()) return null
+    const rendered = await ImageManipulator.manipulate(picture.uri).resize({ width }).renderAsync()
+    const frame = await rendered.saveAsync({ compress: 0.7, format: SaveFormat.JPEG })
+    if (cancelled()) return null
+    const result = await api.readCards(photoBody({
+      uri: frame.uri, name: 'frame.jpg', type: 'image/jpeg', read: () => new File(frame.uri).bytes(),
+    }))
+    return cancelled() ? null : result.cards
+  }
+
+  async function scanOne() {
+    if (!canRead || reading) return
+    setReading(true)
+    setNotice('Reading…')
+    try {
+      const cards = await readPhoto(PHOTO_WIDTH, () => false)
+      const action = cards && photographed(itemsRef.current, cards, Date.now())
+      if (!action) { setNotice('No card found. Fill the frame with one card, flat and in good light.'); return }
+      dispatch(action)
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      if (action.type === 'seen') {
+        const [item] = action.sighting.fresh
+        price(item)
+        setNotice(`Added ${item.name}.${cards.length > 1 ? ' One card per photo; use Many cards for several.' : ''}`)
+      } else {
+        const item = itemsRef.current.find((row) => row.key === action.key)
+        setNotice(`Another ${item?.name ?? 'copy'}: ${(item?.quantity ?? 0) + 1} copies.`)
+      }
+    } catch (error) {
+      if (stopsScanning(error)) setStopped(message(error))
+      else setNotice(`${message(error)} Try again.`)
+    } finally {
+      setReading(false)
+    }
+  }
+
   useEffect(() => {
     if (!scanning) return
     let cancelled = false
 
     async function readFrame() {
-      const picture = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: false })
-      if (!picture || cancelled) return
-      const rendered = await ImageManipulator.manipulate(picture.uri).resize({ width: FRAME_WIDTH }).renderAsync()
-      const frame = await rendered.saveAsync({ compress: 0.6, format: SaveFormat.JPEG })
-      if (cancelled) return
-      const result = await api.readCards(photoBody({ uri: frame.uri, name: 'frame.jpg', type: 'image/jpeg' }))
-      if (cancelled) return
-      const fresh = newCards(itemsRef.current, result.cards)
-      if (!fresh.length) return
-      dispatch({ type: 'seen', cards: fresh })
+      const cards = await readPhoto(FRAME_WIDTH, () => cancelled)
+      if (!cards) return
+      const sighting = sight(itemsRef.current, cards, Date.now())
+      if (!sighting.fresh.length && !sighting.seen.length) return
+      dispatch({ type: 'seen', sighting })
+      for (const item of [...sighting.fresh, ...sighting.reread.map((entry) => entry.item)]) price(item)
+      if (!sighting.fresh.length) return
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      setNotice(`Added ${fresh.map((card) => card.name).join(', ')}`)
-      // The reducer has not run yet; the keys are the ones it will give these cards.
-      for (const item of scanReducer([], { type: 'seen', cards: fresh })) price(item)
+      setNotice(`Added ${sighting.fresh.map((item) => item.name).join(', ')}`)
     }
 
     async function loop() {
@@ -121,7 +167,7 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
 
     void loop()
     return () => { cancelled = true }
-    // price and api are stable for the life of the sheet; restarting on them would double-read.
+    // price, readPhoto and api are stable for the life of the sheet; restarting on them would double-read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanning])
 
@@ -131,6 +177,7 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
     setNotice(null)
     setStopped(null)
     setPaused(false)
+    setReading(false)
     setReady(false)
     setSaveError(null)
     onClose()
@@ -173,18 +220,32 @@ export function CardScanner({ open, gameId, title, doneLabel, costEntry = false,
 
   const statusLine = stopped
     ?? (status.data?.available === false ? 'Card reading is off. Type the cards in instead.' : null)
-    ?? (paused ? 'Paused.' : notice ?? 'Hold one or more cards flat in view.')
+    ?? (mode === 'many' && paused ? 'Paused.' : null)
+    ?? notice
+    ?? (mode === 'one' ? 'Fill the frame with one card, then tap Scan card.' : 'Hold one or more cards flat in view.')
 
   return <Modal visible animationType="slide" onRequestClose={close}>
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }}>
       <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
         <Row>
           <Text accessibilityRole="header" style={{ color: colors.text, fontSize: 20, fontWeight: '700', flex: 1 }}>{title}</Text>
-          <Button label={paused ? 'Resume' : 'Pause'} disabled={Boolean(stopped) || saving} onPress={() => setPaused((value) => !value)} />
+          {mode === 'many' ? <Button label={paused ? 'Resume' : 'Pause'} disabled={Boolean(stopped) || saving} onPress={() => setPaused((value) => !value)} /> : null}
           <Button label="Close" disabled={saving} onPress={close} />
         </Row>
       </View>
       <View style={{ height: '42%', backgroundColor: '#000', justifyContent: 'center' }}>{cameraArea}</View>
+      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+        <Row>
+          {(['one', 'many'] as const).map((value) => <Button key={value}
+            label={value === 'one' ? 'One card' : 'Many cards'}
+            disabled={saving || reading}
+            style={mode === value ? { borderColor: colors.accent, borderWidth: 2 } : undefined}
+            onPress={() => { setMode(value); setNotice(null) }} />)}
+          {mode === 'one' ? <Button variant="primary" label={reading ? 'Reading…' : 'Scan card'}
+            disabled={!canRead || reading} style={{ flex: 1, minWidth: 120 }}
+            onPress={() => { void scanOne() }} /> : null}
+        </Row>
+      </View>
       <Text accessibilityLiveRegion="polite" style={{ color: stopped ? colors.loss : colors.muted, paddingHorizontal: 16, paddingVertical: 8 }}>
         {statusLine}
       </Text>
@@ -236,10 +297,20 @@ function ScanRow({ item, disabled, costEntry, onQuantity, onPrice, onPaid, onIde
       <Stepper label="−" accessibilityLabel={`One fewer ${item.name}`} disabled={disabled} onPress={() => onQuantity(-1)} />
       <Text style={{ color: colors.text, minWidth: 20, textAlign: 'center' }}>{item.quantity}</Text>
       <Stepper label="+" accessibilityLabel={`One more ${item.name}`} disabled={disabled} onPress={() => onQuantity(1)} />
-      <Button variant="link" label={editing ? 'Done editing' : 'Review'} disabled={disabled} onPress={() => setEditing((value) => !value)} />
+      <Button variant="link" label={editing ? 'Done' : 'Edit'} disabled={disabled} onPress={() => setEditing((value) => !value)} />
     </Row>
     {item.status === 'pricing' ? <Text style={{ color: colors.muted, fontSize: 13 }}>Pricing…</Text> : null}
     {item.message ? <Text style={{ color: colors.muted, fontSize: 13 }}>{item.message}</Text> : null}
+    {item.candidates.length && (!item.listing || editing) ? <Choice
+      label="Catalog match"
+      value={String(item.candidates.findIndex((candidate) => candidate.listing.product_id === item.listing?.productId && candidate.subtype === item.listing?.subtype))}
+      options={item.candidates.map((candidate, index) => ({
+        value: String(index),
+        label: `${candidate.listing.name}${candidate.listing.number ? ` #${candidate.listing.number}` : ''} · ${candidate.subtype}${candidate.market ? ` · $${candidate.market}` : ''}`,
+      }))}
+      onChange={(value) => onListing(Number(value))}
+      disabled={disabled}
+    /> : null}
     <Text style={{ color: colors.muted, fontSize: 13 }}>
       Market estimate {item.price ? `$${item.price} CAD each` : 'unavailable'}
     </Text>
@@ -259,16 +330,6 @@ function ScanRow({ item, disabled, costEntry, onQuantity, onPrice, onPaid, onIde
       placeholder="0.00"
     />}
     {editing ? <View style={{ gap: 8 }}>
-      {item.candidates.length ? <Choice
-        label="Catalog match"
-        value={String(item.candidates.findIndex((candidate) => candidate.listing.product_id === item.listing?.productId && candidate.subtype === item.listing?.subtype))}
-        options={item.candidates.map((candidate, index) => ({
-          value: String(index),
-          label: `${candidate.listing.name}${candidate.listing.number ? ` #${candidate.listing.number}` : ''} · ${candidate.subtype}${candidate.market ? ` · $${candidate.market}` : ''}`,
-        }))}
-        onChange={(value) => onListing(Number(value))}
-        disabled={disabled}
-      /> : null}
       <Field label="Card name" value={item.name} onChangeText={(value) => onIdentity('name', value)} editable={!disabled} />
       <Field label="Set" value={item.setName} onChangeText={(value) => onIdentity('setName', value)} editable={!disabled} />
       <Row>
@@ -278,7 +339,9 @@ function ScanRow({ item, disabled, costEntry, onQuantity, onPrice, onPaid, onIde
       <Field label="Language" value={item.language} onChangeText={(value) => onIdentity('language', value)} editable={!disabled} />
     </View> : null}
     <Row>
-      <Button variant={item.reviewed ? 'secondary' : 'primary'} label={item.reviewed ? 'Card confirmed' : 'Confirm card'} disabled={disabled || item.status === 'pricing'} onPress={onReviewed} />
+      {item.reviewed
+        ? <Text style={{ color: colors.muted, fontSize: 13, flex: 1 }}>Confirmed</Text>
+        : <Button variant="primary" label="Confirm card" disabled={disabled || item.status === 'pricing'} onPress={onReviewed} />}
       <Button variant="link" label="Remove" disabled={disabled} onPress={onRemove} />
     </Row>
   </View>

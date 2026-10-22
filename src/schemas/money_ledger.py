@@ -53,6 +53,9 @@ class AccountRead(BaseModel):
     balance: MoneyOut
     #: `cash` or `owed`, so a client never has to infer which from the kind.
     balance_means: str
+    #: What this partner has put in for their share of the business - never owed back, so
+    #: never part of `balance`. Set on member accounts only.
+    contributed: MoneyOut | None = None
 
 
 class AccountList(BaseModel):
@@ -67,6 +70,9 @@ class AccountList(BaseModel):
     total_credit: MoneyOut
     #: How many shops that credit is spread across, for "$2,400 across 2 stores".
     credit_stores: int
+    #: Everything partners have put in for their shares. Ownership, not a debt, so it is
+    #: kept apart from `total_owed`.
+    total_contributed: MoneyOut
 
 
 # ------------------------------------------------------------------------- movements
@@ -101,14 +107,23 @@ class TransferCreate(BaseModel):
 class AdjustmentCreate(BaseModel):
     """A correction, or an opening balance carried over from the spreadsheet.
 
-    Signed on purpose: "Jason was already owed $5,000 when we started" and "we double
-    counted a payback" are the same operation in opposite directions.
+    Given one of two ways. `target` is the usual one: "Jason says he is owed $5,000" is
+    typed as 5000 and the server works out the change, so nobody does arithmetic against a
+    balance that might have moved while they were typing. `amount` is the change itself,
+    signed, for the correction that is naturally a delta ("we double counted a payback").
     """
 
     account_id: uuid.UUID
     #: What the balance should move by, in that account's own terms - `owed` for a member
     #: account, `cash` for the joint one. The sign flip to raw flow happens server-side.
-    amount: SignedMoney = Field(ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS)
+    amount: SignedMoney | None = Field(
+        default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS
+    )
+    #: What the balance should read afterwards, in the same terms. Zero is a real target:
+    #: "we are square with Patrick".
+    target: SignedMoney | None = Field(
+        default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS
+    )
     occurred_on: date = Field(default_factory=date.today)
     notes: str | None = None
 
@@ -119,10 +134,34 @@ class AdjustmentCreate(BaseModel):
 
     @field_validator("amount")
     @classmethod
-    def non_zero(cls, value: int) -> int:
+    def non_zero(cls, value: int | None) -> int | None:
         if value == 0:
             raise ValueError("an adjustment of zero changes nothing")
         return value
+
+    @model_validator(mode="after")
+    def one_way_of_saying_it(self) -> "AdjustmentCreate":
+        if (self.amount is None) == (self.target is None):
+            raise ValueError("give either the change or the new balance, not both")
+        return self
+
+
+class ContributionCreate(BaseModel):
+    """A partner putting money in for their share of the business.
+
+    Lands in the joint account and is owed back to nobody, which is the whole difference
+    from a transfer out of their own account.
+    """
+
+    member_id: uuid.UUID
+    amount: MoneyIn = Field(gt=0)
+    occurred_on: date = Field(default_factory=date.today)
+    notes: str | None = None
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
 
 
 class ExpenseCreate(BaseModel):
@@ -184,6 +223,8 @@ class MovementRead(BaseModel):
     product_name: str | None = None
     #: Set on expenses only.
     expense_category: str | None = None
+    #: Set on contributions only: whose share of the business it bought.
+    contributed_by_member_id: uuid.UUID | None = None
     notes: str | None
     status: str
 

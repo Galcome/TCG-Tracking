@@ -22,7 +22,8 @@ from src.services import sets
 
 router = APIRouter()
 
-MAX_SUGGESTIONS = 30
+#: Room for every set a game's stock uses, which is what the stock filter lists.
+MAX_SUGGESTIONS = 200
 
 
 class SetRead(BaseModel):
@@ -49,6 +50,7 @@ def list_sets(
     game: str = Query(max_length=60, description="Game slug"),
     q: str = Query(default="", max_length=120),
     limit: int = Query(default=sets.DEFAULT_SUGGESTION_LIMIT, ge=1, le=MAX_SUGGESTIONS),
+    used: bool = Query(default=False, description="Only sets some product already uses"),
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session, scope="function"),
 ) -> SetList:
@@ -61,7 +63,7 @@ def list_sets(
     if game_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
 
-    found = sets.suggestions(db, game_id=game_id, query=q, limit=limit)
+    found = sets.suggestions(db, game_id=game_id, query=q, limit=limit, used_only=used)
 
     return SetList(
         items=[

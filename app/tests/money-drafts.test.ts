@@ -3,6 +3,13 @@ import test from 'node:test'
 
 import {
   MAX_ADJUSTMENT_CENTS,
+  balanceChange,
+  balanceChangeLine,
+  buildBalanceTargetPayload,
+  buildContributionPayload,
+  signedCents,
+  validateBalanceTargetDraft,
+  validateContributionDraft,
   adjustmentDraftFromMovement,
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
@@ -256,4 +263,48 @@ test('ledger lines say what happened to each account in plain words', () => {
   assert.equal(legLine({ account_name: 'WealthSimple', account_kind: 'joint', amount: '200.00' }), '$200.00 into WealthSimple')
   assert.equal(legLine({ account_name: 'LCS', account_kind: 'store_credit', amount: '-20.00' }), '$20.00 store credit used at LCS')
   assert.equal(legLine({ account_name: 'LCS', account_kind: 'store_credit', amount: '20.00' }), '$20.00 store credit added at LCS')
+})
+
+test('a new balance is the figure someone tells you, and the app works out the change', () => {
+  assert.equal(signedCents('$5,000'), 500000n)
+  assert.equal(signedCents('-25.50'), -2550n)
+  assert.equal(signedCents('abc'), null)
+  assert.equal(balanceChange('200.00', '5000'), 480000n)
+  assert.equal(balanceChange('200.00', 'x'), null)
+
+  const partner = { name: 'Jason', balance_means: 'owed' }
+  assert.equal(balanceChangeLine(partner, 480000n), 'Jason will be owed $4,800.00 more')
+  assert.equal(balanceChangeLine(partner, -100n), 'Jason will be owed $1.00 less')
+  assert.equal(balanceChangeLine(partner, 0n), 'No change - that is already the balance.')
+  assert.equal(balanceChangeLine({ name: 'Joint account', balance_means: 'cash' }, 500n), '$5.00 into Joint account')
+  assert.equal(balanceChangeLine({ name: 'Joint account', balance_means: 'cash' }, -500n), '$5.00 out of Joint account')
+  assert.equal(balanceChangeLine({ name: 'Shop', balance_means: 'credit' }, 500n), '$5.00 store credit added')
+  assert.equal(balanceChangeLine({ name: 'Shop', balance_means: 'credit' }, -500n), '$5.00 store credit removed')
+})
+
+test('a new balance is sent as signed cents and refused when it changes nothing', () => {
+  const draft = { accountId: 'a', target: '-12.50', occurredOn: date, notes: ' ' }
+  assert.deepEqual(buildBalanceTargetPayload(draft, '0.00'), {
+    account_id: 'a',
+    target: -1250,
+    occurred_on: date,
+    notes: null,
+  })
+  assert.equal(buildBalanceTargetPayload({ ...draft, target: '0' }, '0.00'), null)
+  assert.match(validateBalanceTargetDraft({ ...draft, target: '0' }, '0.00').amount ?? '', /already/)
+  assert.match(validateBalanceTargetDraft({ ...draft, target: '' }, '0.00').amount ?? '', /new balance/)
+  assert.match(validateBalanceTargetDraft({ ...draft, target: String(MAX_ADJUSTMENT_CENTS) }, '0.00').amount ?? '', /billion/)
+  assert.ok(validateBalanceTargetDraft({ target: '5' }, '0.00').accountId)
+})
+
+test('a buy-in names whose shares it paid for and a positive amount', () => {
+  const draft = { memberId: 'm', amount: ' 5000.00 ', occurredOn: date, notes: '' }
+  assert.deepEqual(buildContributionPayload(draft), {
+    member_id: 'm',
+    amount: '5000.00',
+    occurred_on: date,
+    notes: null,
+  })
+  assert.equal(buildContributionPayload({ ...draft, amount: '0' }), null)
+  assert.ok(validateContributionDraft({ ...draft, memberId: '' }).accountId)
 })
