@@ -1,6 +1,6 @@
 {
   "name": "tcg-investments-app",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
