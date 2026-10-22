@@ -23,6 +23,7 @@ from src.models.money import (
     ACCOUNT_MEMBER,
     ACCOUNT_STORE_CREDIT,
     MOVEMENT_ADJUSTMENT,
+    MOVEMENT_CONTRIBUTION,
     MOVEMENT_EXPENSE,
     MOVEMENT_KINDS,
     MOVEMENT_TRANSFER,
@@ -36,6 +37,7 @@ from src.schemas.money_ledger import (
     AccountList,
     AccountRead,
     AdjustmentCreate,
+    ContributionCreate,
     ExpenseCreate,
     FundingLeg,
     MovementList,
@@ -201,6 +203,7 @@ def list_accounts(
     """
     money.ensure_accounts(db)
     flows = money.balances(db)
+    contributed = money.contributions(db)
 
     # Joint, then the partners, then the shops. Ordering by kind alphabetically put
     # store_credit first, so a group with a dozen shops opened the page to a wall of them
@@ -239,6 +242,11 @@ def list_accounts(
                 is_active=account.is_active,
                 balance=balance,
                 balance_means=account.balance_means,
+                contributed=(
+                    contributed.get(account.member_id, 0)
+                    if account.kind == ACCOUNT_MEMBER
+                    else None
+                ),
             )
         )
 
@@ -248,6 +256,7 @@ def list_accounts(
         total_owed=total_owed,
         total_credit=total_credit,
         credit_stores=credit_stores,
+        total_contributed=sum(contributed.values()),
     )
 
 
@@ -281,6 +290,7 @@ def _serialise(
                 sale_id=movement.sale_id,
                 product_name=product_names.get(movement.id),
                 expense_category=movement.expense_category,
+                contributed_by_member_id=movement.contributed_by_member_id,
                 notes=movement.notes,
                 status=movement.status,
             )
@@ -418,12 +428,29 @@ def create_adjustment(
 ) -> MovementRead:
     """Correct a balance, or set the one carried over from the spreadsheet.
 
-    `amount` arrives in the account's own terms - "Jason is owed $5,000" is +5000 on Jason's
-    account, not a sign the caller has to work out. The flip to raw cash flow happens here,
-    in the one place that knows about it.
+    Everything arrives in the account's own terms - "Jason is owed $5,000" is 5000 on
+    Jason's account, not a sign the caller has to work out. The flip to raw cash flow
+    happens here, in the one place that knows about it.
+
+    Given a `target`, the change is worked out here against the balance as it stands now,
+    with the account row locked so two people setting the same balance at once post one
+    correction between them rather than two.
     """
-    account = _require_account(db, payload.account_id)
-    flow = money.balance_for(account, payload.amount)
+    if payload.target is None:
+        account = _require_account(db, payload.account_id)
+        change = payload.amount or 0
+    else:
+        account = db.get(MoneyAccount, payload.account_id, with_for_update=True)
+        if account is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        current = money.balance_for(account, money.balances(db).get(account.id, 0))
+        change = payload.target - current
+        if change == 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="The balance is already that amount",
+            )
+    flow = money.balance_for(account, change)
 
     movement = money.record_movement(
         db,
@@ -442,7 +469,50 @@ def create_adjustment(
         after={
             "kind": MOVEMENT_ADJUSTMENT,
             "account": str(account.id),
+            "amount_cents": change,
+            "target_cents": payload.target,
+        },
+    )
+    return _one(db, movement)
+
+
+@router.post(
+    "/contributions", response_model=MovementRead, status_code=status.HTTP_201_CREATED
+)
+def create_contribution(
+    payload: ContributionCreate,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> MovementRead:
+    """Record a partner putting money in for their share of the business.
+
+    One leg, into the joint account, and nobody owed for it. Recording it as a transfer
+    from the partner's own account would say the business owes it back, which is a loan.
+    """
+    if db.get(Member, payload.member_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    money.ensure_accounts(db)
+    joint = db.scalars(select(MoneyAccount).where(MoneyAccount.kind == ACCOUNT_JOINT)).one()
+
+    movement = money.record_movement(
+        db,
+        kind=MOVEMENT_CONTRIBUTION,
+        legs=[(joint.id, payload.amount)],
+        occurred_on=payload.occurred_on,
+        member_id=member.id,
+        notes=payload.notes,
+        contributed_by_member_id=payload.member_id,
+    )
+    ledger.record_audit(
+        db,
+        entity_type="money_movement",
+        entity_id=movement.id,
+        action="create",
+        member_id=member.id,
+        after={
+            "kind": MOVEMENT_CONTRIBUTION,
             "amount_cents": payload.amount,
+            "member": str(payload.member_id),
         },
     )
     return _one(db, movement)

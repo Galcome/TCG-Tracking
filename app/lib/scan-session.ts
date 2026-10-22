@@ -130,6 +130,20 @@ export function sight(items: readonly ScanItem[], cards: readonly ReadCard[], at
   return sighting
 }
 
+/**
+ * One deliberate photo of one card. Nothing re-reads a card by itself in this mode, so the
+ * same card photographed again is another copy.
+ */
+export function photographed(
+  items: readonly ScanItem[], cards: readonly ReadCard[], at: number,
+): Extract<ScanAction, { type: 'seen' | 'quantity' }> | null {
+  const card = cards.find((read) => read.name.trim())
+  if (!card) return null
+  const key = scanKey(card)
+  if (items.some((item) => item.key === key)) return { type: 'quantity', key, delta: 1 }
+  return { type: 'seen', sighting: { at, fresh: [scanItem(card, at)], reread: [], seen: [] } }
+}
+
 function priced(item: ScanItem, lookup: CardLookup): ScanItem {
   const chosen = lookup.suggested_index === null ? undefined : lookup.candidates[lookup.suggested_index]
   if (!chosen) {

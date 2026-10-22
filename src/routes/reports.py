@@ -242,6 +242,9 @@ class MonthRead(BaseModel):
 
     month: str
     spent: MoneyOut = Field(validation_alias="spent_cents")
+    house_spent: MoneyOut = Field(validation_alias="house_spent_cents")
+    own_spent: MoneyOut = Field(validation_alias="own_spent_cents")
+    untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
     revenue: MoneyOut = Field(validation_alias="revenue_cents")
     units_sold: int
@@ -259,6 +262,54 @@ def read_by_month(
     trend chart would just be a shorter trend.
     """
     return reporting.by_month(db)
+
+
+class ValuePointRead(BaseModel):
+    model_config = _CONFIG
+
+    captured_on: date
+    market_value: MoneyOut = Field(validation_alias="market_value_cents")
+    priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
+
+
+class YearRead(BaseModel):
+    """One calendar year of trading. A null year holds everything with no date."""
+
+    model_config = _CONFIG
+
+    year: int | None
+    spent: MoneyOut = Field(validation_alias="spent_cents")
+    house_spent: MoneyOut = Field(validation_alias="house_spent_cents")
+    own_spent: MoneyOut = Field(validation_alias="own_spent_cents")
+    untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
+    revenue: MoneyOut = Field(validation_alias="revenue_cents")
+    realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
+    expenses: MoneyOut = Field(validation_alias="expenses_cents")
+
+
+class PerformanceRead(BaseModel):
+    model_config = _CONFIG
+
+    value_history: list[ValuePointRead]
+    market_value: MoneyOut = Field(validation_alias="market_value_cents")
+    priced_cost: MoneyOut = Field(validation_alias="priced_cost_cents")
+    #: Who paid for the stock bought since `tracked_from`; the two add up to its cost.
+    tracked_from: date
+    own_money: MoneyOut = Field(validation_alias="own_money_cents")
+    house_money: MoneyOut = Field(validation_alias="house_money_cents")
+    years: list[YearRead]
+
+
+@router.get("/reports/performance", response_model=PerformanceRead)
+def read_performance(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+):
+    """Value over time, who paid for the stock, and year by year: the dashboard's charts.
+
+    No period parameter, like by-month: each of these is already its own time axis.
+    """
+    return reporting.performance(db)
 
 
 @router.get("/reports/aging", response_model=list[AgingLotRead])

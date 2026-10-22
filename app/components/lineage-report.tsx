@@ -88,7 +88,7 @@ function LineageSummary({ report }: { report: LineageRollup }) {
           value={<Signed value={report.realized_profit}>{reportMoney(report.realized_profit)}</Signed>}
         />
         <SummaryMetric
-          label="Remaining cost"
+          label="Cost on hand"
           value={reportMoney(report.remaining_cost)}
           hint={plural(report.units_remaining, 'unit') + ' remaining'}
         />

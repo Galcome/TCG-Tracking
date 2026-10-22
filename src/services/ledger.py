@@ -16,9 +16,11 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.models.audit import AuditLog
+from src.models.audit import ACTION_DELETE, ACTION_RESTORE, AuditLog
+from src.models.grading import GradingSubmission
 from src.models.ledger import (
     STATUS_ACTIVE,
     STATUS_VOIDED,
@@ -28,11 +30,20 @@ from src.models.ledger import (
     Sale,
     StockMove,
 )
+from src.models.money import MoneyMovement
+from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
-from src.models.transformation import TransformationOutput
+from src.models.transformation import (
+    Transformation,
+    TransformationInput,
+    TransformationOutput,
+)
+from src.services import recovery
 from src.services.costing import Event, allocate
 
-EntityKind = Literal["purchase", "sale", "adjustment", "move", "money_movement", "transformation"]
+EntityKind = Literal[
+    "purchase", "sale", "adjustment", "move", "money_movement", "transformation", "product"
+]
 
 #: Which table an event id came from, so allocations land in the right FK column.
 _SourceKind = Literal["purchase", "sale", "adjustment_supply", "adjustment_consumer"]
@@ -246,3 +257,126 @@ def void(
         after={"status": STATUS_VOIDED},
         reason=reason,
     )
+
+
+def delete_product(db: Session, product: Product, *, member_id: uuid.UUID | None) -> None:
+    """Remove a product that should never have existed, and everything recorded against it.
+
+    For test entries and duplicates: one step instead of voiding each purchase and sale one
+    by one. Its purchases, sales, moves, adjustments, cost allocations and the money that
+    funded or came from them all go, voided rows included. The audit row left behind lists
+    what was removed, and keeps a full copy of it so `restore_product` can put it back.
+
+    A product that was opened, combined or sent for grading is refused: those link it to other
+    products' stock and cost, and removing one side would corrupt the other.
+    """
+    lock_products(db, [product.id])
+
+    linked = (
+        select(Transformation.id).where(Transformation.source_product_id == product.id),
+        select(TransformationOutput.id).where(TransformationOutput.product_id == product.id),
+        select(TransformationInput.id).where(TransformationInput.product_id == product.id),
+        select(GradingSubmission.id).where(GradingSubmission.product_id == product.id),
+    )
+    if any(db.scalar(query.limit(1)) for query in linked):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This product was opened, combined or sent for grading, which ties it to other "
+                "products. Void that first, or archive the product instead."
+            ),
+        )
+
+    purchases = db.scalars(
+        select(Purchase).where(Purchase.product_id == product.id).order_by(Purchase.created_at)
+    ).all()
+    sales = db.scalars(
+        select(Sale).where(Sale.product_id == product.id).order_by(Sale.created_at)
+    ).all()
+    purchase_ids = [purchase.id for purchase in purchases]
+    sale_ids = [sale.id for sale in sales]
+
+    def as_text(value: uuid.UUID | None) -> str | None:
+        return str(value) if value else None
+
+    before = {
+        "name": product.name,
+        "purchases": [
+            {
+                **snapshot(purchase, ["quantity", "purchase_date", "source", "status"]),
+                "landed_cost_cents": purchase.landed_cost_cents,
+                "purchased_by_member_id": as_text(purchase.purchased_by_member_id),
+            }
+            for purchase in purchases
+        ],
+        "sales": [
+            {
+                **snapshot(sale, ["quantity", "gross_amount_cents", "sale_date", "status"]),
+                "sold_by_member_id": as_text(sale.sold_by_member_id),
+            }
+            for sale in sales
+        ],
+        "records": recovery.capture(db, product.id),
+    }
+
+    # Children before parents. Money postings go with their movement (ON DELETE CASCADE);
+    # catalog mappings and market prices go with the product the same way.
+    db.execute(delete(CostAllocation).where(CostAllocation.product_id == product.id))
+    db.execute(
+        delete(MoneyMovement).where(
+            MoneyMovement.purchase_id.in_(purchase_ids) | MoneyMovement.sale_id.in_(sale_ids)
+        )
+    )
+    for model in (StockMove, Sale, InventoryAdjustment, Purchase, PriceSnapshot):
+        db.execute(delete(model).where(model.product_id == product.id))
+
+    record_audit(
+        db,
+        entity_type="product",
+        entity_id=product.id,
+        action=ACTION_DELETE,
+        member_id=member_id,
+        before=before,
+    )
+    db.delete(product)
+    db.flush()
+
+
+def restore_product(db: Session, entry: AuditLog, *, member_id: uuid.UUID | None) -> uuid.UUID:
+    """Put a deleted product back exactly as it was, from the copy its delete row kept.
+
+    A last resort for a delete that should not have happened. Everything returns with its
+    original ids, then FIFO is rebuilt so cost and profit match what they were.
+    """
+    before = entry.before or {}
+    records = before.get("records")
+    if records is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This product was deleted before deletes kept a full copy, so it cannot "
+            "be put back.",
+        )
+    if db.get(Product, entry.entity_id) is not None:
+        raise HTTPException(status_code=409, detail="This product is already back.")
+
+    try:
+        with db.begin_nested():
+            recovery.restore(db, records)
+    except IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="Something this product was recorded against no longer exists, so it "
+            "cannot be put back.",
+        ) from error
+
+    recompute_product(db, entry.entity_id)
+    record_audit(
+        db,
+        entity_type="product",
+        entity_id=entry.entity_id,
+        action=ACTION_RESTORE,
+        member_id=member_id,
+        after={"name": before.get("name"), "from_delete": str(entry.id)},
+    )
+    db.flush()
+    return entry.entity_id

@@ -47,9 +47,15 @@ TRANSFORM_CRACK = "crack"
 TRANSFORM_RIP = "rip"
 #: A raw card back from the grader as a graded one. One in, one out, plus fees.
 TRANSFORM_GRADE = "grade"
-TRANSFORM_KINDS = (TRANSFORM_CRACK, TRANSFORM_RIP, TRANSFORM_GRADE)
+#: Many products bundled into one new one - a whole set of singles sold as a single unit.
+#: The reverse direction: the inputs live in `transformation_inputs`, and there is no
+#: single source product.
+TRANSFORM_COMBINE = "combine"
+TRANSFORM_KINDS = (TRANSFORM_CRACK, TRANSFORM_RIP, TRANSFORM_GRADE, TRANSFORM_COMBINE)
 
-_KIND_CHECK = "kind IN ('crack', 'rip', 'grade')"
+_KIND_CHECK = "kind IN ('crack', 'rip', 'grade', 'combine')"
+#: A combine has many sources, recorded as inputs; everything else has exactly one.
+_SOURCE_CHECK = "(kind = 'combine') = (source_product_id IS NULL)"
 _STATUS_CHECK = "status IN ('active', 'voided')"
 
 
@@ -60,6 +66,7 @@ class Transformation(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint(_KIND_CHECK, name="ck_transformations_kind"),
         CheckConstraint(_STATUS_CHECK, name="ck_transformations_status"),
+        CheckConstraint(_SOURCE_CHECK, name="ck_transformations_source_matches_kind"),
         CheckConstraint("source_quantity > 0", name="ck_transformations_source_positive"),
         Index("ix_transformations_source", "source_product_id", "status"),
     )
@@ -67,14 +74,14 @@ class Transformation(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    source_product_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("products.id"), nullable=False
+    #: NULL only for a combine, whose sources are its inputs.
+    source_product_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("products.id"), nullable=True
     )
+    #: For a combine, every unit across all its inputs.
     source_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    #: Which bucket the source came out of.
-    source_bucket: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=BUCKET_INVENTORY
-    )
+    #: Which bucket the source came out of. NULL for a combine; each input has its own.
+    source_bucket: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     #: The day it was opened. Deliberately *not* what the outputs inherit - see below.
     occurred_on: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -140,4 +147,39 @@ class TransformationOutput(Base):
     #: the record of where it came from.
     purchase_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("purchases.id"), nullable=True
+    )
+
+
+class TransformationInput(Base):
+    """One product that went into a combine, out of one bucket, with what it cost.
+
+    The mirror of an output. Each input is consumed by its own adjustment, so undoing the
+    combine puts every card back exactly where it came from.
+    """
+
+    __tablename__ = "transformation_inputs"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_transformation_inputs_quantity_positive"),
+        CheckConstraint(
+            "cost_cents IS NULL OR cost_cents >= 0",
+            name="ck_transformation_inputs_cost_non_negative",
+        ),
+        Index("ix_transformation_inputs_transformation", "transformation_id"),
+        Index("ix_transformation_inputs_product", "product_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    transformation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("transformations.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    bucket: Mapped[str] = mapped_column(String(16), nullable=False, default=BUCKET_INVENTORY)
+
+    #: What FIFO said these units cost when they went in. NULL when that is unknown.
+    cost_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    #: The adjustment that took this input out of stock. Voiding the combine voids it.
+    consuming_adjustment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("inventory_adjustments.id"), nullable=True
     )

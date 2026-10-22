@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
 import { useApi } from '../context/AppContext';
-import { type GradingSubmission, type ProductDetail, type Transformation } from '../lib/api';
+import { type GradingSubmission, type ProductDetail, type SourcedTransformation, type Transformation } from '../lib/api';
 import { money } from '../lib/format';
 import { gradingAvailable } from '../lib/grading-drafts';
 import { canCrack, canRip } from '../lib/product-types';
@@ -23,11 +23,14 @@ function VoidTransformationDialog({ transformation, onClose }: { transformation:
     },
     onSuccess: async () => { await client.invalidateQueries(); onClose(); },
   });
-  return <Sheet title={'Undo ' + transformation.kind} open onClose={onClose} dismissDisabled={mutation.isPending}>
-    <Copy>This reverses the source and its outputs together. The server will refuse a reversal if later transactions depend on it.</Copy>
+  const combine = transformation.kind === 'combine';
+  return <Sheet title={combine ? 'Break apart' : 'Undo ' + transformation.kind} open onClose={onClose} dismissDisabled={mutation.isPending}>
+    <Copy>{combine
+      ? 'Every product goes back where it came from and the bundle is emptied. If the bundle was moved, it is moved back first. This is refused once the bundle has been sold.'
+      : 'This reverses the source and its outputs together. The server will refuse a reversal if later transactions depend on it.'}</Copy>
     <Field label="Reason" value={reason} onChangeText={setReason} editable={!mutation.isPending} />
     <ErrorNotice error={mutation.error} />
-    <Button label="Undo transformation" danger disabled={mutation.isPending || !reason.trim()} onPress={() => mutation.mutate()} />
+    <Button label={combine ? 'Break apart' : 'Undo transformation'} danger disabled={mutation.isPending || !reason.trim()} onPress={() => mutation.mutate()} />
   </Sheet>;
 }
 
@@ -35,7 +38,7 @@ function VoidTransformationDialog({ transformation, onClose }: { transformation:
  * Correct a rip or a crack. The form needs the product that was opened, which is not the
  * page's product when the record is being looked at from one of the things that came out.
  */
-function CorrectTransformationDialog({ transformation, product, onClose }: { transformation: Transformation; product: ProductDetail; onClose: () => void }) {
+function CorrectTransformationDialog({ transformation, product, onClose }: { transformation: SourcedTransformation; product: ProductDetail; onClose: () => void }) {
   const api = useApi();
   const own = transformation.source_product_id === product.id;
   const source = useQuery({ queryKey: ['product', transformation.source_product_id], queryFn: () => api.product(transformation.source_product_id), enabled: !own });
@@ -57,7 +60,7 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
   const [voiding, setVoiding] = useState<GradingSubmission | null>(null);
   const [undoing, setUndoing] = useState<Transformation | null>(null);
   const [editingSubmission, setEditingSubmission] = useState<GradingSubmission | null>(null);
-  const [correcting, setCorrecting] = useState<Transformation | null>(null);
+  const [correcting, setCorrecting] = useState<SourcedTransformation | null>(null);
   const grading = useQuery({ queryKey: ['grading', product.id], queryFn: () => api.gradingSubmissions({ product_id: product.id }) });
   const transformations = useQuery({ queryKey: ['transformations', product.id], queryFn: () => api.transformations({ product_id: product.id }) });
   const inStock = product.stats.quantity_on_hand > 0;
@@ -97,18 +100,29 @@ export function ProductOperations({ product }: { product: ProductDetail }) {
     {transformations.isPending && <Loading />}
     {transformations.data?.length === 0 && <Copy muted>No transformations.</Copy>}
     {transformations.data?.map(t => <View key={t.id} role="group" accessibilityLabel={'Transformation ' + t.id}><Card>
-      <Copy>{t.kind} · {t.status} · {t.occurred_on ?? 'No date'}</Copy>
-      <Button label={'Source: ' + t.source_product_name} onPress={() => router.push(`/products/${t.source_product_id}`)} />
-      <Copy>{t.source_quantity} from {t.source_bucket} · Source cost {money(t.source_cost)}</Copy>
-      <Copy>Inherited purchase date {t.inherited_purchase_date ?? 'unknown'} · Bulk write-off {money(t.bulk_cost)}</Copy>
+      <Copy>{t.kind === 'combine' ? 'combined' : t.kind} · {t.status} · {t.occurred_on ?? 'No date'}</Copy>
+      {t.kind === 'combine'
+        ? <>
+          <Copy>{t.inputs.length} products, {t.source_quantity} units · Cost {money(t.source_cost)}</Copy>
+          <Copy>Inherited purchase date {t.inherited_purchase_date ?? 'unknown'}</Copy>
+          {t.inputs.map(input => <View key={input.product_id + input.bucket}>
+            <Button label={'In: ' + input.product_name} onPress={() => router.push(`/products/${input.product_id}`)} />
+            <Copy>{input.quantity} from {input.bucket} · Cost {money(input.cost)}</Copy>
+          </View>)}
+        </>
+        : <>
+          <Button label={'Source: ' + t.source_product_name} onPress={() => router.push(`/products/${t.source_product_id}`)} />
+          <Copy>{t.source_quantity} from {t.source_bucket} · Source cost {money(t.source_cost)}</Copy>
+          <Copy>Inherited purchase date {t.inherited_purchase_date ?? 'unknown'} · Bulk write-off {money(t.bulk_cost)}</Copy>
+        </>}
       {t.outputs.map((output, index) => <View key={output.product_id + output.bucket + index}>
         <Button label={'Output: ' + output.product_name} onPress={() => router.push(`/products/${output.product_id}`)} />
         <Copy>{output.quantity} in {output.bucket} · Allocated cost {money(output.cost)}</Copy>
       </View>)}
       <Copy muted>{t.notes}</Copy>
       {t.status === 'active' && <Row>
-        {t.kind !== 'grade' && <Button label={'Edit ' + t.kind} onPress={() => setCorrecting(t)} />}
-        <Button label={t.kind === 'grade' ? 'Undo return' : 'Undo ' + t.kind} danger onPress={() => setUndoing(t)} />
+        {t.kind !== 'grade' && t.kind !== 'combine' && <Button label={'Edit ' + t.kind} onPress={() => setCorrecting(t)} />}
+        <Button label={t.kind === 'grade' ? 'Undo return' : t.kind === 'combine' ? 'Break apart' : 'Undo ' + t.kind} danger onPress={() => setUndoing(t)} />
       </Row>}
     </Card></View>)}
   </>;

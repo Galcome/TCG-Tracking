@@ -1,8 +1,7 @@
-"""Cracking a case open, and undoing it.
+"""Cracking a case open, ripping a box, combining products into one, and undoing them.
 
-One endpoint for now. Ripping a box and returning a card from grading are the same
-primitive with a different cost split, and they get their own endpoints when their screens
-exist rather than a `kind` parameter nobody can read at the call site.
+Each is the same primitive with a different cost split, and each gets its own endpoint
+rather than a `kind` parameter nobody can read at the call site.
 """
 
 import uuid
@@ -15,19 +14,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.dependencies import db_session, get_current_member
-from src.models.ledger import BUCKET_INVENTORY, BUCKETS, STATUS_ACTIVE
+from src.models.ledger import BUCKET_INVENTORY, BUCKETS, STATUS_ACTIVE, StockMove
 from src.models.member import Member
 from src.models.price_snapshot import PriceSnapshot
 from src.models.product import Product
+from src.models.taxonomy import Game, ProductType
 from src.models.transformation import (
+    TRANSFORM_COMBINE,
     TRANSFORM_CRACK,
     TRANSFORM_RIP,
     Transformation,
+    TransformationInput,
     TransformationOutput,
 )
 from src.schemas.ledger import VoidRequest
 from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
-from src.services import inventory, ledger, transformations
+from src.schemas.product import NAME_MAX_LENGTH
+from src.services import inventory, ledger, pricing, sets, transformations
 from src.services.costing import Event, allocate
 
 router = APIRouter()
@@ -39,6 +42,11 @@ BUCKET_PATTERN = f"^({chr(124).join(BUCKETS)})$"
 #: What marks a valuation as the estimate typed during a rip, so a corrected rip can find
 #: its own estimates again instead of leaving the wrong ones behind.
 RIP_VALUE_NOTE = "valued when ripped"
+#: What marks the bundle's valuation as the sum of its parts on the day it was made.
+COMBINE_VALUE_NOTE = "valued when combined"
+
+#: A whole set of singles is a few hundred rows; this only stops a runaway request.
+MAX_COMBINE_INPUTS = 2_000
 
 
 class OutputRequest(BaseModel):
@@ -95,6 +103,15 @@ class OutputRead(BaseModel):
     value: MoneyOutOptional = None
 
 
+class InputRead(BaseModel):
+    product_id: uuid.UUID
+    product_name: str
+    quantity: int
+    bucket: str
+    #: What FIFO said these units cost when they went in. null when that is unknown.
+    cost: MoneyOutOptional
+
+
 class TransformationRead(BaseModel):
     # populate_by_name so these can be built by field name here as well as read off
     # the ORM through the *_cents aliases.
@@ -102,10 +119,12 @@ class TransformationRead(BaseModel):
 
     id: uuid.UUID
     kind: str
-    source_product_id: uuid.UUID
-    source_product_name: str
+    #: null for a combine, whose sources are `inputs`.
+    source_product_id: uuid.UUID | None
+    source_product_name: str | None
+    #: For a combine, every unit across all its inputs.
     source_quantity: int
-    source_bucket: str
+    source_bucket: str | None
     occurred_on: date | None
     #: What the outputs are dated from - the lot the source came out of, not the day it
     #: was opened. This is what stops cracking from resetting the ageing clock.
@@ -114,12 +133,16 @@ class TransformationRead(BaseModel):
     #: What the outputs did not take, written off where it happened.
     bulk_cost: MoneyOut = Field(validation_alias="bulk_cost_cents")
     outputs: list[OutputRead]
+    #: What went into a combine. Empty for everything else.
+    inputs: list[InputRead] = []
     notes: str | None
     status: str
 
 
-def _rip_snapshots(db: Session, record: Transformation) -> list[PriceSnapshot]:
-    """The estimates this rip wrote, oldest first."""
+def _rip_snapshots(
+    db: Session, record: Transformation, note: str = RIP_VALUE_NOTE
+) -> list[PriceSnapshot]:
+    """The estimates this rip (or combine) wrote, oldest first."""
     produced = select(TransformationOutput.product_id).where(
         TransformationOutput.transformation_id == record.id
     )
@@ -129,16 +152,23 @@ def _rip_snapshots(db: Session, record: Transformation) -> list[PriceSnapshot]:
             .where(
                 PriceSnapshot.product_id.in_(produced),
                 PriceSnapshot.captured_on == record.occurred_on,
-                PriceSnapshot.notes == RIP_VALUE_NOTE,
+                PriceSnapshot.notes == note,
             )
             .order_by(PriceSnapshot.created_at)
         )
     )
 
 
+_VALUE_NOTES = {TRANSFORM_RIP: RIP_VALUE_NOTE, TRANSFORM_COMBINE: COMBINE_VALUE_NOTE}
+
+
 def _rip_values(db: Session, record: Transformation) -> dict[uuid.UUID, int]:
+    note = _VALUE_NOTES.get(record.kind)
+    if note is None:
+        return {}
     return {
-        snapshot.product_id: snapshot.value_cents for snapshot in _rip_snapshots(db, record)
+        snapshot.product_id: snapshot.value_cents
+        for snapshot in _rip_snapshots(db, record, note)
     }
 
 
@@ -149,14 +179,24 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
         .where(TransformationOutput.transformation_id == record.id)
         .order_by(TransformationOutput.bucket, Product.name)
     ).all()
-    source_name = db.scalar(select(Product.name).where(Product.id == record.source_product_id))
-    values = _rip_values(db, record) if record.kind == TRANSFORM_RIP else {}
+    source_name = (
+        db.scalar(select(Product.name).where(Product.id == record.source_product_id))
+        if record.source_product_id is not None
+        else None
+    )
+    values = _rip_values(db, record)
+    inputs = db.execute(
+        select(TransformationInput, Product.name)
+        .join(Product, Product.id == TransformationInput.product_id)
+        .where(TransformationInput.transformation_id == record.id)
+        .order_by(Product.name, TransformationInput.bucket)
+    ).all()
 
     return TransformationRead(
         id=record.id,
         kind=record.kind,
         source_product_id=record.source_product_id,
-        source_product_name=source_name or "",
+        source_product_name=source_name,
         source_quantity=record.source_quantity,
         source_bucket=record.source_bucket,
         occurred_on=record.occurred_on,
@@ -173,6 +213,16 @@ def _read(db: Session, record: Transformation) -> TransformationRead:
                 value=values.get(output.product_id),
             )
             for output, name in rows
+        ],
+        inputs=[
+            InputRead(
+                product_id=item.product_id,
+                product_name=name,
+                quantity=item.quantity,
+                bucket=item.bucket,
+                cost=item.cost_cents,
+            )
+            for item, name in inputs
         ],
         notes=record.notes,
         status=record.status,
@@ -601,16 +651,252 @@ def preview_rip(
     )
 
 
+class InputRequest(BaseModel):
+    """One product going into a combine, out of one bucket."""
+
+    product_id: uuid.UUID
+    quantity: int = Field(default=1, gt=0, le=MAX_OUTPUT_UNITS)
+    bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
+
+
+class CombinePreviewRequest(BaseModel):
+    inputs: list[InputRequest] = Field(min_length=1, max_length=MAX_COMBINE_INPUTS)
+    occurred_on: date = Field(default_factory=date.today)
+
+    @model_validator(mode="after")
+    def one_entry_per_product_and_bucket(self) -> "CombinePreviewRequest":
+        seen = {(item.product_id, item.bucket) for item in self.inputs}
+        if len(seen) != len(self.inputs):
+            raise ValueError("each product and bucket combination can only appear once")
+        return self
+
+
+class CombineRequest(CombinePreviewRequest):
+    """Bundle products into one new product - a whole set of singles sold as one unit."""
+
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    product_type_id: uuid.UUID
+    #: Omitted, the game every input shares. Inputs from different games must name one.
+    game_id: uuid.UUID | None = None
+    set_name: str | None = Field(default=None, max_length=120)
+    #: Where the bundle lands.
+    bucket: str = Field(default=BUCKET_INVENTORY, pattern=BUCKET_PATTERN)
+    notes: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name cannot be blank")
+        return stripped
+
+    @field_validator("set_name", "notes", mode="after")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
+
+
+class CombinePreviewInput(BaseModel):
+    product_id: uuid.UUID
+    product_name: str
+    quantity: int
+    bucket: str
+    #: What that bucket holds now. Less than `quantity` and the combine will be refused.
+    available: int
+    cost: MoneyOutOptional
+    #: The display estimate for the whole row. null when nothing prices it.
+    value: MoneyOutOptional
+
+
+class CombinePreviewRead(BaseModel):
+    inputs: list[CombinePreviewInput]
+    #: The bundle's cost: every input's FIFO cost added up. null when any is unknown.
+    total_cost: MoneyOutOptional
+    has_unknown_cost: bool
+    #: What the priced inputs are worth together. A floor when some have no price.
+    estimated_value: MoneyOut
+    unpriced: int
+    nonbinding: Literal[True] = True
+
+
+def _combine_products(db: Session, inputs: list[InputRequest]) -> dict[uuid.UUID, Product]:
+    found = {
+        product.id: product
+        for product in db.scalars(
+            select(Product).where(Product.id.in_({item.product_id for item in inputs}))
+        )
+    }
+    if len(found) != len({item.product_id for item in inputs}):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One of the products going in does not exist",
+        )
+    return found
+
+
+def _row_values(db: Session, inputs: list[InputRequest]) -> list[int | None]:
+    """Each input row's estimated worth: the display estimate per unit times the quantity."""
+    estimates = pricing.display_estimates(db, list({item.product_id for item in inputs}))
+    values: list[int | None] = []
+    for item in inputs:
+        estimate = estimates.get(item.product_id)
+        unit = estimate.value_cents if estimate is not None else None
+        values.append(None if unit is None else unit * item.quantity)
+    return values
+
+
+@router.post("/combine/preview", response_model=CombinePreviewRead)
+def preview_combine(
+    payload: CombinePreviewRequest,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> CombinePreviewRead:
+    """What a combine would cost and be worth, without writing anything.
+
+    Short stock is reported per row rather than refused, so the form can point at the
+    exact card that is missing.
+    """
+    products = _combine_products(db, payload.inputs)
+    held = _held(db, set(products))
+    values = _row_values(db, payload.inputs)
+
+    rows: list[CombinePreviewInput] = []
+    total: int | None = 0
+    unknown = False
+    for item, value in zip(payload.inputs, values):
+        events, _sources = ledger.load_events(db, item.product_id)
+        hypothetical = Event(
+            id=uuid.uuid4(),
+            quantity=item.quantity,
+            is_supply=False,
+            occurred_on=payload.occurred_on,
+            created_at=datetime.max.replace(tzinfo=UTC),
+        )
+        outcome = allocate([*events, hypothetical]).consumers[hypothetical.id]
+        cost = None if outcome.has_unknown_cost else outcome.cost_basis_cents
+        if cost is None:
+            unknown = True
+            total = None
+        elif total is not None:
+            total += cost
+        rows.append(
+            CombinePreviewInput(
+                product_id=item.product_id,
+                product_name=products[item.product_id].name,
+                quantity=item.quantity,
+                bucket=item.bucket,
+                available=held.get((item.product_id, item.bucket), 0),
+                cost=cost,
+                value=value,
+            )
+        )
+
+    return CombinePreviewRead(
+        inputs=rows,
+        total_cost=total,
+        has_unknown_cost=unknown,
+        estimated_value=sum(value for value in values if value is not None),
+        unpriced=sum(1 for value in values if value is None),
+    )
+
+
+@router.post("/combine", response_model=TransformationRead, status_code=status.HTTP_201_CREATED)
+def combine_products(
+    payload: CombineRequest,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> TransformationRead:
+    """Bundle products into one new product, carrying their cost and their worth across.
+
+    The cards leave stock and one bundle arrives. Its cost is what FIFO says the cards cost,
+    added up, so selling the bundle reports the same profit selling them one by one would
+    have. Its estimated value is what the cards were worth together today, kept as a dated
+    valuation - an estimate, never a cost.
+
+    Undo it to break the bundle apart: every card goes back where it came from.
+    """
+    products = _combine_products(db, payload.inputs)
+
+    if db.get(ProductType, payload.product_type_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown product type"
+        )
+    game_id = payload.game_id
+    if game_id is None:
+        games = {product.game_id for product in products.values()}
+        if len(games) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="These come from different games. Pick the game the bundle belongs to.",
+            )
+        game_id = games.pop()
+    elif db.get(Game, game_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown game"
+        )
+
+    card_set = (
+        sets.resolve(db, game_id=game_id, name=payload.set_name, member_id=member.id)
+        if payload.set_name
+        else None
+    )
+    bundle = Product(
+        name=payload.name,
+        game_id=game_id,
+        product_type_id=payload.product_type_id,
+        set_id=card_set.id if card_set else None,
+        set_name=card_set.name if card_set else None,
+        created_by_member_id=member.id,
+    )
+    db.add(bundle)
+    db.flush()
+
+    # Valued before the cards leave stock: a sold-out card can still carry a quote, but
+    # reading first keeps the figure the same one the preview showed.
+    values = _row_values(db, payload.inputs)
+
+    record = transformations.combine(
+        db,
+        product_id=bundle.id,
+        bucket=payload.bucket,
+        inputs=[
+            transformations.InputSpec(
+                product_id=item.product_id, quantity=item.quantity, bucket=item.bucket
+            )
+            for item in payload.inputs
+        ],
+        occurred_on=payload.occurred_on,
+        member_id=member.id,
+        notes=payload.notes,
+    )
+
+    # Nothing priced means nothing known about its worth. A zero would claim it is worthless.
+    priced = [value for value in values if value is not None]
+    if priced:
+        db.add(
+            PriceSnapshot(
+                product_id=bundle.id,
+                value_cents=sum(priced),
+                captured_on=payload.occurred_on,
+                created_by_member_id=member.id,
+                notes=COMBINE_VALUE_NOTE,
+            )
+        )
+        db.flush()
+    return _read(db, record)
+
+
 @router.get("", response_model=list[TransformationRead])
 def list_transformations(
     product_id: uuid.UUID | None = Query(default=None),
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session, scope="function"),
 ) -> list[TransformationRead]:
-    """What has been opened, newest first.
+    """What has been opened or combined, newest first.
 
     Filtered by `product_id` this answers both directions: what this product was opened
-    into, and what it came out of.
+    or combined into, and what it came out of.
     """
     statement = select(Transformation)
     if product_id is not None:
@@ -620,6 +906,13 @@ def list_transformations(
                 Transformation.id.in_(
                     select(TransformationOutput.transformation_id).where(
                         TransformationOutput.product_id == product_id
+                    )
+                )
+            )
+            | (
+                Transformation.id.in_(
+                    select(TransformationInput.transformation_id).where(
+                        TransformationInput.product_id == product_id
                     )
                 )
             )
@@ -651,5 +944,70 @@ def void_transformation(
             status_code=status.HTTP_409_CONFLICT, detail="This has already been voided"
         )
 
-    transformations.void(db, record, member_id=member.id, reason=payload.reason)
+    if record.kind != TRANSFORM_COMBINE:
+        transformations.void(db, record, member_id=member.id, reason=payload.reason)
+        return _read(db, record)
+
+    # Breaking a bundle apart after it was sold would put the cards back and leave the
+    # bundle owing one. Refuse that, exactly as a correction would.
+    with db.begin_nested():
+        outputs = list(
+            db.scalars(
+                select(TransformationOutput).where(
+                    TransformationOutput.transformation_id == record.id
+                )
+            )
+        )
+        produced = {output.product_id for output in outputs}
+        ledger.lock_products(db, produced)
+        for output in outputs:
+            _bring_back(db, output, member)
+        before = _held(db, produced)
+        transformations.void(db, record, member_id=member.id, reason=payload.reason)
+        _refuse_overdrawn(db, produced, before)
     return _read(db, record)
+
+
+def _bring_back(db: Session, output: TransformationOutput, member: Member) -> None:
+    """Move a bundle back to where it was combined into, so it can be taken out of there.
+
+    A bundle is stock like any other and gets moved to Store to be sold. Breaking it apart
+    takes it out of the bucket it arrived in, so wherever it sits now, it goes back there
+    first - as a recorded move, so the history still shows where it actually was.
+    """
+    held = _held(db, {output.product_id})
+    short = output.quantity - held.get((output.product_id, output.bucket), 0)
+    total = sum(held.values())
+    if total < output.quantity:
+        name = db.scalar(select(Product.name).where(Product.id == output.product_id))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{name} has already been sold, so it cannot be broken apart.",
+        )
+    for (_, bucket), quantity in sorted(held.items()):
+        if short <= 0:
+            break
+        if bucket == output.bucket or quantity <= 0:
+            continue
+        step = min(quantity, short)
+        move = StockMove(
+            product_id=output.product_id,
+            quantity=step,
+            from_bucket=bucket,
+            bucket=output.bucket,
+            moved_on=date.today(),
+            member_id=member.id,
+            notes="Brought back to be broken apart",
+            created_by_member_id=member.id,
+        )
+        db.add(move)
+        db.flush()
+        ledger.record_audit(
+            db,
+            entity_type="move",
+            entity_id=move.id,
+            action="create",
+            member_id=member.id,
+            after=ledger.snapshot(move, ["quantity", "from_bucket", "bucket", "moved_on"]),
+        )
+        short -= step

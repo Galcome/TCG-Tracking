@@ -329,3 +329,14 @@ def test_moving_a_product_to_another_game_rehomes_its_set(client, make_product, 
 
 def test_resolving_a_blank_name_makes_nothing(db, game_id):
     assert sets.resolve(db, game_id=game_id, name="   ", member_id=None) is None
+
+
+def test_the_stock_filter_lists_only_sets_in_use_by_name(client, make_product):
+    make_product("Zed card", set_name="Zzz Filter Set")
+    make_product("Aaa card", set_name="Aaa Filter Set")
+
+    listed = suggest(client, used="true", limit=200)["items"]
+
+    assert all(item["uses"] > 0 for item in listed)
+    filtered = [item["name"] for item in listed if "Filter Set" in item["name"]]
+    assert filtered == ["Aaa Filter Set", "Zzz Filter Set"]

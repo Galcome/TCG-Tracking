@@ -13,7 +13,7 @@ import {
   type Product,
   type ReadCard,
   type RipPreview,
-  type Transformation,
+  type SourcedTransformation,
 } from '../lib/api'
 import {
   buildRipPreviewPayload,
@@ -46,7 +46,7 @@ export interface RipDialogProps {
   onClose: () => void
   initialBucket?: Bucket
   /** A recorded rip being corrected: saving replaces it instead of ripping again. */
-  editing?: Transformation
+  editing?: SourcedTransformation
 }
 
 type IdentityField = 'name' | 'setName' | 'collectorNumber' | 'variant' | 'language'
