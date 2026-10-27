@@ -26,7 +26,9 @@ function IconButton({ glyph, caption, label, onPress, danger = false }: { glyph:
 // replace the market position: the Vault is valued, not priced. Elsewhere, anything no
 // feed can price (graded cards, lots) takes a typed value, which then shows as its price.
 // On desktop the actions column has a fixed width and the other two split what is left
-// evenly, so a card without Rip lines its figures up with one that has it.
+// evenly, so a card without Rip lines its figures up with one that has it. Only that desktop
+// row wraps: Android's layout engine sizes a wrapping column to its widest child rather than
+// the card, which pushed the figures and the Rip button past the card's edge on phones.
 export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit, onSell, onMove, onRip, onValue, onEditCost, onToggleHidden, onDelete }: {
   product: Product; bucket: Bucket | ''; dense: boolean; vault?: VaultHolding;
   onDetails: () => void; onEdit: () => void; onSell: () => void; onMove: () => void; onRip?: () => void; onValue?: () => void;
@@ -34,9 +36,10 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
 }) {
   const fonts = useTypography();
   const noStock = p.is_archived || p.stats.quantity_on_hand <= 0;
+  const wide = dense ? { flexGrow: 1, flexBasis: 0 } : null;
   const setRepeatsName = Boolean(p.set_name && p.name.toLocaleLowerCase().includes(p.set_name.toLocaleLowerCase()));
-  return <View role="group" accessibilityLabel={'Stock product: ' + p.name}><Card><View style={{ flexDirection: dense ? 'row' : 'column', flexWrap: 'wrap', alignItems: dense ? 'center' : 'stretch', gap: 16 }}>
-    <View style={{ flexGrow: 1, flexBasis: dense ? 0 : undefined, minWidth: dense ? 260 : undefined, gap: 8 }}>
+  return <View role="group" accessibilityLabel={'Stock product: ' + p.name}><Card><View style={dense ? { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 } : { gap: 16 }}>
+    <View style={[wide, { minWidth: dense ? 260 : undefined, gap: 8 }]}>
       <Row><View style={{ flex: 1, minWidth: 160 }}>
         <Button variant="link" label={p.name} onPress={onDetails} />
         <GameIdentity slug={p.game.slug} name={p.game.name} />
@@ -54,7 +57,7 @@ export function StockCard({ product: p, bucket, dense, vault, onDetails, onEdit,
       {p.is_archived ? <Copy muted>Archived · history retained</Copy> : null}
       {p.is_hidden ? <Copy muted>Hidden · left out of stock totals</Copy> : null}
     </View>
-    <View style={{ flexGrow: 1, flexBasis: dense ? 0 : undefined, minWidth: dense ? 250 : undefined, gap: 6 }}>
+    <View style={[wide, { minWidth: dense ? 250 : undefined, gap: 6 }]}>
       {vault ? <VaultSummary holding={vault} /> : <>
       <CostSummary product={p} />
       {!noStock && !p.market_estimate?.value && canUseFreeMarketPricing(p) ? <Button variant="link" label="Set up price" onPress={onDetails} /> : null}
