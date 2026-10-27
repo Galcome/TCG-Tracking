@@ -1,6 +1,7 @@
 import type {
   CatalogMapping,
   CatalogMappingDraft,
+  FixedCard,
   Product,
   PricingRefresh,
   PricingSuggestion,
@@ -45,7 +46,16 @@ export const FREE_MARKET_PRICING_TYPES = [
   'illumineers-quest',
   'prerelease-kit',
   'secret-lair',
+  // Only through a Complete Set mapping in practice: no single listing is a lot.
+  'lot',
 ] as const
+
+/** A mapping with this subtype prices a whole set: every numbered card in the group, summed. */
+export const COMPLETE_SET_SUBTYPE = 'Complete Set'
+
+export function isCompleteSet(subtype: string): boolean {
+  return subtype.trim().toLocaleLowerCase() === COMPLETE_SET_SUBTYPE.toLocaleLowerCase()
+}
 
 /** The server shows a typed valuation under this provider when no feed quotes the product. */
 export const MANUAL_PROVIDER = 'manual'
@@ -114,6 +124,28 @@ export function validatePricingMappingDraft(draft: CatalogMappingDraft): string 
   if (!/^\d+$/.test(draft.external_group_id.trim())) return 'Group ID must be numeric.'
   if (!draft.subtype_name.trim()) return 'Subtype / printing is required.'
   return null
+}
+
+/** One fixed-value card per line, "199/165 1200.00", for editing as plain text. */
+export function fixedCardsText(cards: FixedCard[] | undefined): string {
+  return (cards ?? []).map((card) => `${card.number} ${card.value}`).join('\n')
+}
+
+/**
+ * Read "199/165 1200.00" lines back into cards. A "$" or "=" between the two is tolerated,
+ * blank lines are skipped, and the first line that is not a card number and an amount is
+ * named in the error so the user can fix it.
+ */
+export function parseFixedCards(text: string): { cards: FixedCard[] } | { error: string } {
+  const cards: FixedCard[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const match = /^(\d+\/\d+)\s*[=:]?\s*\$?\s*(\d+(?:\.\d{1,2})?)$/.exec(line)
+    if (!match) return { error: `"${line}" should be a card number and a value, like 199/165 1200.00.` }
+    cards.push({ number: match[1], value: match[2] })
+  }
+  return { cards }
 }
 
 export function pricingRefreshSummary(result: PricingRefresh): string {
@@ -194,8 +226,10 @@ export function needsPricingSetup(
   mappings: CatalogMapping[],
 ): Product[] {
   const mapped = new Set(mappings.map((mapping) => mapping.product_id))
+  // A lot has no listing to match; it is priced by hand as a Complete Set or not at all.
   return products.filter(
-    (product) => canUseFreeMarketPricing(product) && !mapped.has(product.id),
+    (product) =>
+      canUseFreeMarketPricing(product) && product.product_type.slug !== 'lot' && !mapped.has(product.id),
   )
 }
 

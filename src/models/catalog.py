@@ -6,9 +6,19 @@ many daily quote refreshes, and creating one never changes the ledger.
 """
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database import Base
@@ -68,6 +78,12 @@ class CatalogMapping(Base, TimestampMixin):
         String(20), nullable=False, default=MAPPING_CONFIRMED
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Complete Set mappings only: `[{"number": "199/165", "value_cents": 120000}]`. Each
+    #: card is left out of the market sum and counted at its fixed CAD value instead - a
+    #: graded copy is worth what its owner says, not the raw card's price.
+    fixed_cards: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id", ondelete="SET NULL"), nullable=True
     )

@@ -11,9 +11,12 @@ import type {
 import {
   canUseFreeMarketPricing,
   catalogId,
+  fixedCardsText,
   isCertainSuggestion,
+  isCompleteSet,
   isManualEstimate,
   marketPosition,
+  parseFixedCards,
   unitPosition,
   needsPricingSetup,
   preferredSubtype,
@@ -79,6 +82,7 @@ function mapping(overrides: Partial<CatalogMapping>): CatalogMapping {
     condition: null,
     language: null,
     match_status: 'confirmed',
+    fixed_cards: [],
     notes: null,
     created_by_member_id: null,
     created_at: '2026-09-12T00:00:00Z',
@@ -97,7 +101,28 @@ test('pricing eligibility allows only ungraded supported product types', () => {
   for (const slug of ['booster-pack', 'box-set', 'collection', 'deck']) {
     assert.equal(canUseFreeMarketPricing(product({ product_type: { id: 'type', name: slug, slug, is_system: true, sort_order: 0 } })), true, slug)
   }
-  assert.equal(pricingEligibilityMessage(product({ product_type: { id: 'type', name: 'Lot', slug: 'lot', is_system: true, sort_order: 0 } })), 'Market pricing supports raw cards and sealed products only.')
+  assert.equal(pricingEligibilityMessage(product({ product_type: { id: 'type', name: 'Other', slug: 'other', is_system: true, sort_order: 0 } })), 'Market pricing supports raw cards and sealed products only.')
+  // A lot is priced as a Complete Set, so it gets the pricing controls too.
+  assert.equal(canUseFreeMarketPricing(product({ product_type: { id: 'type', name: 'Lot', slug: 'lot', is_system: true, sort_order: 0 } })), true)
+})
+
+test('fixed-value cards round-trip through their one-per-line text', () => {
+  assert.equal(isCompleteSet(' complete set '), true)
+  assert.equal(isCompleteSet('Normal'), false)
+  const cards = [{ number: '199/165', value: '1200.00' }, { number: '200/165', value: '50.50' }]
+  assert.equal(fixedCardsText(cards), '199/165 1200.00\n200/165 50.50')
+  assert.equal(fixedCardsText(undefined), '')
+  assert.deepEqual(parseFixedCards(fixedCardsText(cards)), { cards })
+  assert.deepEqual(parseFixedCards('\n 199/165 = $1200 \n\n200/165: 50.5'), {
+    cards: [{ number: '199/165', value: '1200' }, { number: '200/165', value: '50.5' }],
+  })
+  assert.deepEqual(parseFixedCards(''), { cards: [] })
+  assert.deepEqual(parseFixedCards('Charizard 1200'), {
+    error: '"Charizard 1200" should be a card number and a value, like 199/165 1200.00.',
+  })
+  assert.deepEqual(parseFixedCards('199/165 12.345'), {
+    error: '"199/165 12.345" should be a card number and a value, like 199/165 1200.00.',
+  })
 })
 
 test('market position is exact cents of the stock on hand against its remaining cost', () => {
@@ -212,7 +237,8 @@ test('set-up queue is stock that can be priced and has no listing yet', () => {
   const products = [
     product({ id: 'unmapped', product_type: box }),
     product({ id: 'mapped', product_type: box }),
-    product({ id: 'ineligible', product_type: lot }),
+    // A lot has no listing to find; it is set up by hand as a Complete Set.
+    product({ id: 'lot', product_type: lot }),
   ]
   const mapping = { ...pricingMappingDraft(null), product_id: 'mapped' } as unknown as CatalogMapping
 

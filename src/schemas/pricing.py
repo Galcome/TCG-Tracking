@@ -8,10 +8,41 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.models.catalog import CATALOG_MAPPING_STATUSES, CATALOG_PROVIDER_TCGCSV
 from src.models.market_price import QUOTE_STATUSES
-from src.schemas.money import MoneyOutOptional
+from src.schemas.money import MoneyIn, MoneyOut, MoneyOutOptional
+from src.services.pricing import set_number_key
 
 MappingStatus = Literal["confirmed", "disabled"]
 QuoteStatus = Literal["fresh", "stale", "unavailable"]
+
+#: More than any real lot holds graded; a bound so the list cannot grow without limit.
+MAX_FIXED_CARDS = 50
+
+
+class FixedCardIn(BaseModel):
+    """A card in a complete set counted at a fixed CAD value instead of its market price."""
+
+    number: str = Field(pattern=r"^\s*\d+/\d+\s*$", max_length=40)
+    value_cents: MoneyIn = Field(validation_alias="value")
+
+    @field_validator("number", mode="after")
+    @classmethod
+    def strip_number(cls, value: str) -> str:
+        return value.strip()
+
+
+def _unique_fixed_cards(cards: list[FixedCardIn] | None) -> list[FixedCardIn]:
+    # An explicit null clears the list; the column itself is never null.
+    numbers = [set_number_key(card.number) for card in cards or []]
+    if len(numbers) != len(set(numbers)):
+        raise ValueError("each card number can only be fixed once")
+    return cards or []
+
+
+class FixedCardRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    number: str
+    value: MoneyOut = Field(validation_alias="value_cents")
 
 
 class CatalogMappingCreate(BaseModel):
@@ -27,6 +58,9 @@ class CatalogMappingCreate(BaseModel):
     language: str | None = Field(default=None, max_length=40)
     match_status: MappingStatus = "confirmed"
     notes: str | None = Field(default=None, max_length=2000)
+    fixed_cards: list[FixedCardIn] = Field(default_factory=list, max_length=MAX_FIXED_CARDS)
+
+    _fixed_cards_unique = field_validator("fixed_cards", mode="after")(_unique_fixed_cards)
 
     @field_validator(
         "external_group_id",
@@ -63,6 +97,9 @@ class CatalogMappingUpdate(BaseModel):
     language: str | None = Field(default=None, max_length=40)
     match_status: MappingStatus | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    fixed_cards: list[FixedCardIn] | None = Field(default=None, max_length=MAX_FIXED_CARDS)
+
+    _fixed_cards_unique = field_validator("fixed_cards", mode="after")(_unique_fixed_cards)
 
     @field_validator(
         "external_product_id",
@@ -108,6 +145,7 @@ class CatalogMappingRead(BaseModel):
     language: str | None
     match_status: MappingStatus
     notes: str | None
+    fixed_cards: list[FixedCardRead]
     created_by_member_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime

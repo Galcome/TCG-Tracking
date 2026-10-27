@@ -61,6 +61,50 @@ def test_mapping_create_list_update_and_duplicate_guard(client, make_product):
     assert missing.status_code == 404
 
 
+def test_complete_set_mapping_keeps_fixed_value_cards(client, make_product):
+    product = make_product("151 Complete Set")
+    created = client.post(
+        "/api/v1/pricing/mappings",
+        json=mapping_payload(
+            product["id"],
+            subtype_name="Complete Set",
+            fixed_cards=[{"number": " 199/165 ", "value": "1200.00"}],
+        ),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["fixed_cards"] == [{"number": "199/165", "value": "1200.00"}]
+
+    url = f"/api/v1/pricing/mappings/{created.json()['id']}"
+    changed = client.patch(url, json={"fixed_cards": [{"number": "200/165", "value": "50.5"}]})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["fixed_cards"] == [{"number": "200/165", "value": "50.50"}]
+
+    # Fixed cards belong to the whole-set total; a single listing cannot carry them.
+    assert client.patch(url, json={"subtype_name": "Normal"}).status_code == 422
+    cleared = client.patch(url, json={"subtype_name": "Normal", "fixed_cards": None})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["fixed_cards"] == []
+
+
+@pytest.mark.parametrize(
+    "fixed_cards",
+    [
+        [{"number": "Charizard", "value": "10"}],
+        [{"number": "199/165", "value": "-1"}],
+        [{"number": "199/165", "value": "10"}, {"number": "0199/165", "value": "20"}],
+    ],
+)
+def test_fixed_value_cards_reject_bad_numbers_values_and_duplicates(
+    client, make_product, fixed_cards
+):
+    product = make_product("Bad Fixed Cards")
+    response = client.post(
+        "/api/v1/pricing/mappings",
+        json=mapping_payload(product["id"], subtype_name="Complete Set", fixed_cards=fixed_cards),
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_catalog_discovery_is_authenticated_and_returns_bounded_choices(client, monkeypatch):
     monkeypatch.setattr(
         pricing_route.pricing_service.TCGCSVProvider,
@@ -186,8 +230,8 @@ def test_mapping_create_rejects_missing_and_non_numeric_tcgcsv_fields(client, ma
 
 def test_mapping_create_rejects_graded_and_unsupported_products(client, db, game_id):
     graded_type = db.scalar(select(ProductType.id).where(ProductType.slug == "graded-card"))
-    lot_type = db.scalar(select(ProductType.id).where(ProductType.slug == "lot"))
-    assert graded_type and lot_type
+    other_type = db.scalar(select(ProductType.id).where(ProductType.slug == "other"))
+    assert graded_type and other_type
 
     def create(name, product_type_id):
         response = client.post(
@@ -206,7 +250,7 @@ def test_mapping_create_rejects_graded_and_unsupported_products(client, db, game
     assert response.status_code == 422
     assert "manual" in response.json()["detail"]
 
-    unsupported = create("Mixed Lot", lot_type)
+    unsupported = create("Playmat", other_type)
     response = client.post(
         "/api/v1/pricing/mappings", json=mapping_payload(unsupported["id"])
     )

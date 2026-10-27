@@ -111,6 +111,7 @@ def mapping(**overrides):
         "external_category_id": "1",
         "subtype_name": "Normal",
         "condition": "Near Mint",
+        "fixed_cards": [],
         "product": SimpleNamespace(
             product_type=SimpleNamespace(slug="booster-box"),
             grading_company=None,
@@ -547,6 +548,91 @@ def test_tcgcsv_provider_rejects_bad_marker_group_payload_and_missing_quote():
     )
 
 
+def complete_set_feed(prices, products):
+    urls = {
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/23237/prices": prices,
+        f"{pricing.TCGCSV_BASE_URL}/tcgplayer/3/23237/products": products,
+    }
+    return pricing.TCGCSVProvider(
+        lambda url, **_kwargs: json.dumps({"success": True, "results": urls[url]}).encode(),
+        pause=lambda _seconds: None,
+    )
+
+
+def card(product_id, number):
+    return {"productId": product_id, "extendedData": [{"name": "Number", "value": number}]}
+
+
+def test_a_complete_set_is_the_sum_of_its_numbered_cards_at_their_cheapest_printing():
+    provider = complete_set_feed(
+        prices=[
+            {"productId": 1, "subTypeName": "Normal", "marketPrice": "0.10"},
+            {"productId": 1, "subTypeName": "Reverse Holofoil", "marketPrice": "0.50"},
+            {"productId": 2, "subTypeName": "Holofoil", "marketPrice": "23.41"},
+            {"productId": 3, "subTypeName": "Holofoil", "marketPrice": "200"},
+            {"productId": 4, "subTypeName": "Normal", "marketPrice": "120"},
+            {"productId": 5, "subTypeName": "Normal", "marketPrice": None},
+            {"productId": 6, "subTypeName": "Holofoil", "marketPrice": "999"},
+        ],
+        products=[
+            card(1, "001/165"),
+            card(2, "151/165"),
+            card(3, "199/165"),  # secret rare: most of the set's value
+            {"productId": 4, "name": "151 Booster Box"},  # sealed: no number
+            card(5, "002/165"),  # no market price yet
+            card(6, "SVP 052"),  # promo numbering: not part of the set
+        ],
+    )
+    quote = provider.quote_for(
+        mapping(
+            external_category_id="3",
+            external_group_id="23237",
+            external_product_id="23237",
+            subtype_name="Complete Set",
+        ),
+        pricing.FeedRevision("r", TODAY),
+    )
+
+    assert quote.original_value == Decimal("223.51")
+    assert quote.currency == "USD"
+
+
+def test_a_complete_sets_fixed_value_card_is_left_out_of_the_market_sum():
+    provider = complete_set_feed(
+        prices=[
+            {"productId": 1, "subTypeName": "Normal", "marketPrice": "0.10"},
+            {"productId": 3, "subTypeName": "Holofoil", "marketPrice": "200"},
+        ],
+        products=[card(1, "001/165"), card(3, "199/165")],
+    )
+    quote = provider.quote_for(
+        mapping(
+            external_category_id="3",
+            external_group_id="23237",
+            subtype_name="Complete Set",
+            # Leading zeros differ from the feed's number; it is still the same card.
+            fixed_cards=[{"number": "0199/165", "value_cents": 120000}],
+        ),
+        pricing.FeedRevision("r", TODAY),
+    )
+
+    assert quote.original_value == Decimal("0.10")
+
+
+def test_a_complete_set_with_no_priced_cards_is_unavailable():
+    provider = complete_set_feed(prices=[], products=[card(1, "001/165")])
+
+    with pytest.raises(pricing.QuoteUnavailable, match="no priced numbered cards"):
+        provider.quote_for(
+            mapping(
+                external_category_id="3",
+                external_group_id="23237",
+                subtype_name="complete set",
+            ),
+            pricing.FeedRevision("r", TODAY),
+        )
+
+
 def test_tcgcsv_provider_rejects_invalid_price():
     for raw_price in ("NaN", "0", "-1", "1000001"):
         provider = pricing.TCGCSVProvider(
@@ -633,11 +719,13 @@ def test_pricing_eligibility_is_strict_about_slabs_and_product_types():
         "Market pricing is manual for graded products."
     )
 
-    for sealed in ("booster-pack", "box-set", "collection", "deck", "elite-trainer-box", "tin"):
+    for sealed in (
+        "booster-pack", "box-set", "collection", "deck", "elite-trainer-box", "tin", "lot"
+    ):
         product = SimpleNamespace(product_type=SimpleNamespace(slug=sealed))
         assert pricing.is_pricing_eligible(mapping(product=product).product), sealed
 
-    unsupported = mapping(product=SimpleNamespace(product_type=SimpleNamespace(slug="lot")))
+    unsupported = mapping(product=SimpleNamespace(product_type=SimpleNamespace(slug="other")))
     assert not pricing.is_pricing_eligible(unsupported.product)
     assert "raw cards" in pricing.eligibility_error(unsupported.product)
 
@@ -929,6 +1017,24 @@ def test_refresh_writes_current_quote_and_history_and_rounds_cad():
     assert len(db.history) == 1
     assert db.history[0].source_revision == "r"
     assert db.history[0].fx_as_of == TODAY
+
+
+def test_refresh_adds_a_complete_sets_fixed_cards_in_cad_without_conversion():
+    item = mapping(
+        subtype_name="Complete Set",
+        fixed_cards=[
+            {"number": "199/165", "value_cents": 120000},
+            {"number": "200/165", "value_cents": 5050},
+        ],
+    )
+    db = FakeDB([item])
+    provider = FakeProvider(quotes={item.id: "100.00"})
+    pricing.refresh(db, today=TODAY, now=NOW, provider=provider, fx=FakeFX(Decimal("1.35")))
+
+    current = db.currents[0]
+    assert current.original_value_cents == 10000
+    # 100.00 USD at 1.35 is 135.00 CAD; the fixed 1,200.00 and 50.50 CAD go on untouched.
+    assert current.cad_value_cents == 13500 + 120000 + 5050
 
 
 def test_refresh_handles_ineligible_unavailable_and_provider_errors():
