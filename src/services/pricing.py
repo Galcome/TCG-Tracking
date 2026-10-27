@@ -108,8 +108,18 @@ ELIGIBLE_PRODUCT_TYPE_SLUGS = frozenset(
         "illumineers-quest",
         "prerelease-kit",
         "secret-lair",
+        # Only through a Complete Set mapping in practice: no single listing is a lot.
+        "lot",
     }
 )
+
+#: A mapping with this subtype prices a whole set rather than one listing: the group's
+#: numbered cards, each at its cheapest printing, added together. TCGplayer has no
+#: listing for a complete set, so this is the only way one gets a market value.
+COMPLETE_SET_SUBTYPE = "Complete Set"
+
+#: "151/165" -> card 151 of a 165-card set.
+_SET_NUMBER = re.compile(r"(\d+)/(\d+)")
 
 
 class PricingError(RuntimeError):
@@ -634,6 +644,8 @@ class TCGCSVProvider:
         group_id = (mapping.external_group_id or "").strip()
         product_id = mapping.external_product_id.strip()
         subtype = _normalise_subtype(mapping.subtype_name)
+        if subtype == COMPLETE_SET_SUBTYPE.casefold():
+            return self._complete_set_quote(category_id, group_id, revision)
         for item in self._prices(category_id, group_id):
             if str(item.get("productId")) != product_id:
                 continue
@@ -652,6 +664,40 @@ class TCGCSVProvider:
                 source_revision=revision,
             )
         raise QuoteUnavailable("TCGCSV has no matching price for this mapping")
+
+    def _complete_set_quote(
+        self, category_id: str, group_id: str, revision: FeedRevision
+    ) -> ProviderQuote:
+        # The set is every card numbered up to its printed total. Secret rares (166/165)
+        # and unnumbered sealed listings in the same group are left out, and each card
+        # counts once at its cheapest printing so a reverse holo never inflates it.
+        prices = self._prices(category_id, group_id)
+        self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
+        products = _catalog_results(
+            self._get_bytes(f"{TCGCSV_BASE_URL}/tcgplayer/{category_id}/{group_id}/products")
+        )
+        cards = set()
+        for item in products:
+            number = _SET_NUMBER.fullmatch(_catalog_number(item) or "")
+            if number and int(number[1]) <= int(number[2]):
+                cards.add(_catalog_id(item, "productId"))
+        cheapest: dict[int, Decimal] = {}
+        for item in prices:
+            product_id = _catalog_id(item, "productId")
+            raw_price = item.get("marketPrice")
+            if product_id not in cards or raw_price is None:
+                continue
+            price = _bounded_positive_decimal(
+                raw_price,
+                maximum=MAX_PROVIDER_MARKET_PRICE,
+                message="TCGCSV returned an invalid price",
+            )
+            cheapest[product_id] = min(price, cheapest.get(product_id, price))
+        if not cheapest:
+            raise QuoteUnavailable("TCGCSV has no priced numbered cards for this set")
+        return ProviderQuote(
+            original_value=sum(cheapest.values()), currency="USD", source_revision=revision
+        )
 
 
 @dataclass(frozen=True)

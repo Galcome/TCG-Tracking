@@ -364,8 +364,8 @@ def test_the_route_reports_a_catalog_outage(client, make_product, linked_set):
 
 
 def test_the_route_refuses_what_cannot_be_priced(client, db, make_product):
-    lot_type = db.scalar(select(ProductType.id).where(ProductType.slug == "lot"))
-    item = make_product("Mixed Lot", product_type_id=str(lot_type))
+    other_type = db.scalar(select(ProductType.id).where(ProductType.slug == "other"))
+    item = make_product("Playmat", product_type_id=str(other_type))
 
     response = client.get("/api/v1/pricing/suggestion", params={"product_id": item["id"]})
 
