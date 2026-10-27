@@ -7,7 +7,11 @@ things per game:
 
 - **Links** a set we already have to its catalog group - by name first, then by a release
   date within a few days plus a similar name, which is what catches the misnamed seeds.
-- **Creates** a set for a recent release nobody has yet.
+- **Creates** a set for every released group nobody has yet, however old. A sealed box of
+  Prismatic Evolutions is still bought and sold long after its release year, and a set that
+  only exists by being typed has no group id, so the catalog lookup and daily pricing cannot
+  match its products. Age does not crowd the picker: suggestions are capped, ranked by
+  recency, and an old set only appears once its name is typed.
 
 Only groups with a real release date are considered. TCGCSV stamps a release as a bare
 midnight date; a legacy group it republishes carries the publish instant instead
@@ -32,9 +36,6 @@ from sqlalchemy.orm import Session
 from src.models.card_set import CardSet
 from src.models.taxonomy import Game
 from src.services.pricing import CatalogGroup, PricingError, TCGCSVProvider
-
-#: How far back a release is still worth creating a set for. Older sets can be typed.
-RELEASE_LOOKBACK_DAYS = 365
 
 #: How far apart the catalog's date and a seeded date may be and still be the same set.
 LINK_WINDOW_DAYS = 10
@@ -80,15 +81,9 @@ def display_name(name: str) -> str:
     return (_SET_CODE.sub("", name).strip() or name.strip())[:_NAME_LENGTH]
 
 
-def sync(
-    db: Session,
-    *,
-    provider: TCGCSVProvider | None = None,
-    today: date | None = None,
-) -> SyncSummary:
+def sync(db: Session, *, provider: TCGCSVProvider | None = None) -> SyncSummary:
     """Link and create sets for every game that has a TCGCSV category."""
     provider = provider or TCGCSVProvider()
-    reference = today or date.today()
     games = list(
         db.scalars(
             select(Game).where(Game.tcgcsv_category_id.is_not(None)).order_by(Game.slug)
@@ -102,30 +97,22 @@ def sync(
         except PricingError as error:
             errors.append(f"{game.slug}: {error}")
             continue
-        game_created, game_linked = _sync_game(db, game, groups, reference)
+        game_created, game_linked = _sync_game(db, game, groups)
         created += game_created
         linked += game_linked
     return SyncSummary(len(games), created, linked, tuple(errors))
 
 
-def _sync_game(
-    db: Session, game: Game, groups: list[CatalogGroup], today: date
-) -> tuple[int, int]:
+def _sync_game(db: Session, game: Game, groups: list[CatalogGroup]) -> tuple[int, int]:
     known = set(
         db.scalars(
             select(CardSet.tcgcsv_group_id).where(CardSet.tcgcsv_group_id.is_not(None))
         )
     )
-    earliest = today - timedelta(days=RELEASE_LOOKBACK_DAYS)
     candidates: list[tuple[CatalogGroup, date, str]] = []
     for group in groups:
         released = release_date(group.published_on)
-        if (
-            group.group_id in known
-            or released is None
-            or released < earliest
-            or _NOT_A_SET.search(group.name)
-        ):
+        if group.group_id in known or released is None or _NOT_A_SET.search(group.name):
             continue
         candidates.append((group, released, display_name(group.name)))
     candidates.sort(key=lambda item: (item[1], item[0].group_id))
