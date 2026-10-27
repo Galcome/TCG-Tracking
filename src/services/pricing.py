@@ -113,13 +113,13 @@ ELIGIBLE_PRODUCT_TYPE_SLUGS = frozenset(
     }
 )
 
-#: A mapping with this subtype prices a whole set rather than one listing: the group's
-#: numbered cards, each at its cheapest printing, added together. TCGplayer has no
+#: A mapping with this subtype prices a whole set rather than one listing: every numbered
+#: card in the group, each at its cheapest printing, added together. TCGplayer has no
 #: listing for a complete set, so this is the only way one gets a market value.
 COMPLETE_SET_SUBTYPE = "Complete Set"
 
-#: "151/165" -> card 151 of a 165-card set.
-_SET_NUMBER = re.compile(r"(\d+)/(\d+)")
+#: "151/165" or a secret rare's "199/165". Sealed listings and promos carry no such number.
+_SET_NUMBER = re.compile(r"\d+/\d+")
 
 
 class PricingError(RuntimeError):
@@ -668,19 +668,20 @@ class TCGCSVProvider:
     def _complete_set_quote(
         self, category_id: str, group_id: str, revision: FeedRevision
     ) -> ProviderQuote:
-        # The set is every card numbered up to its printed total. Secret rares (166/165)
-        # and unnumbered sealed listings in the same group are left out, and each card
-        # counts once at its cheapest printing so a reverse holo never inflates it.
+        # The set is every numbered card, secret rares (199/165) included - they are most
+        # of a modern set's value. Unnumbered sealed listings in the same group are left
+        # out, and each card counts once at its cheapest printing so a reverse holo never
+        # inflates it.
         prices = self._prices(category_id, group_id)
         self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
         products = _catalog_results(
             self._get_bytes(f"{TCGCSV_BASE_URL}/tcgplayer/{category_id}/{group_id}/products")
         )
-        cards = set()
-        for item in products:
-            number = _SET_NUMBER.fullmatch(_catalog_number(item) or "")
-            if number and int(number[1]) <= int(number[2]):
-                cards.add(_catalog_id(item, "productId"))
+        cards = {
+            _catalog_id(item, "productId")
+            for item in products
+            if _SET_NUMBER.fullmatch(_catalog_number(item) or "")
+        }
         cheapest: dict[int, Decimal] = {}
         for item in prices:
             product_id = _catalog_id(item, "productId")

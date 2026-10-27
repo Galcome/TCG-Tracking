@@ -571,13 +571,15 @@ def test_a_complete_set_is_the_sum_of_its_numbered_cards_at_their_cheapest_print
             {"productId": 3, "subTypeName": "Holofoil", "marketPrice": "200"},
             {"productId": 4, "subTypeName": "Normal", "marketPrice": "120"},
             {"productId": 5, "subTypeName": "Normal", "marketPrice": None},
+            {"productId": 6, "subTypeName": "Holofoil", "marketPrice": "999"},
         ],
         products=[
             card(1, "001/165"),
             card(2, "151/165"),
-            card(3, "205/165"),  # secret rare: not part of the set
+            card(3, "199/165"),  # secret rare: most of the set's value
             {"productId": 4, "name": "151 Booster Box"},  # sealed: no number
             card(5, "002/165"),  # no market price yet
+            card(6, "SVP 052"),  # promo numbering: not part of the set
         ],
     )
     quote = provider.quote_for(
@@ -590,7 +592,7 @@ def test_a_complete_set_is_the_sum_of_its_numbered_cards_at_their_cheapest_print
         pricing.FeedRevision("r", TODAY),
     )
 
-    assert quote.original_value == Decimal("23.51")
+    assert quote.original_value == Decimal("223.51")
     assert quote.currency == "USD"
 
 
