@@ -224,6 +224,16 @@ def _validate_mapping(values: dict, product: Product) -> None:
                     detail=f"TCGCSV {field.replace('_', ' ')} must be numeric.",
                 )
 
+    complete_set = (
+        str(values.get("subtype_name") or "").strip().casefold()
+        == pricing_service.COMPLETE_SET_SUBTYPE.casefold()
+    )
+    if values.get("fixed_cards") and not complete_set:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only a Complete Set mapping can have fixed-value cards.",
+        )
+
 
 def _conflict_if_existing(db: Session, product_id: uuid.UUID, provider: str) -> None:
     if db.scalar(
@@ -314,6 +324,7 @@ def update_mapping(
         "language": mapping.language,
         "match_status": mapping.match_status,
         "notes": mapping.notes,
+        "fixed_cards": mapping.fixed_cards,
         **changes,
     }
     _validate_mapping(candidate, mapping.product)
@@ -342,6 +353,8 @@ _LISTING_FIELDS = frozenset(
         "subtype_name",
         "condition",
         "language",
+        # A complete set's total includes these, so a changed value must be repriced now.
+        "fixed_cards",
     }
 )
 

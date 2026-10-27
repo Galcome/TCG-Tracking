@@ -111,6 +111,7 @@ def mapping(**overrides):
         "external_category_id": "1",
         "subtype_name": "Normal",
         "condition": "Near Mint",
+        "fixed_cards": [],
         "product": SimpleNamespace(
             product_type=SimpleNamespace(slug="booster-box"),
             grading_company=None,
@@ -596,6 +597,28 @@ def test_a_complete_set_is_the_sum_of_its_numbered_cards_at_their_cheapest_print
     assert quote.currency == "USD"
 
 
+def test_a_complete_sets_fixed_value_card_is_left_out_of_the_market_sum():
+    provider = complete_set_feed(
+        prices=[
+            {"productId": 1, "subTypeName": "Normal", "marketPrice": "0.10"},
+            {"productId": 3, "subTypeName": "Holofoil", "marketPrice": "200"},
+        ],
+        products=[card(1, "001/165"), card(3, "199/165")],
+    )
+    quote = provider.quote_for(
+        mapping(
+            external_category_id="3",
+            external_group_id="23237",
+            subtype_name="Complete Set",
+            # Leading zeros differ from the feed's number; it is still the same card.
+            fixed_cards=[{"number": "0199/165", "value_cents": 120000}],
+        ),
+        pricing.FeedRevision("r", TODAY),
+    )
+
+    assert quote.original_value == Decimal("0.10")
+
+
 def test_a_complete_set_with_no_priced_cards_is_unavailable():
     provider = complete_set_feed(prices=[], products=[card(1, "001/165")])
 
@@ -994,6 +1017,24 @@ def test_refresh_writes_current_quote_and_history_and_rounds_cad():
     assert len(db.history) == 1
     assert db.history[0].source_revision == "r"
     assert db.history[0].fx_as_of == TODAY
+
+
+def test_refresh_adds_a_complete_sets_fixed_cards_in_cad_without_conversion():
+    item = mapping(
+        subtype_name="Complete Set",
+        fixed_cards=[
+            {"number": "199/165", "value_cents": 120000},
+            {"number": "200/165", "value_cents": 5050},
+        ],
+    )
+    db = FakeDB([item])
+    provider = FakeProvider(quotes={item.id: "100.00"})
+    pricing.refresh(db, today=TODAY, now=NOW, provider=provider, fx=FakeFX(Decimal("1.35")))
+
+    current = db.currents[0]
+    assert current.original_value_cents == 10000
+    # 100.00 USD at 1.35 is 135.00 CAD; the fixed 1,200.00 and 50.50 CAD go on untouched.
+    assert current.cad_value_cents == 13500 + 120000 + 5050
 
 
 def test_refresh_handles_ineligible_unavailable_and_provider_errors():

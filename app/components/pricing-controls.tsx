@@ -7,6 +7,7 @@ import { colors } from '../context/ThemeContext'
 import type {
   CatalogMapping,
   CatalogMappingDraft,
+  FixedCard,
   MarketEstimate as MarketEstimateData,
   ProductDetail,
   TCGCSVCategory,
@@ -17,8 +18,12 @@ import { reportMoney } from '../lib/reports'
 import {
   canUseFreeMarketPricing,
   catalogId,
+  COMPLETE_SET_SUBTYPE,
+  fixedCardsText,
   isCertainSuggestion,
+  isCompleteSet,
   isManualEstimate,
+  parseFixedCards,
   pricingEligibilityMessage,
   preferredSubtype,
   pricingMappingDraft,
@@ -349,6 +354,7 @@ export function PricingControls({ product }: { product: ProductDetail }) {
   })
   const mapping = mappings.data?.[0] ?? null
   const [draftOverride, setDraftOverride] = useState<CatalogMappingDraft | null>(null)
+  const [fixedOverride, setFixedOverride] = useState<string | null>(null)
   const [discoveryEnabled, setDiscoveryEnabled] = useState(false)
   const [catalogSearch, setCatalogSearch] = useState('')
   const [submittedSearch, setSubmittedSearch] = useState<string | null>(null)
@@ -356,6 +362,8 @@ export function PricingControls({ product }: { product: ProductDetail }) {
   const [refreshResult, setRefreshResult] = useState<string | null>(null)
   const mutationBusy = useRef(false)
   const draft = draftOverride ?? pricingMappingDraft(mapping)
+  const fixedText = fixedOverride ?? fixedCardsText(mapping?.fixed_cards)
+  const completeSet = isCompleteSet(draft.subtype_name)
   const categoryId = catalogId(draft.external_category_id)
   const groupId = catalogId(draft.external_group_id)
 
@@ -391,14 +399,16 @@ export function PricingControls({ product }: { product: ProductDetail }) {
 
   const releaseMutation = () => { mutationBusy.current = false }
   const save = useMutation({
-    mutationFn: ({ draft: submittedDraft, currentMapping }: {
+    mutationFn: ({ draft: submittedDraft, fixedCards, currentMapping }: {
       draft: CatalogMappingDraft
+      fixedCards: FixedCard[]
       currentMapping: CatalogMapping | null
     }) => currentMapping
-      ? api.updatePricingMapping(currentMapping.id, { ...submittedDraft, match_status: 'confirmed' })
-      : api.createPricingMapping({ product_id: product.id, ...submittedDraft }),
+      ? api.updatePricingMapping(currentMapping.id, { ...submittedDraft, fixed_cards: fixedCards, match_status: 'confirmed' })
+      : api.createPricingMapping({ product_id: product.id, ...submittedDraft, fixed_cards: fixedCards }),
     onSuccess: async () => {
       setDraftOverride(null)
+      setFixedOverride(null)
       await invalidatePricing()
     },
     onSettled: releaseMutation,
@@ -466,15 +476,29 @@ export function PricingControls({ product }: { product: ProductDetail }) {
     mutationBusy.current = true
     run()
   }
+  const priceWholeSet = () => {
+    resetMutationFeedback()
+    // The set has no listing of its own; its group ID stands in for the product ID.
+    setDraftOverride((current) => ({
+      ...(current ?? draft),
+      external_product_id: (current ?? draft).external_group_id ?? '',
+      subtype_name: COMPLETE_SET_SUBTYPE,
+    }))
+  }
   const submit = () => {
     const error = validatePricingMappingDraft(draft)
     if (error) {
       setValidationError(error)
       return
     }
+    const fixed = completeSet ? parseFixedCards(fixedText) : { cards: [] }
+    if ('error' in fixed) {
+      setValidationError(fixed.error)
+      return
+    }
     // Snapshot the confirmed values so a picker update or query refetch cannot make this
     // write use a later or stale render's draft.
-    runMutation(() => save.mutate({ draft: { ...draft }, currentMapping: mapping }))
+    runMutation(() => save.mutate({ draft: { ...draft }, fixedCards: fixed.cards, currentMapping: mapping }))
   }
   const toggleMapping = () => {
     if (!mapping) return
@@ -525,6 +549,28 @@ export function PricingControls({ product }: { product: ProductDetail }) {
           <Field label="Category ID" value={draft.external_category_id ?? ''} onChangeText={(value) => updateDraft('external_category_id', value)} keyboardType="number-pad" editable={!pending} />
           <Field label="Group ID" value={draft.external_group_id ?? ''} onChangeText={(value) => updateDraft('external_group_id', value)} keyboardType="number-pad" editable={!pending} />
           <Field label="Product ID" value={draft.external_product_id} onChangeText={(value) => updateDraft('external_product_id', value)} keyboardType="number-pad" editable={!pending} />
+          {product.product_type.slug === 'lot' && !completeSet ? (
+            <>
+              <Copy muted>A lot has no listing. Pick its set&apos;s category and group above to price it as the sum of every card in the set.</Copy>
+              <Button label="Price the whole set" disabled={pending || groupId === null} onPress={priceWholeSet} />
+            </>
+          ) : null}
+          {completeSet ? (
+            <>
+              <Field
+                label="Fixed-value cards (CAD)"
+                value={fixedText}
+                onChangeText={(value) => {
+                  resetMutationFeedback()
+                  setFixedOverride(value)
+                }}
+                placeholder="199/165 1200.00"
+                multiline
+                editable={!pending}
+              />
+              <Copy muted>One card per line: its number, then its value. These count at that value and never update, e.g. a graded copy. Every other card in the set follows the market daily.</Copy>
+            </>
+          ) : null}
           {mapping ? <Copy muted>Mapping is {mapping.match_status}. Saving confirms the identity again.</Copy> : null}
           {validationError ? <Text accessibilityRole="alert" style={styles.error}>{validationError}</Text> : null}
           {mutationError ? <Text accessibilityRole="alert" style={styles.error}>{mutationError instanceof Error ? mutationError.message : 'Something went wrong'}</Text> : null}

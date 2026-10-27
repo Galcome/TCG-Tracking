@@ -122,6 +122,11 @@ COMPLETE_SET_SUBTYPE = "Complete Set"
 _SET_NUMBER = re.compile(r"\d+/\d+")
 
 
+def set_number_key(number: str) -> tuple[int, ...]:
+    """'001/165' and '1/165' are the same card; compare numbers by value, not text."""
+    return tuple(int(part) for part in number.strip().split("/"))
+
+
 class PricingError(RuntimeError):
     """A provider response cannot safely become a quote."""
 
@@ -645,7 +650,8 @@ class TCGCSVProvider:
         product_id = mapping.external_product_id.strip()
         subtype = _normalise_subtype(mapping.subtype_name)
         if subtype == COMPLETE_SET_SUBTYPE.casefold():
-            return self._complete_set_quote(category_id, group_id, revision)
+            fixed = {set_number_key(card["number"]) for card in mapping.fixed_cards}
+            return self._complete_set_quote(category_id, group_id, fixed, revision)
         for item in self._prices(category_id, group_id):
             if str(item.get("productId")) != product_id:
                 continue
@@ -666,22 +672,26 @@ class TCGCSVProvider:
         raise QuoteUnavailable("TCGCSV has no matching price for this mapping")
 
     def _complete_set_quote(
-        self, category_id: str, group_id: str, revision: FeedRevision
+        self,
+        category_id: str,
+        group_id: str,
+        fixed: set[tuple[int, ...]],
+        revision: FeedRevision,
     ) -> ProviderQuote:
         # The set is every numbered card, secret rares (199/165) included - they are most
         # of a modern set's value. Unnumbered sealed listings in the same group are left
         # out, and each card counts once at its cheapest printing so a reverse holo never
-        # inflates it.
+        # inflates it. Fixed-value cards are left out here; refresh adds their values.
         prices = self._prices(category_id, group_id)
         self._pause(TCGCSV_REQUEST_DELAY_SECONDS)
         products = _catalog_results(
             self._get_bytes(f"{TCGCSV_BASE_URL}/tcgplayer/{category_id}/{group_id}/products")
         )
-        cards = {
-            _catalog_id(item, "productId")
-            for item in products
-            if _SET_NUMBER.fullmatch(_catalog_number(item) or "")
-        }
+        cards = set()
+        for item in products:
+            number = _catalog_number(item) or ""
+            if _SET_NUMBER.fullmatch(number) and set_number_key(number) not in fixed:
+                cards.add(_catalog_id(item, "productId"))
         cheapest: dict[int, Decimal] = {}
         for item in prices:
             product_id = _catalog_id(item, "productId")
@@ -1063,7 +1073,11 @@ def refresh(
                     group_provider_attempted = True
                     quote = provider.quote_for(mapping, revisions)
                     original_cents = _cents(quote.original_value)
-                    cad_cents = _cents(quote.original_value * exchange.rate)
+                    # A complete set's fixed-value cards are already CAD and never move, so
+                    # they are added after conversion rather than through the exchange rate.
+                    cad_cents = _cents(quote.original_value * exchange.rate) + sum(
+                        card["value_cents"] for card in mapping.fixed_cards
+                    )
                 except QuoteUnavailable as error:
                     message = str(error)
                     _, had_value = _record_failure(db, mapping, current, attempted_at, message)

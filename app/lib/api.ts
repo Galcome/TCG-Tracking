@@ -68,9 +68,16 @@ export interface CatalogMapping {
   language: string | null
   match_status: 'confirmed' | 'disabled'
   notes: string | null
+  /** Complete Set only: cards counted at a fixed CAD value instead of their market price. */
+  fixed_cards: FixedCard[]
   created_by_member_id: string | null
   created_at: string
   updated_at: string
+}
+
+export interface FixedCard {
+  number: string
+  value: string
 }
 
 export type CatalogMappingDraft = Pick<
@@ -81,7 +88,9 @@ export type CatalogMappingDraft = Pick<
   | 'subtype_name'
 >
 
-export type CatalogMappingCreateInput = CatalogMappingDraft & Pick<CatalogMapping, 'product_id'>
+export type CatalogMappingCreateInput = CatalogMappingDraft & Pick<CatalogMapping, 'product_id'> & {
+  fixed_cards?: FixedCard[]
+}
 
 export interface PricingRefresh {
   attempted: number
@@ -1296,6 +1305,7 @@ export function createApi(request: ApiRequest) { return {
 
   updatePricingMapping: (id: string, changes: Partial<CatalogMappingDraft> & {
     match_status?: CatalogMapping['match_status']
+    fixed_cards?: FixedCard[]
   }) =>
     request<CatalogMapping>(`/api/v1/pricing/mappings/${id}`, {
       method: 'PATCH',
