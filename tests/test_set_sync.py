@@ -15,7 +15,6 @@ from src.models.taxonomy import Game
 from src.services import set_sync
 from src.services.pricing import CatalogGroup, PricingError
 
-TODAY = date(2026, 9, 19)
 POKEMON = 3
 LORCANA = 71
 
@@ -40,7 +39,7 @@ class FakeProvider:
 
 
 def run(db, groups: dict[int, list[CatalogGroup]], **kwargs) -> set_sync.SyncSummary:
-    return set_sync.sync(db, provider=FakeProvider(groups, **kwargs), today=TODAY)
+    return set_sync.sync(db, provider=FakeProvider(groups, **kwargs))
 
 
 def find(db, slug: str, name: str) -> CardSet | None:
@@ -202,17 +201,28 @@ def test_a_new_release_is_created_for_its_own_game(db):
         group(990012, "MEE: Mega Evolution Energies", "2026-09-01T00:00:00"),
         group(990013, "Some Set Pre-release Cards", "2026-09-01T00:00:00"),
         group(990014, "POP Series 1", "2026-09-18T20:00:06.6501221Z"),
-        group(990015, "Long Ago Set", "2024-01-01T00:00:00"),
         group(990016, "Undated Set", None),
     ],
 )
-def test_groups_that_are_not_recent_releases_are_skipped(db, skipped):
+def test_groups_that_are_not_releases_are_skipped(db, skipped):
     summary = run(db, {POKEMON: [skipped]})
 
     assert summary.created == summary.linked == 0
     assert db.scalar(
         select(CardSet.id).where(CardSet.tcgcsv_group_id == skipped.group_id)
     ) is None
+
+
+def test_an_old_release_is_created_so_its_products_can_be_priced(db):
+    summary = run(
+        db, {POKEMON: [group(23821, "SV: Prismatic Evolutions", "2025-01-17T00:00:00")]}
+    )
+
+    created = find(db, "pokemon", "Prismatic Evolutions")
+    assert created.tcgcsv_group_id == 23821
+    assert created.released_on == date(2025, 1, 17)
+    assert created.created_by_member_id is None
+    assert summary.created == 1
 
 
 def test_a_group_whose_name_is_already_taken_is_not_duplicated(db, game_id):
@@ -257,7 +267,7 @@ def test_one_game_failing_does_not_stop_the_others(db):
 
 def test_only_games_with_a_catalog_are_asked(db):
     provider = FakeProvider({})
-    summary = set_sync.sync(db, provider=provider, today=TODAY)
+    summary = set_sync.sync(db, provider=provider)
 
     synced = set(
         db.scalars(select(Game.tcgcsv_category_id).where(Game.tcgcsv_category_id.is_not(None)))
