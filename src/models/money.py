@@ -29,6 +29,9 @@ That single flip is why every event the group described falls out of one rule:
 | Sleeves bought from Joint | Joint -X | Cash down, and profit down by X |
 | Joseph puts $5,000 in for his shares | Joint +X | Cash in, and nobody is owed it |
 
+**A payback made from an open item names it** in `settles_movement_id`, so it comes off that
+row. It changes no balance: the postings above are still the whole of the money.
+
 **Store credit is value, not money.** A store-credit account sums like the joint one - it is
 something the group owns and can spend - but it is never added into a cash figure. Selling a
 $200 box for $500 of credit is $300 of realized profit and zero dollars, and both of those
@@ -243,6 +246,13 @@ class MoneyMovement(Base, TimestampMixin):
     contributed_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True
     )
+    #: Set on a transfer made with Pay back: the movement it is paying back. Money without
+    #: a link comes off the partner's oldest open items instead.
+    #:
+    #: Deliberately not a foreign key. Deleting a product removes its funding outright and
+    #: restoring it brings that row back with its original id, which is when a payback's
+    #: link has to line up again. A link to a missing row counts for nothing until then.
+    settles_movement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("members.id"), nullable=True

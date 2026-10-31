@@ -3,15 +3,17 @@ import { useMemo, useState } from 'react'
 import { Text, View } from 'react-native'
 
 import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
+import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
-import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind } from '../../lib/api'
+import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem } from '../../lib/api'
 import { money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
   expenseEditFromMovement,
   legLine,
+  openItemLine,
   storeCreditMeaning,
   transferDraftFromMovement,
   type BalanceAdjustmentDraft,
@@ -20,6 +22,8 @@ import {
 } from '../../lib/money-drafts'
 
 const PAGE_SIZE = 50
+/** Open items shown before "Show all", so a long list does not bury the ledger below it. */
+const OPEN_PREVIEW = 5
 
 const MOVEMENT_KINDS: { value: MovementKind | ''; label: string }[] = [
   { value: '', label: 'All movement types' },
@@ -116,6 +120,35 @@ function MovementLegs({ movement }: { movement: Movement }) {
   )
 }
 
+/** What a movement is about, for the line under its title. */
+function movementDetail(movement: Movement): string {
+  return [
+    movement.occurred_on ?? 'No date',
+    movement.product_name,
+    movement.expense_category ? EXPENSE_CATEGORY_LABELS[movement.expense_category] : null,
+  ].filter(Boolean).join(' · ')
+}
+
+function OpenItemCard({ item, onPayBack }: { item: OpenItem; onPayBack: () => void }) {
+  return (
+    <View role="group" accessibilityLabel={`Open: ${item.movement.product_name ?? MOVEMENT_LABELS[item.movement.kind]}`}>
+      <Card>
+        <Row>
+          <View style={{ flex: 1, minWidth: 180 }}>
+            <Copy>{MOVEMENT_LABELS[item.movement.kind]}</Copy>
+            <Copy muted>{movementDetail(item.movement)}</Copy>
+            <Copy muted>{openItemLine(item)}</Copy>
+          </View>
+          <Copy>{money(item.outstanding)}</Copy>
+        </Row>
+        <Row>
+          <Button label="Pay back" onPress={onPayBack} />
+        </Row>
+      </Card>
+    </View>
+  )
+}
+
 function MovementCard({
   movement,
   onVoid,
@@ -125,18 +158,14 @@ function MovementCard({
   onVoid: () => void
   onEdit?: () => void
 }) {
-  const canVoid = movement.status !== 'voided' && !movement.purchase_id && !movement.sale_id
+  const canVoid = movement.status !== 'voided'
   return (
     <View role="group" accessibilityLabel={movement.notes || movement.id}>
       <Card>
         <Row>
           <View style={{ flex: 1, minWidth: 180 }}>
             <Copy>{MOVEMENT_LABELS[movement.kind]}</Copy>
-            <Copy muted>
-              {movement.occurred_on ?? 'No date'}
-              {movement.product_name ? ` · ${movement.product_name}` : ''}
-              {movement.expense_category ? ` · ${EXPENSE_CATEGORY_LABELS[movement.expense_category]}` : ''}
-            </Copy>
+            <Copy muted>{movementDetail(movement)}</Copy>
           </View>
           <Copy>{money(movement.amount)}</Copy>
         </Row>
@@ -175,6 +204,27 @@ function editTarget(movement: Movement, accounts: Account[]): EditTarget | null 
   return draft ? { kind: 'adjustment', id: movement.id, account, draft } : null
 }
 
+/** A row that came from a purchase or sale opens that transaction's own form. */
+interface StockAction {
+  mode: 'edit' | 'void'
+  movement: Movement
+}
+
+function StockActionDialog({ action, onClose }: { action: StockAction; onClose: () => void }) {
+  const api = useApi()
+  const productId = action.movement.product_id ?? ''
+  const product = useQuery({ queryKey: ['product', productId], queryFn: () => api.product(productId) })
+  const id = action.movement.purchase_id ?? action.movement.sale_id
+  const kind = action.movement.purchase_id ? 'purchase' : 'sale'
+  const transaction = product.data?.history.find((row) => row.kind === kind && row.id === id)
+
+  if (product.error) return <ErrorNotice error={product.error} retry={() => void product.refetch()} />
+  if (!transaction) return <Loading />
+  return action.mode === 'edit'
+    ? <EditTransactionDialog transaction={transaction} onClose={onClose} />
+    : <VoidDialog transaction={transaction} onClose={onClose} />
+}
+
 export interface MoneyProps {
   /** Kept for route-shell parity; the screen itself owns its money actions. */
   onRecordSale?: () => void
@@ -191,13 +241,19 @@ export function Money(_props: MoneyProps = {}) {
   const [contributing, setContributing] = useState(false)
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const [voiding, setVoiding] = useState<string | null>(null)
+  const [stockAction, setStockAction] = useState<StockAction | null>(null)
+  const [hideVoided, setHideVoided] = useState(false)
+  const [payingBack, setPayingBack] = useState<OpenItem | null>(null)
+  const [allOpen, setAllOpen] = useState(false)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const open = useQuery({ queryKey: ['openItems'], queryFn: api.openItems })
   const movements = useQuery({
-    queryKey: ['movements', accountFilter, kindFilter, offset],
+    queryKey: ['movements', accountFilter, kindFilter, hideVoided, offset],
     queryFn: () => api.movements({
       account_id: accountFilter || undefined,
       kind: kindFilter || undefined,
+      include_voided: hideVoided ? false : undefined,
       limit: PAGE_SIZE,
       offset,
     }),
@@ -208,6 +264,7 @@ export function Money(_props: MoneyProps = {}) {
     [accounts.data],
   )
   const rows = movements.data?.items ?? []
+  const openItems = open.data?.items ?? []
   const spentStores = items.filter((account) => account.balance_means === 'credit' && isZeroMoney(account.balance))
   const shownAccounts = items.filter((account) => !spentStores.includes(account))
   const accountOptions = useMemo(
@@ -221,6 +278,7 @@ export function Money(_props: MoneyProps = {}) {
 
   function retry() {
     void accounts.refetch()
+    void open.refetch()
     void movements.refetch()
   }
 
@@ -278,6 +336,26 @@ export function Money(_props: MoneyProps = {}) {
         </>
       ) : null}
 
+      {openItems.length > 0 ? (
+        <>
+          <Copy>Open transactions</Copy>
+          <Copy muted>What partners paid for and have not been paid back yet, oldest first.</Copy>
+          {(allOpen ? openItems : openItems.slice(0, OPEN_PREVIEW)).map((item) => (
+            <OpenItemCard
+              key={`${item.movement.id}:${item.account_id}`}
+              item={item}
+              onPayBack={() => setPayingBack(item)}
+            />
+          ))}
+          {openItems.length > OPEN_PREVIEW ? (
+            <Button
+              label={allOpen ? 'Show fewer' : `Show all ${openItems.length}`}
+              onPress={() => setAllOpen(!allOpen)}
+            />
+          ) : null}
+        </>
+      ) : null}
+
       <Choice
         label="Account"
         value={accountFilter}
@@ -296,19 +374,36 @@ export function Money(_props: MoneyProps = {}) {
           resetMovementPage()
         }}
       />
+      <Button
+        label={hideVoided ? 'Show voided' : 'Hide voided'}
+        onPress={() => {
+          setHideVoided(!hideVoided)
+          resetMovementPage()
+        }}
+      />
       <Copy muted>{movements.data ? `${rows.length} movement${rows.length === 1 ? '' : 's'} shown${movements.data.total > rows.length ? ` of ${movements.data.total}` : ''}.` : 'Loading movements…'}</Copy>
-      <ErrorNotice error={accounts.error ?? movements.error} retry={retry} />
+      <ErrorNotice error={accounts.error ?? open.error ?? movements.error} retry={retry} />
       {accounts.isPending || movements.isPending ? <Loading /> : null}
       {movements.data && rows.length === 0 ? (
         <Card>
           <Copy muted>
-            {accountFilter || kindFilter
+            {accountFilter || kindFilter || hideVoided
               ? 'No movements match those filters.'
               : 'Nothing has moved yet. Purchases and sales will appear here.'}
           </Copy>
         </Card>
       ) : null}
       {rows.map((movement) => {
+        if (movement.purchase_id || movement.sale_id) {
+          return (
+            <MovementCard
+              key={movement.id}
+              movement={movement}
+              onVoid={() => setStockAction({ mode: 'void', movement })}
+              onEdit={() => setStockAction({ mode: 'edit', movement })}
+            />
+          )
+        }
         const target = editTarget(movement, items)
         return (
           <MovementCard
@@ -361,6 +456,23 @@ export function Money(_props: MoneyProps = {}) {
         />
       ) : null}
       {voiding ? <VoidMovementDialog id={voiding} onClose={() => setVoiding(null)} /> : null}
+      {stockAction ? <StockActionDialog key={stockAction.movement.id + stockAction.mode} action={stockAction} onClose={() => setStockAction(null)} /> : null}
+      {payingBack && accounts.data ? (
+        <TransferDialog
+          key={payingBack.movement.id + payingBack.account_id}
+          // Every account, not just active ones: a partner who left can still be owed.
+          accounts={accounts.data.items}
+          from={(accounts.data.items.find((account) => account.kind === 'joint')
+            ?? accounts.data.items.find((account) => account.id !== payingBack.account_id))?.id}
+          payingBack={{
+            movementId: payingBack.movement.id,
+            toAccountId: payingBack.account_id,
+            amount: payingBack.outstanding,
+            notes: `Paying back ${payingBack.movement.product_name ?? MOVEMENT_LABELS[payingBack.movement.kind].toLowerCase()}`,
+          }}
+          onClose={() => setPayingBack(null)}
+        />
+      ) : null}
     </Page>
   )
 }

@@ -42,6 +42,8 @@ from src.schemas.money_ledger import (
     FundingLeg,
     MovementList,
     MovementRead,
+    OpenItemList,
+    OpenItemRead,
     PostingRead,
     ProceedsLeg,
     TransferCreate,
@@ -266,11 +268,13 @@ def list_accounts(
 def _serialise(
     movements: list[MoneyMovement],
     legs_by_movement: dict[uuid.UUID, list[tuple[MoneyPosting, MoneyAccount]]],
-    product_names: dict[uuid.UUID, str],
+    products: dict[uuid.UUID, tuple[uuid.UUID, str]],
+    settleable: set[tuple[uuid.UUID, uuid.UUID]],
 ) -> list[MovementRead]:
     items: list[MovementRead] = []
     for movement in movements:
         legs = legs_by_movement.get(movement.id, [])
+        product_id, product_name = products.get(movement.id, (None, None))
         items.append(
             MovementRead(
                 id=movement.id,
@@ -288,9 +292,19 @@ def _serialise(
                 ],
                 purchase_id=movement.purchase_id,
                 sale_id=movement.sale_id,
-                product_name=product_names.get(movement.id),
+                product_id=product_id,
+                product_name=product_name,
                 expense_category=movement.expense_category,
                 contributed_by_member_id=movement.contributed_by_member_id,
+                settles_movement_id=(
+                    movement.settles_movement_id
+                    if any(
+                        (movement.settles_movement_id, account.id) in settleable
+                        for posting, account in legs
+                        if posting.delta_cents > 0
+                    )
+                    else None
+                ),
                 notes=movement.notes,
                 status=movement.status,
             )
@@ -298,9 +312,11 @@ def _serialise(
     return items
 
 
-def _product_names(db: Session, movements: list[MoneyMovement]) -> dict[uuid.UUID, str]:
-    """What each funding or proceeds movement was for, in one query per side."""
-    names: dict[uuid.UUID, str] = {}
+def _products(
+    db: Session, movements: list[MoneyMovement]
+) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
+    """The product each funding or proceeds movement was for, in one query per side."""
+    products: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
 
     for model, attribute in ((Purchase, "purchase_id"), (Sale, "sale_id")):
         wanted = {
@@ -311,20 +327,62 @@ def _product_names(db: Session, movements: list[MoneyMovement]) -> dict[uuid.UUI
         if not wanted:
             continue
         rows = db.execute(
-            select(model.id, Product.name)
+            select(model.id, Product.id, Product.name)
             .join(Product, Product.id == model.product_id)
             .where(model.id.in_(wanted))
         )
-        for record_id, name in rows:
-            names[wanted[record_id]] = name
+        for record_id, product_id, name in rows:
+            products[wanted[record_id]] = (product_id, name)
 
-    return names
+    return products
+
+
+def _read_movements(db: Session, movements: list[MoneyMovement]) -> list[MovementRead]:
+    """Serialise movements with their legs and products."""
+    legs_by_movement: dict[uuid.UUID, list[tuple[MoneyPosting, MoneyAccount]]] = {}
+    if movements:
+        rows = db.execute(
+            select(MoneyPosting, MoneyAccount)
+            .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+            .where(MoneyPosting.movement_id.in_([movement.id for movement in movements]))
+            .order_by(MoneyPosting.delta_cents)
+        )
+        for posting, account in rows:
+            legs_by_movement.setdefault(posting.movement_id, []).append((posting, account))
+    # A link can go stale: its movement gets voided, or changes who paid. Only live ones are
+    # reported, because correcting a payback posts its link again and the write checks it.
+    links = {m.settles_movement_id for m in movements if m.settles_movement_id is not None}
+    settleable = money.settleable(db, links) if links else set()
+    return _serialise(movements, legs_by_movement, _products(db, movements), settleable)
+
+
+@router.get("/open", response_model=OpenItemList)
+def list_open_items(
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> OpenItemList:
+    """What the group still owes its partners for, oldest first. See `money.open_items`."""
+    items = money.open_items(db)
+    unique = {item.movement.id: item.movement for item in items}
+    reads = {read.id: read for read in _read_movements(db, list(unique.values()))}
+    return OpenItemList(
+        items=[
+            OpenItemRead(
+                account_id=item.account.id,
+                account_name=item.account.name,
+                outstanding=item.outstanding,
+                movement=reads[item.movement.id],
+            )
+            for item in items
+        ]
+    )
 
 
 @router.get("/movements", response_model=MovementList)
 def list_movements(
     account_id: uuid.UUID | None = Query(default=None),
     kind: str | None = Query(default=None, pattern=f"^({'|'.join(MOVEMENT_KINDS)})$"),
+    include_voided: bool = Query(default=True),
     limit: int = Query(default=DEFAULT_MOVEMENT_LIMIT, ge=1, le=MAX_MOVEMENT_LIMIT),
     offset: int = Query(default=0, ge=0),
     _: Member = Depends(get_current_member),
@@ -332,12 +390,15 @@ def list_movements(
 ) -> MovementList:
     """Every movement, newest first.
 
-    Voided movements are listed and flagged rather than hidden, exactly as voided sales
-    are: a voided row is the explanation for a balance changing.
+    Voided movements are listed and flagged by default, exactly as voided sales are: a
+    voided row is the explanation for a balance changing. `include_voided=false` leaves them
+    out here rather than in the client, so the total and the paging stay right.
     """
     filters = []
     if kind:
         filters.append(MoneyMovement.kind == kind)
+    if not include_voided:
+        filters.append(MoneyMovement.status == STATUS_ACTIVE)
     if account_id is not None:
         filters.append(
             MoneyMovement.id.in_(
@@ -361,19 +422,8 @@ def list_movements(
         )
     )
 
-    legs_by_movement: dict[uuid.UUID, list[tuple[MoneyPosting, MoneyAccount]]] = {}
-    if movements:
-        rows = db.execute(
-            select(MoneyPosting, MoneyAccount)
-            .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
-            .where(MoneyPosting.movement_id.in_([movement.id for movement in movements]))
-            .order_by(MoneyPosting.delta_cents)
-        )
-        for posting, account in rows:
-            legs_by_movement.setdefault(posting.movement_id, []).append((posting, account))
-
     return MovementList(
-        items=_serialise(movements, legs_by_movement, _product_names(db, movements)),
+        items=_read_movements(db, movements),
         total=total or 0,
         limit=limit,
         offset=offset,
@@ -396,6 +446,13 @@ def create_transfer(
     source = _require_account(db, payload.from_account_id)
     destination = _require_account(db, payload.to_account_id)
 
+    settles = payload.settles_movement_id
+    if settles is not None and (settles, destination.id) not in money.settleable(db, {settles}):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"That transaction can no longer be paid back to {destination.name}",
+        )
+
     movement = money.record_movement(
         db,
         kind=MOVEMENT_TRANSFER,
@@ -403,6 +460,7 @@ def create_transfer(
         occurred_on=payload.occurred_on,
         member_id=member.id,
         notes=payload.notes,
+        settles_movement_id=settles,
     )
     ledger.record_audit(
         db,
@@ -415,6 +473,7 @@ def create_transfer(
             "amount_cents": payload.amount,
             "from": str(source.id),
             "to": str(destination.id),
+            "settles": str(settles) if settles else None,
         },
     )
     return _one(db, movement)
@@ -603,12 +662,5 @@ def void_movement(
 
 def _one(db: Session, movement: MoneyMovement) -> MovementRead:
     """Serialise a single movement the same way the list does."""
-    rows = db.execute(
-        select(MoneyPosting, MoneyAccount)
-        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
-        .where(MoneyPosting.movement_id == movement.id)
-        .order_by(MoneyPosting.delta_cents)
-    )
-    legs = {movement.id: [(posting, account) for posting, account in rows]}
-    return _serialise([movement], legs, _product_names(db, [movement]))[0]
+    return _read_movements(db, [movement])[0]
 

@@ -12,6 +12,7 @@ corrected never leaves a funding record claiming the old number.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -189,6 +190,94 @@ def balance_for(account: MoneyAccount, flow: int) -> int:
     return -flow if account.is_liability else flow
 
 
+@dataclass(frozen=True)
+class OpenItem:
+    account: MoneyAccount
+    movement: MoneyMovement
+    outstanding: int
+
+
+def settleable(db: Session, movement_ids: set[uuid.UUID]) -> set[tuple[uuid.UUID, uuid.UUID]]:
+    """Which of these movements can be paid back, as (movement, partner account) pairs.
+
+    A movement qualifies while it is active and a partner's money paid for it, which is what
+    puts it on the open items list.
+    """
+    rows = db.execute(
+        select(MoneyPosting.movement_id, MoneyPosting.account_id)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(
+            MoneyPosting.movement_id.in_(movement_ids),
+            MoneyPosting.delta_cents < 0,
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyAccount.kind == ACCOUNT_MEMBER,
+        )
+    )
+    return {(movement_id, account_id) for movement_id, account_id in rows}
+
+
+def _paid_back(db: Session) -> dict[tuple[uuid.UUID, uuid.UUID], int]:
+    """What active paybacks have put toward each (movement, partner account)."""
+    rows = db.execute(
+        select(
+            MoneyMovement.settles_movement_id,
+            MoneyPosting.account_id,
+            func.sum(MoneyPosting.delta_cents),
+        )
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyMovement.settles_movement_id.is_not(None),
+            MoneyPosting.delta_cents > 0,
+        )
+        .group_by(MoneyMovement.settles_movement_id, MoneyPosting.account_id)
+    )
+    return {(movement_id, account_id): int(total) for movement_id, account_id, total in rows}
+
+
+def open_items(db: Session) -> list[OpenItem]:
+    """What each partner is still owed for, oldest first.
+
+    A payback made from a row comes off that row. Everything else that reduced a balance
+    has no row to come off: a transfer made with Move money, a partner keeping sale cash,
+    and whatever was settled before paybacks were linked. That comes off the partner's
+    oldest items, which is the walk below: newest first, handing out the balance until it
+    runs out. The same walk means a partner's items always add up to their balance, and a
+    payback larger than its row carries over to their oldest items.
+    """
+    flows = balances(db)
+    paid_back = _paid_back(db)
+    rows = db.execute(
+        select(MoneyPosting, MoneyMovement, MoneyAccount)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyAccount.kind == ACCOUNT_MEMBER,
+            MoneyPosting.delta_cents < 0,
+        )
+        .order_by(
+            MoneyMovement.occurred_on.desc().nullslast(),
+            MoneyMovement.created_at.desc(),
+            MoneyMovement.id.desc(),
+        )
+    )
+
+    items: list[OpenItem] = []
+    unexplained: dict[uuid.UUID, int] = {}
+    for posting, movement, account in rows:
+        left = unexplained.setdefault(account.id, balance_for(account, flows.get(account.id, 0)))
+        unpaid = -posting.delta_cents - paid_back.get((movement.id, account.id), 0)
+        outstanding = min(unpaid, left)
+        if outstanding <= 0:
+            continue
+        unexplained[account.id] = left - outstanding
+        items.append(OpenItem(account=account, movement=movement, outstanding=outstanding))
+    items.reverse()
+    return items
+
+
 # -------------------------------------------------------------------------- movements
 
 
@@ -204,6 +293,7 @@ def record_movement(
     sale_id: uuid.UUID | None = None,
     expense_category: str | None = None,
     contributed_by_member_id: uuid.UUID | None = None,
+    settles_movement_id: uuid.UUID | None = None,
 ) -> MoneyMovement:
     """Write one movement and its legs. `legs` are (account_id, signed cents)."""
     movement = MoneyMovement(
@@ -213,6 +303,7 @@ def record_movement(
         sale_id=sale_id,
         expense_category=expense_category,
         contributed_by_member_id=contributed_by_member_id,
+        settles_movement_id=settles_movement_id,
         notes=notes,
         created_by_member_id=member_id,
     )
