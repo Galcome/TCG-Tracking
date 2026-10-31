@@ -74,10 +74,12 @@ function AccountCard({
   account,
   onTransfer,
   onAdjust,
+  onExpense,
 }: {
   account: Account
   onTransfer: () => void
   onAdjust: () => void
+  onExpense: () => void
 }) {
   return (
     <View role="group" accessibilityLabel={account.name}>
@@ -95,6 +97,7 @@ function AccountCard({
         <Row>
           <Button label="Move money" onPress={onTransfer} />
           <Button label="Adjust" onPress={onAdjust} />
+          <Button label="Add expense" onPress={onExpense} />
         </Row>
       </Card>
     </View>
@@ -184,6 +187,7 @@ export function Money(_props: MoneyProps = {}) {
   const [offset, setOffset] = useState(0)
   const [transferFrom, setTransferFrom] = useState<string | null>(null)
   const [adjusting, setAdjusting] = useState<Account | null>(null)
+  const [expenseFrom, setExpenseFrom] = useState<string | null>(null)
   const [contributing, setContributing] = useState(false)
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const [voiding, setVoiding] = useState<string | null>(null)
@@ -263,6 +267,7 @@ export function Money(_props: MoneyProps = {}) {
               account={account}
               onTransfer={() => setTransferFrom(account.id)}
               onAdjust={() => setAdjusting(account)}
+              onExpense={() => setExpenseFrom(account.id)}
             />
           ))}
           {spentStores.length > 0 ? (
@@ -335,6 +340,7 @@ export function Money(_props: MoneyProps = {}) {
       {transferFrom ? <TransferDialog accounts={items} from={transferFrom} onClose={() => setTransferFrom(null)} /> : null}
       {contributing ? <ContributionDialog accounts={items} onClose={() => setContributing(false)} /> : null}
       {adjusting ? <BalanceAdjustmentDialog account={adjusting} onClose={() => setAdjusting(null)} /> : null}
+      {expenseFrom ? <ExpenseDialog from={expenseFrom} onClose={() => setExpenseFrom(null)} /> : null}
       {editing?.kind === 'adjustment' ? (
         <BalanceAdjustmentDialog
           key={editing.id}
