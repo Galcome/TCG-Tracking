@@ -1,4 +1,4 @@
-import type { ExpenseCategory, FundingLeg, MovementLeg } from './api'
+import type { ExpenseCategory, FundingLeg, MovementLeg, OpenItem } from './api'
 import { money, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
@@ -393,6 +393,14 @@ export function buildBalanceAdjustmentPayload(draft: BalanceAdjustmentDraft): Ba
 
 /** One account a movement touched, in plain words. A leg's amount is signed cash flow, so for
  * a partner (a liability) money leaving means the business owes them more. */
+/** Who an open item is owed to, and how much of it is left when part has been paid back. */
+export function openItemLine(item: OpenItem): string {
+  const leg = item.movement.legs.find((candidate) => candidate.account_id === item.account_id)
+  const paid = leg ? money(leg.amount.trim().replace(/^-/, '')) : null
+  if (!paid || paid === money(item.outstanding)) return `${item.account_name} paid for this`
+  return `${item.account_name} is still owed ${money(item.outstanding)} of ${paid}`
+}
+
 export function legLine(leg: Pick<MovementLeg, 'account_name' | 'account_kind' | 'amount'>): string {
   const out = tone(leg.amount) === 'loss'
   const amount = money(leg.amount.trim().replace(/^-/, ''))

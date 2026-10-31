@@ -219,7 +219,9 @@ class MovementRead(BaseModel):
     legs: list[PostingRead]
     purchase_id: uuid.UUID | None
     sale_id: uuid.UUID | None
-    #: Filled for funding and proceeds so the ledger can say what it was for.
+    #: Filled for funding and proceeds so the ledger can say what it was for, and so a row
+    #: can open the purchase or sale behind it.
+    product_id: uuid.UUID | None = None
     product_name: str | None = None
     #: Set on expenses only.
     expense_category: str | None = None
@@ -234,6 +236,21 @@ class MovementList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class OpenItemRead(BaseModel):
+    """One thing a partner paid for that the group has not paid back yet."""
+
+    account_id: uuid.UUID
+    account_name: str
+    #: How much of this movement is still owed. Across one partner these add up to exactly
+    #: their balance.
+    outstanding: MoneyOut
+    movement: MovementRead
+
+
+class OpenItemList(BaseModel):
+    items: list[OpenItemRead]
 
 
 # -------------------------------------------------- funding attached to a purchase

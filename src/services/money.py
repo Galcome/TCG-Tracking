@@ -12,6 +12,7 @@ corrected never leaves a funding record claiming the old number.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -187,6 +188,52 @@ def balance_for(account: MoneyAccount, flow: int) -> int:
     their hands on the store's behalf.
     """
     return -flow if account.is_liability else flow
+
+
+@dataclass(frozen=True)
+class OpenItem:
+    account: MoneyAccount
+    movement: MoneyMovement
+    outstanding: int
+
+
+def open_items(db: Session) -> list[OpenItem]:
+    """What each partner is still owed for, oldest first.
+
+    Derived from the balance rather than tracked per transaction, because the balance is
+    what is true: a payback is a plain transfer, and a partner keeping sale cash settles
+    debt without any transfer at all. Whatever has reduced a balance is taken off that
+    partner's oldest items first, so the newest ones stay open and each partner's items
+    always add up to their balance, including for everything settled before this existed.
+    """
+    flows = balances(db)
+    rows = db.execute(
+        select(MoneyPosting, MoneyMovement, MoneyAccount)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyAccount.kind == ACCOUNT_MEMBER,
+            MoneyPosting.delta_cents < 0,
+        )
+        .order_by(
+            MoneyMovement.occurred_on.desc().nullslast(),
+            MoneyMovement.created_at.desc(),
+            MoneyMovement.id.desc(),
+        )
+    )
+
+    items: list[OpenItem] = []
+    unexplained: dict[uuid.UUID, int] = {}
+    for posting, movement, account in rows:
+        left = unexplained.setdefault(account.id, balance_for(account, flows.get(account.id, 0)))
+        if left <= 0:
+            continue
+        outstanding = min(-posting.delta_cents, left)
+        unexplained[account.id] = left - outstanding
+        items.append(OpenItem(account=account, movement=movement, outstanding=outstanding))
+    items.reverse()
+    return items
 
 
 # -------------------------------------------------------------------------- movements

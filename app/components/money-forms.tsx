@@ -125,18 +125,20 @@ export interface TransferDialogProps {
   onClose: () => void
   /** The posted transfer this one corrects. */
   replacing?: { id: string; draft: TransferDraft }
+  /** Paying a partner back: who gets it and how much, with the source left to choose. */
+  payingBack?: { toAccountId: string; amount: string; notes: string }
 }
 
-export function TransferDialog({ accounts, from, onClose, replacing }: TransferDialogProps) {
+export function TransferDialog({ accounts, from, onClose, replacing, payingBack }: TransferDialogProps) {
   const api = useApi()
   const initialFrom = replacing?.draft.fromAccountId ?? from ?? accounts[0]?.id ?? ''
   const [source, setSource] = useState(initialFrom)
   const [destination, setDestination] = useState(
-    replacing?.draft.toAccountId ?? accounts.find((account) => account.id !== initialFrom)?.id ?? '',
+    replacing?.draft.toAccountId ?? payingBack?.toAccountId ?? accounts.find((account) => account.id !== initialFrom)?.id ?? '',
   )
-  const [amount, setAmount] = useState(replacing?.draft.amount ?? '')
+  const [amount, setAmount] = useState(replacing?.draft.amount ?? payingBack?.amount ?? '')
   const [occurredOn, setOccurredOn] = useState(replacing?.draft.occurredOn ?? todayIso())
-  const [notes, setNotes] = useState(replacing?.draft.notes ?? '')
+  const [notes, setNotes] = useState(replacing?.draft.notes ?? payingBack?.notes ?? '')
   const [validation, setValidation] = useState<MoneyValidation>({})
   const replacement = useReplacement(replacing?.id)
   const mutation = useMoneyMutation(async (payload: Parameters<typeof api.createTransfer>[0]) => {
@@ -162,15 +164,16 @@ export function TransferDialog({ accounts, from, onClose, replacing }: TransferD
 
   return (
     <MoneySheet
-      title={replacing ? 'Edit transfer' : 'Move money'}
+      title={replacing ? 'Edit transfer' : payingBack ? 'Pay back' : 'Move money'}
       onClose={onClose}
       onSubmit={submit}
       busy={mutation.isPending}
-      submitLabel={replacing ? 'Save correction' : 'Move it'}
+      submitLabel={replacing ? 'Save correction' : payingBack ? 'Pay it back' : 'Move it'}
       error={mutation.error}
       validation={validation}
     >
       {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
+      {payingBack ? <Copy muted>A payback clears the oldest open items first.</Copy> : null}
       <Row>
         <Choice label="Out of" value={source} options={accounts.map(accountOption)} onChange={setSource} />
         <Choice label="Into" value={destination} options={accounts.map(accountOption)} onChange={setDestination} />
@@ -198,6 +201,9 @@ function transferMeaning(from: Account, to: Account, amount: string): string {
   }
   if (from.kind === 'member' && to.kind === 'joint') {
     return `${from.name} puts ${shown} into joint cash, increasing what the group owes them.`
+  }
+  if (from.kind === 'member' && to.kind === 'member') {
+    return `${from.name} pays ${to.name} ${shown}: the group owes ${to.name} that much less and ${from.name} that much more.`
   }
   if (to.kind === 'store_credit') return `${shown} moves into ${to.name} as store credit, not cash.`
   if (from.kind === 'store_credit') return `${shown} leaves ${from.name}'s store credit.`

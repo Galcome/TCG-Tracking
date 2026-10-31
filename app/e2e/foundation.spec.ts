@@ -1297,6 +1297,57 @@ test('an expense added from an account card is paid from that account', async ({
   const { id } = await response.json();
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
 });
+test('a purchase a partner paid for can be paid back, corrected from its row, voided and hidden', async ({ page, request }) => {
+  const games = await (await request.get(API + '/api/v1/games')).json();
+  const types = await (await request.get(API + '/api/v1/product-types')).json();
+  const { items } = await (await request.get(API + '/api/v1/money/accounts')).json();
+  const member = items.find((a: { name: string }) => a.name === 'E2E Tester');
+  const shared = items.find((a: { kind: string }) => a.kind === 'joint');
+  const name = 'Open item box ' + Date.now();
+  // Large enough that the partner is owed for it whatever earlier tests left on the balance.
+  const product = await (await request.post(API + '/api/v1/products', { data: {
+    name, game_id: games[0].id, product_type_id: types[0].id,
+    initial_purchase: { quantity: 1, amount: '5000.00', bucket: 'inventory', funding: [{ account_id: member.id }] },
+  } })).json();
+  const funding = await (await request.get(API + '/api/v1/money/movements?kind=funding&limit=50')).json();
+  const row = funding.items.find((m: { product_id: string }) => m.product_id === product.id);
+
+  await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Money', exact: true }).click();
+
+  await expect(page.getByText('Open transactions', { exact: true })).toBeVisible();
+  const showAll = page.getByRole('button', { name: /^Show all \d+$/ });
+  if (await showAll.count()) await showAll.click();
+  await page.getByRole('group', { name: 'Open: ' + name, exact: true }).getByRole('button', { name: 'Pay back', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Pay back', exact: true });
+  const sent = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/transfers');
+  await dialog.getByRole('button', { name: 'Pay it back', exact: true }).click();
+  const payback = await sent;
+  expect(payback.request().postDataJSON()).toMatchObject({ from_account_id: shared.id, to_account_id: member.id, notes: 'Paying back ' + name });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const { id } = await payback.json();
+  expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
+
+  const card = page.getByRole('group', { name: row.notes || row.id, exact: true });
+  await card.getByRole('button', { name: 'Edit', exact: true }).click();
+  const edit = page.getByRole('dialog', { name: 'Edit purchase', exact: true });
+  await expect(edit).toBeVisible();
+  await edit.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await card.getByRole('button', { name: 'Void', exact: true }).click();
+  await page.getByLabel('Reason', { exact: true }).fill('Reversed in test');
+  await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(card.getByText('Voided', { exact: true })).toBeVisible();
+  const voided = await (await request.get(API + '/api/v1/products/' + product.id)).json();
+  expect(voided.stats.quantity_on_hand).toBe(0);
+
+  await page.getByRole('button', { name: 'Hide voided', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show voided', exact: true }).click();
+  await expect(card).toBeVisible();
+});
 
 test('common actions sit one tap from where they are needed', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();

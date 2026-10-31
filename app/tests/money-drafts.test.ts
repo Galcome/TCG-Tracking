@@ -14,6 +14,7 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   legLine,
+  openItemLine,
   buildTransferPayload,
   expenseEditFromMovement,
   parseAdjustmentCents,
@@ -26,6 +27,8 @@ import {
   validateVoidMovementDraft,
 } from '../lib/money-drafts'
 
+import type { OpenItem } from '../lib/api'
+
 const date = '2026-09-09'
 
 test('money inputs stay decimal strings and reject zero, fractions over two places, and negatives', () => {
@@ -34,6 +37,23 @@ test('money inputs stay decimal strings and reject zero, fractions over two plac
   assert.equal(positiveMoney('0.00'), false)
   assert.equal(positiveMoney('-1.00'), false)
   assert.equal(positiveMoney('19.999'), false)
+})
+
+test('an open item says how much of that partner\'s own share is left, not of the whole purchase', () => {
+  const item = (outstanding: string) => ({
+    account_id: 'jason',
+    account_name: 'Jason',
+    outstanding,
+    movement: {
+      amount: '300.00',
+      legs: [
+        { account_id: 'jason', account_name: 'Jason', account_kind: 'member', amount: '-200.00' },
+        { account_id: 'joint', account_name: 'Joint', account_kind: 'joint', amount: '-100.00' },
+      ],
+    },
+  }) as unknown as OpenItem
+  assert.equal(openItemLine(item('200.00')), 'Jason paid for this')
+  assert.equal(openItemLine(item('50.00')), 'Jason is still owed $50.00 of $200.00')
 })
 
 test('adjustment cents are parsed exactly without float rounding', () => {

@@ -1065,6 +1065,8 @@ export interface Movement {
   legs: MovementLeg[]
   purchase_id: string | null
   sale_id: string | null
+  /** Set with `product_name` on funding and proceeds: where the purchase or sale lives. */
+  product_id?: string | null
   product_name: string | null
   /** Set on expenses only. */
   expense_category: ExpenseCategory | null
@@ -1079,6 +1081,15 @@ export interface MovementPage {
   total: number
   limit: number
   offset: number
+}
+
+/** Something a partner paid for and has not been paid back for yet. */
+export interface OpenItem {
+  account_id: string
+  account_name: string
+  /** How much of it is still owed. One partner's items add up to their balance. */
+  outstanding: string
+  movement: Movement
 }
 
 /** Who paid for a purchase. `amount` may be omitted when one account paid all of it. */
@@ -1605,8 +1616,10 @@ export function createApi(request: ApiRequest) { return {
 
   accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
 
-  movements: (params: { account_id?: string; kind?: MovementKind; limit?: number; offset?: number }) =>
+  movements: (params: { account_id?: string; kind?: MovementKind; include_voided?: boolean; limit?: number; offset?: number }) =>
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
+
+  openItems: () => request<{ items: OpenItem[] }>('/api/v1/money/open'),
 
   /** Overhead. `paid_from` omitted means the joint account paid. */
   createExpense: (expense: {
