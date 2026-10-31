@@ -295,6 +295,9 @@ export interface Dashboard {
   cost_of_sales: string
   cost_written_off: string
   total_sales: string
+  /** `total_sales - uncosted_revenue - sale_fees - cost_of_sales = realized_profit`. */
+  uncosted_revenue: string
+  sale_fees: string
   average_sale: string | null
   units_in_stock: number
   sale_count: number
@@ -352,6 +355,11 @@ export interface MonthRow {
   untracked_spent: string
   realized_profit: string
   revenue: string
+  /** `revenue - uncosted_revenue - sale_fees - cost_of_sales = realized_profit`. */
+  uncosted_revenue: string
+  sale_fees: string
+  cost_of_sales: string
+  expenses: string
   units_sold: number
   units_bought: number
 }
@@ -372,6 +380,10 @@ export interface YearRow {
   own_spent: string
   untracked_spent: string
   revenue: string
+  /** Sums to `realized_profit` as on MonthRow. */
+  uncosted_revenue: string
+  sale_fees: string
+  cost_of_sales: string
   realized_profit: string
   expenses: string
 }

@@ -86,6 +86,10 @@ class Dashboard:
     total_invested_cents: int = 0
     purchases_in_period_cents: int = 0
     total_sales_cents: int = 0
+    #: With `cost_of_sales_cents`, what takes `total_sales_cents` down to realized profit:
+    #: gross is every sale, profit only those with a known cost, after their fees.
+    uncosted_revenue_cents: int = 0
+    sale_fees_cents: int = 0
     units_in_stock: int = 0
     sale_count: int = 0
     #: Sales left out of profit because their cost is unknown.
@@ -247,6 +251,9 @@ _NET = (
 #: Net proceeds of known-cost sales only. Including the rest would inflate profit with
 #: revenue whose cost we cannot subtract.
 _NET_KNOWN = case((Sale.has_unknown_cost.is_(False), _NET), else_=0)
+#: Gross of the sales `_NET_KNOWN` leaves out, so a report can show that gap instead of
+#: revenue and profit that do not add up. What remains of the gap is fees.
+_UNCOSTED_GROSS = case((Sale.has_unknown_cost.is_(True), Sale.gross_amount_cents), else_=0)
 
 _LANDED = (
     Purchase.gross_amount_cents + Purchase.shipping_cents + Purchase.tax_cents + Purchase.fees_cents
@@ -261,16 +268,19 @@ def dashboard(db: Session, period: str = PERIOD_ALL, today: date | None = None) 
         func.coalesce(func.sum(_NET_KNOWN), 0),
         func.coalesce(func.sum(func.coalesce(Sale.cost_basis_cents, 0)), 0),
         func.coalesce(func.sum(Sale.gross_amount_cents), 0),
+        func.coalesce(func.sum(_UNCOSTED_GROSS), 0),
         func.count(),
         func.coalesce(func.sum(case((Sale.has_unknown_cost.is_(True), 1), else_=0)), 0),
     ).where(Sale.status == STATUS_ACTIVE)
     if start is not None:
         sales = sales.where(Sale.sale_date.is_not(None), Sale.sale_date >= start)
 
-    net_known, cost_of_sales, gross, count, unknown = db.execute(sales).one()
+    net_known, cost_of_sales, gross, uncosted, count, unknown = db.execute(sales).one()
     result.cost_of_sales_cents = int(cost_of_sales)
     result.realized_profit_cents = int(net_known) - int(cost_of_sales)
     result.total_sales_cents = int(gross)
+    result.uncosted_revenue_cents = int(uncosted)
+    result.sale_fees_cents = int(gross) - int(uncosted) - int(net_known)
     result.sale_count = int(count)
     result.sales_missing_cost = int(unknown)
 
@@ -849,6 +859,11 @@ class MonthRow:
     untracked_spent_cents: int = 0
     realized_profit_cents: int = 0
     revenue_cents: int = 0
+    #: What takes `revenue_cents` down to `realized_profit_cents`, as on Dashboard.
+    uncosted_revenue_cents: int = 0
+    sale_fees_cents: int = 0
+    cost_of_sales_cents: int = 0
+    expenses_cents: int = 0
     units_sold: int = 0
     units_bought: int = 0
 
@@ -912,17 +927,34 @@ def by_month(db: Session, today: date | None = None) -> list[MonthRow]:
         _NET_KNOWN,
         func.coalesce(Sale.cost_basis_cents, 0),
         Sale.gross_amount_cents,
+        _UNCOSTED_GROSS,
         Sale.quantity,
     ).where(
         Sale.status == STATUS_ACTIVE,
         Sale.sale_date.is_not(None),
         Sale.sale_date >= earliest,
     )
-    for when, net_known, cost, gross, quantity in db.execute(sales):
+    for when, net_known, cost, gross, uncosted, quantity in db.execute(sales):
         row = row_for(when)
         row.realized_profit_cents += int(net_known or 0) - int(cost or 0)
         row.revenue_cents += int(gross or 0)
+        row.uncosted_revenue_cents += int(uncosted or 0)
+        row.sale_fees_cents += int(gross or 0) - int(uncosted or 0) - int(net_known or 0)
+        row.cost_of_sales_cents += int(cost or 0)
         row.units_sold += int(quantity)
+
+    expenses = (
+        select(MoneyMovement.occurred_on, -MoneyPosting.delta_cents)
+        .select_from(MoneyPosting)
+        .join(MoneyMovement, MoneyMovement.id == MoneyPosting.movement_id)
+        .where(
+            MoneyMovement.status == STATUS_ACTIVE,
+            MoneyMovement.kind == MOVEMENT_EXPENSE,
+            MoneyMovement.occurred_on >= earliest,
+        )
+    )
+    for when, amount in db.execute(expenses):
+        row_for(when).expenses_cents += int(amount)
 
     ordered = sorted(months.values(), key=lambda row: row.month)
     return ordered[-MONTHS_SHOWN:]
@@ -1082,6 +1114,10 @@ class YearRow:
     own_spent_cents: int = 0
     untracked_spent_cents: int = 0
     revenue_cents: int = 0
+    #: What takes `revenue_cents` down to `realized_profit_cents`, as on Dashboard.
+    uncosted_revenue_cents: int = 0
+    sale_fees_cents: int = 0
+    cost_of_sales_cents: int = 0
     realized_profit_cents: int = 0
     expenses_cents: int = 0
 
@@ -1235,10 +1271,11 @@ def by_year(db: Session) -> list[YearRow]:
         row_for(year).spent_cents += int(amount or 0)
 
     sale_year = func.extract("year", Sale.sale_date)
-    for year, gross, net_known, cost in db.execute(
+    for year, gross, uncosted, net_known, cost in db.execute(
         select(
             sale_year,
             func.sum(Sale.gross_amount_cents),
+            func.sum(_UNCOSTED_GROSS),
             func.sum(_NET_KNOWN),
             func.sum(func.coalesce(Sale.cost_basis_cents, 0)),
         )
@@ -1247,6 +1284,9 @@ def by_year(db: Session) -> list[YearRow]:
     ):
         row = row_for(year)
         row.revenue_cents += int(gross or 0)
+        row.uncosted_revenue_cents += int(uncosted or 0)
+        row.sale_fees_cents += int(gross or 0) - int(uncosted or 0) - int(net_known or 0)
+        row.cost_of_sales_cents += int(cost or 0)
         row.realized_profit_cents += int(net_known or 0) - int(cost or 0)
 
     expense_year = func.extract("year", MoneyMovement.occurred_on)

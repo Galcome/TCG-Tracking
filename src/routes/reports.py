@@ -47,6 +47,9 @@ class DashboardRead(BaseModel):
     cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
     cost_written_off: MoneyOut = Field(validation_alias="cost_written_off_cents")
     total_sales: MoneyOut = Field(validation_alias="total_sales_cents")
+    #: total_sales - uncosted_revenue - sale_fees - cost_of_sales = realized_profit.
+    uncosted_revenue: MoneyOut = Field(validation_alias="uncosted_revenue_cents")
+    sale_fees: MoneyOut = Field(validation_alias="sale_fees_cents")
     average_sale: MoneyOutOptional = Field(validation_alias="average_sale_cents")
     units_in_stock: int
     sale_count: int
@@ -247,6 +250,11 @@ class MonthRead(BaseModel):
     untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
     revenue: MoneyOut = Field(validation_alias="revenue_cents")
+    #: revenue - uncosted_revenue - sale_fees - cost_of_sales = realized_profit.
+    uncosted_revenue: MoneyOut = Field(validation_alias="uncosted_revenue_cents")
+    sale_fees: MoneyOut = Field(validation_alias="sale_fees_cents")
+    cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
+    expenses: MoneyOut = Field(validation_alias="expenses_cents")
     units_sold: int
     units_bought: int
 
@@ -283,6 +291,10 @@ class YearRead(BaseModel):
     own_spent: MoneyOut = Field(validation_alias="own_spent_cents")
     untracked_spent: MoneyOut = Field(validation_alias="untracked_spent_cents")
     revenue: MoneyOut = Field(validation_alias="revenue_cents")
+    #: revenue - uncosted_revenue - sale_fees - cost_of_sales = realized_profit.
+    uncosted_revenue: MoneyOut = Field(validation_alias="uncosted_revenue_cents")
+    sale_fees: MoneyOut = Field(validation_alias="sale_fees_cents")
+    cost_of_sales: MoneyOut = Field(validation_alias="cost_of_sales_cents")
     realized_profit: MoneyOut = Field(validation_alias="realized_profit_cents")
     expenses: MoneyOut = Field(validation_alias="expenses_cents")
 
