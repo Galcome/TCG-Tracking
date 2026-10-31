@@ -276,6 +276,30 @@ test('only a balanced two-leg transfer can be re-opened', () => {
   assert.equal(transferDraftFromMovement(transfer(legs, { occurred_on: null, notes: null }), date)?.occurredOn, date)
 })
 
+test('correcting a payback keeps it on the row it pays back', () => {
+  const draft = transferDraftFromMovement(
+    transfer(
+      [{ account_id: 'jason', amount: '250.00' }, { account_id: 'joint', amount: '-250.00' }],
+      { settles_movement_id: 'row-1' },
+    ),
+    date,
+  )
+  assert.equal(draft?.settlesMovementId, 'row-1')
+  assert.equal(buildTransferPayload(draft!)?.settles_movement_id, 'row-1')
+})
+
+test('a transfer with no row sends no link', () => {
+  const draft = transferDraftFromMovement(
+    transfer(
+      [{ account_id: 'jason', amount: '250.00' }, { account_id: 'joint', amount: '-250.00' }],
+      { settles_movement_id: null },
+    ),
+    date,
+  )
+  assert.equal('settlesMovementId' in draft!, false)
+  assert.equal('settles_movement_id' in buildTransferPayload(draft!)!, false)
+})
+
 test('ledger lines say what happened to each account in plain words', () => {
   assert.equal(legLine({ account_name: 'Joseph', account_kind: 'member', amount: '-75.18' }), 'Joseph is owed $75.18 more')
   assert.equal(legLine({ account_name: 'Joseph', account_kind: 'member', amount: '41.00' }), 'Joseph is owed $41.00 less')

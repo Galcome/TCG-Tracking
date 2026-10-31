@@ -91,6 +91,8 @@ class TransferCreate(BaseModel):
     amount: MoneyIn = Field(gt=0)
     occurred_on: date = Field(default_factory=date.today)
     notes: str | None = None
+    #: The open item this pays back, when it was made with Pay back on that row.
+    settles_movement_id: uuid.UUID | None = None
 
     @field_validator("notes", mode="after")
     @classmethod
@@ -227,6 +229,9 @@ class MovementRead(BaseModel):
     expense_category: str | None = None
     #: Set on contributions only: whose share of the business it bought.
     contributed_by_member_id: uuid.UUID | None = None
+    #: Set on a payback whose movement can still be paid back to the same account, so
+    #: correcting the payback keeps it on that row.
+    settles_movement_id: uuid.UUID | None = None
     notes: str | None
     status: str
 

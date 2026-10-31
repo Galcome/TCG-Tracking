@@ -125,8 +125,8 @@ export interface TransferDialogProps {
   onClose: () => void
   /** The posted transfer this one corrects. */
   replacing?: { id: string; draft: TransferDraft }
-  /** Paying a partner back: who gets it and how much, with the source left to choose. */
-  payingBack?: { toAccountId: string; amount: string; notes: string }
+  /** Paying a partner back for one row: who gets it and how much, with the source left to choose. */
+  payingBack?: { movementId: string; toAccountId: string; amount: string; notes: string }
 }
 
 export function TransferDialog({ accounts, from, onClose, replacing, payingBack }: TransferDialogProps) {
@@ -146,13 +146,18 @@ export function TransferDialog({ accounts, from, onClose, replacing, payingBack 
     return api.createTransfer(payload)
   }, onClose)
 
+  // The row being paid back belongs to one partner. Sending the money anywhere else is an
+  // ordinary transfer, and turning Into back to that partner picks the row up again.
+  const settles = replacing?.draft.settlesMovementId ?? payingBack?.movementId
+  const settlesFor = replacing?.draft.toAccountId ?? payingBack?.toAccountId
   const draft = useMemo<TransferDraft>(() => ({
     fromAccountId: source,
     toAccountId: destination,
     amount,
     occurredOn,
     notes,
-  }), [amount, destination, notes, occurredOn, source])
+    ...(settles && destination === settlesFor ? { settlesMovementId: settles } : {}),
+  }), [amount, destination, notes, occurredOn, settles, settlesFor, source])
 
   function submit() {
     const payload = buildTransferPayload(draft)
@@ -173,7 +178,6 @@ export function TransferDialog({ accounts, from, onClose, replacing, payingBack 
       validation={validation}
     >
       {replacing ? <ReplacementNote stranded={replacement.voided && Boolean(mutation.error)} /> : null}
-      {payingBack ? <Copy muted>A payback clears the oldest open items first.</Copy> : null}
       <Row>
         <Choice label="Out of" value={source} options={accounts.map(accountOption)} onChange={setSource} />
         <Choice label="Into" value={destination} options={accounts.map(accountOption)} onChange={setDestination} />

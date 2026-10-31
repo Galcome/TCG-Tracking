@@ -1072,6 +1072,8 @@ export interface Movement {
   expense_category: ExpenseCategory | null
   /** Set on buy-ins only: whose shares it paid for. */
   contributed_by_member_id?: string | null
+  /** Set on a payback made from an open item: the movement it is paying back. */
+  settles_movement_id?: string | null
   notes: string | null
   status: string
 }
@@ -1641,6 +1643,7 @@ export function createApi(request: ApiRequest) { return {
     amount: string
     occurred_on?: string
     notes?: string | null
+    settles_movement_id?: string
   }) =>
     request<Movement>('/api/v1/money/transfers', {
       method: 'POST',

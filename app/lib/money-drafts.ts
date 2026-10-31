@@ -10,6 +10,8 @@ export interface TransferDraft {
   amount: string
   occurredOn: string
   notes: string
+  /** The open item this pays back, when it was made with Pay back on that row. */
+  settlesMovementId?: string
 }
 
 export interface BalanceAdjustmentDraft {
@@ -89,6 +91,7 @@ export interface TransferPayload {
   amount: string
   occurred_on: string
   notes: string | null
+  settles_movement_id?: string
 }
 
 export interface BalanceAdjustmentPayload {
@@ -137,6 +140,7 @@ interface PostedMovement {
   occurred_on: string | null
   notes: string | null
   expense_category?: ExpenseCategory | null
+  settles_movement_id?: string | null
 }
 
 /** A signed dollar string ("-12.50", "$5,000") as exact cents, or null when it is not one. */
@@ -201,6 +205,7 @@ export function transferDraftFromMovement(movement: PostedMovement, today: strin
     amount: dollars(to.cents!),
     occurredOn: movement.occurred_on ?? today,
     notes: movement.notes ?? '',
+    ...(movement.settles_movement_id ? { settlesMovementId: movement.settles_movement_id } : {}),
   }
 }
 
@@ -376,6 +381,7 @@ export function buildTransferPayload(draft: TransferDraft): TransferPayload | nu
     amount: draft.amount,
     occurred_on: draft.occurredOn,
     notes: draft.notes.trim() || null,
+    ...(draft.settlesMovementId ? { settles_movement_id: draft.settlesMovementId } : {}),
   }
 }
 

@@ -465,6 +465,7 @@ export function Money(_props: MoneyProps = {}) {
           from={(accounts.data.items.find((account) => account.kind === 'joint')
             ?? accounts.data.items.find((account) => account.id !== payingBack.account_id))?.id}
           payingBack={{
+            movementId: payingBack.movement.id,
             toAccountId: payingBack.account_id,
             amount: payingBack.outstanding,
             notes: `Paying back ${payingBack.movement.product_name ?? MOVEMENT_LABELS[payingBack.movement.kind].toLowerCase()}`,

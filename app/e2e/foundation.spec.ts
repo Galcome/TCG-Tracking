@@ -1324,7 +1324,7 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   const sent = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/transfers');
   await dialog.getByRole('button', { name: 'Pay it back', exact: true }).click();
   const payback = await sent;
-  expect(payback.request().postDataJSON()).toMatchObject({ from_account_id: shared.id, to_account_id: member.id, notes: 'Paying back ' + name });
+  expect(payback.request().postDataJSON()).toMatchObject({ from_account_id: shared.id, to_account_id: member.id, notes: 'Paying back ' + name, settles_movement_id: row.id });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const { id } = await payback.json();
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();

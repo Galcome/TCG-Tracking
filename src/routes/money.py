@@ -269,6 +269,7 @@ def _serialise(
     movements: list[MoneyMovement],
     legs_by_movement: dict[uuid.UUID, list[tuple[MoneyPosting, MoneyAccount]]],
     products: dict[uuid.UUID, tuple[uuid.UUID, str]],
+    settleable: set[tuple[uuid.UUID, uuid.UUID]],
 ) -> list[MovementRead]:
     items: list[MovementRead] = []
     for movement in movements:
@@ -295,6 +296,15 @@ def _serialise(
                 product_name=product_name,
                 expense_category=movement.expense_category,
                 contributed_by_member_id=movement.contributed_by_member_id,
+                settles_movement_id=(
+                    movement.settles_movement_id
+                    if any(
+                        (movement.settles_movement_id, account.id) in settleable
+                        for posting, account in legs
+                        if posting.delta_cents > 0
+                    )
+                    else None
+                ),
                 notes=movement.notes,
                 status=movement.status,
             )
@@ -339,7 +349,11 @@ def _read_movements(db: Session, movements: list[MoneyMovement]) -> list[Movemen
         )
         for posting, account in rows:
             legs_by_movement.setdefault(posting.movement_id, []).append((posting, account))
-    return _serialise(movements, legs_by_movement, _products(db, movements))
+    # A link can go stale: its movement gets voided, or changes who paid. Only live ones are
+    # reported, because correcting a payback posts its link again and the write checks it.
+    links = {m.settles_movement_id for m in movements if m.settles_movement_id is not None}
+    settleable = money.settleable(db, links) if links else set()
+    return _serialise(movements, legs_by_movement, _products(db, movements), settleable)
 
 
 @router.get("/open", response_model=OpenItemList)
@@ -432,6 +446,13 @@ def create_transfer(
     source = _require_account(db, payload.from_account_id)
     destination = _require_account(db, payload.to_account_id)
 
+    settles = payload.settles_movement_id
+    if settles is not None and (settles, destination.id) not in money.settleable(db, {settles}):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"That transaction can no longer be paid back to {destination.name}",
+        )
+
     movement = money.record_movement(
         db,
         kind=MOVEMENT_TRANSFER,
@@ -439,6 +460,7 @@ def create_transfer(
         occurred_on=payload.occurred_on,
         member_id=member.id,
         notes=payload.notes,
+        settles_movement_id=settles,
     )
     ledger.record_audit(
         db,
@@ -451,6 +473,7 @@ def create_transfer(
             "amount_cents": payload.amount,
             "from": str(source.id),
             "to": str(destination.id),
+            "settles": str(settles) if settles else None,
         },
     )
     return _one(db, movement)
