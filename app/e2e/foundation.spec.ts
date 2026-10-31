@@ -1281,6 +1281,22 @@ test('an expense takes two fields from Add, pays from joint and lowers net profi
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
   expect((await board()).net_profit).toBe(before.net_profit);
 });
+test('an expense added from an account card is paid from that account', async ({ page, request }) => {
+  await signIn(page);
+  const { items } = await (await request.get(API + '/api/v1/money/accounts')).json();
+  const member = items.find((a: { name: string }) => a.name === 'E2E Tester');
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Money', exact: true }).click();
+  await page.getByRole('group', { name: member.name, exact: true }).getByRole('button', { name: 'Add expense', exact: true }).click();
+  await page.getByLabel('How much', { exact: true }).fill('4.56');
+  const created = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/expenses');
+  await page.getByRole('button', { name: 'Save expense', exact: true }).click();
+  const response = await created;
+  expect(response.request().postDataJSON().paid_from).toEqual([{ account_id: member.id }]);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const { id } = await response.json();
+  expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
+});
 
 test('common actions sit one tap from where they are needed', async ({ page, request }) => {
   const games = await (await request.get(API + '/api/v1/games')).json();

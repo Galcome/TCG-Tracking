@@ -444,9 +444,11 @@ export interface ExpenseDialogProps {
   onClose: () => void
   /** The posted expense this one corrects. */
   replacing?: { id: string; edit: ExpenseEdit }
+  /** The account the expense starts as paid from; the joint account when omitted. */
+  from?: string
 }
 
-export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
+export function ExpenseDialog({ onClose, replacing, from }: ExpenseDialogProps) {
   const api = useApi()
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const accounts = useMemo(
@@ -460,7 +462,7 @@ export function ExpenseDialog({ onClose, replacing }: ExpenseDialogProps) {
   const [addHst, setAddHst] = useState(false)
   const withHst = addHst ? withOntarioHst(amount) : null
   const total = withHst ?? amount
-  const [chosenAccount, setPaidFrom] = useState<string | null>(replacing?.edit.paidFrom || null)
+  const [chosenAccount, setPaidFrom] = useState<string | null>(replacing?.edit.paidFrom || from || null)
   const [split, setSplit] = useState<AllocationDraft[] | null>(
     replacing?.edit.split?.map((leg) => ({ kind: 'account', accountId: leg.accountId, store: '', amount: leg.amount })) ?? null,
   )
