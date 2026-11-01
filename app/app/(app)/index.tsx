@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui';
 import { PeriodSelector } from '../../components/period-selector';
@@ -10,6 +10,7 @@ import { useTypography } from '../../context/TypographyContext';
 import { usePeriodPreference } from '../../lib/period-preference';
 import { lastChange } from '../../lib/charts';
 import { money, percent } from '../../lib/format';
+import { minus, tradingDeductions } from '../../lib/reports';
 import type { Dashboard as DashboardData, Performance, Period } from '../../lib/api';
 
 /** Shrink unusually long figures to fit a phone card; normal values keep a large headline. */
@@ -40,14 +41,30 @@ function InventoryValue({ data, history, width }: { data: DashboardData; history
   </Card>;
 }
 
-/** The reporting period sits in this card because it is the only one the period changes. */
+function SumLine({ label, value, color, total }: { label: string; value: string; color?: string; total?: boolean }) {
+  const fonts = useTypography();
+  const font = total ? fonts.strong : fonts.body;
+  return <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingTop: total ? 6 : 0, borderTopWidth: total ? 1 : 0, borderColor: colors.edge }}>
+    <Text style={{ color: colors.text, fontFamily: font, fontSize: 14, flexShrink: 1 }}>{label}</Text>
+    <Text style={{ color: color ?? colors.text, fontFamily: font, fontSize: 14, fontVariant: ['tabular-nums'], flexShrink: 1 }}>{value}</Text>
+  </View>;
+}
+
+/** The sum behind the headline, top to bottom, so every figure shows where it comes from. The
+ * return sits on the trading line because it is trading-only: expenses come off after it.
+ * The reporting period sits in this card because it is the only one the period changes. */
 function Profit({ data, width, period, setPeriod }: { data: DashboardData; width: number; period: Period; setPeriod: (period: Period) => void }) {
   return <Card>
     <Copy muted>Net profit</Copy>
     <PeriodSelector compact value={period} onChange={setPeriod} />
     <Headline value={money(data.net_profit)} color={toneColor(data.net_profit)} width={width} />
-    <Row><Copy>Trading <Signed value={data.realized_profit}>{money(data.realized_profit)}</Signed></Copy><Copy>Expenses {money(data.expenses)}</Copy><Copy>ROI <Signed value={data.roi}>{percent(data.roi)}</Signed></Copy></Row>
-    <Copy muted>{data.sale_count} sale{data.sale_count === 1 ? '' : 's'} · {money(data.total_sales)} revenue</Copy>
+    <View style={{ gap: 6 }}>
+      <SumLine label={`Revenue · ${data.sale_count} sale${data.sale_count === 1 ? '' : 's'}`} value={money(data.total_sales)} />
+      {tradingDeductions(data).map(line => <SumLine key={line.label} label={line.label} value={money(minus('0.00', line.amount))} />)}
+      <SumLine total label={`Trading profit${data.roi === null ? '' : ` · ${percent(data.roi)} on cost`}`} value={money(data.realized_profit)} color={toneColor(data.realized_profit)} />
+      <SumLine label="Expenses" value={money(minus('0.00', data.expenses))} />
+      <SumLine total label="Net profit" value={money(data.net_profit)} color={toneColor(data.net_profit)} />
+    </View>
   </Card>;
 }
 

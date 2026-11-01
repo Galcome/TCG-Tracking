@@ -69,6 +69,85 @@ def test_a_month_reports_what_was_spent_and_earned_in_it(client, make_product):
     assert row["realized_profit"] == "200.00"
 
 
+def test_revenue_comes_down_to_profit_and_net_in_cents(client, make_product):
+    """The screen shows this sum line by line, so every report must carry each part of it.
+
+    Gross counts every sale; profit counts only known-cost sales after their fees. Without
+    both of those lines, revenue less cost does not reach the profit beside it.
+    """
+    known = make_product("Costed Box")
+    buy(client, known["id"], 1, "100.00", TODAY)
+    costed = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": known["id"],
+            "quantity": 1,
+            "amount": "300.00",
+            "sale_date": TODAY.isoformat(),
+            "platform_fees": "10.00",
+            "payment_fees": "5.00",
+            "shipping_paid": "5.00",
+        },
+    )
+    assert costed.status_code == 201, costed.text
+
+    unknown = make_product("Uncosted Box")
+    adjustment = client.post(
+        "/api/v1/adjustments",
+        json={"product_id": unknown["id"], "quantity_delta": 1, "reason": "opening_inventory"},
+    )
+    assert adjustment.status_code == 201, adjustment.text
+    uncosted = client.post(
+        "/api/v1/sales",
+        json={
+            "product_id": unknown["id"],
+            "quantity": 1,
+            "amount": "50.00",
+            "sale_date": TODAY.isoformat(),
+            "platform_fees": "2.00",
+            "proceeds": [],
+        },
+    )
+    assert uncosted.status_code == 201, uncosted.text
+    assert uncosted.json()["has_unknown_cost"] is True
+
+    spent = client.post(
+        "/api/v1/money/expenses",
+        json={"amount": "30.00", "category": "supplies", "occurred_on": TODAY.isoformat()},
+    )
+    assert spent.status_code == 201, spent.text
+
+    month = months(client)[first_of(TODAY)]
+    year = client.get("/api/v1/reports/performance").json()["years"][0]
+    for row in (month, year):
+        assert row["revenue"] == "350.00"
+        assert row["uncosted_revenue"] == "50.00"
+        assert row["sale_fees"] == "20.00"
+        assert row["cost_of_sales"] == "100.00"
+        assert row["realized_profit"] == "180.00"
+        assert row["expenses"] == "30.00"
+
+    board = client.get("/api/v1/dashboard", params={"period": "all"}).json()
+    assert board["total_sales"] == "350.00"
+    assert board["uncosted_revenue"] == "50.00"
+    assert board["sale_fees"] == "20.00"
+    assert board["cost_of_sales"] == "100.00"
+    assert board["realized_profit"] == "180.00"
+    assert board["net_profit"] == "150.00"
+
+
+def test_an_expense_alone_still_makes_a_month(client):
+    """Overhead in a month with no trading is still that month's loss."""
+    ago = TODAY - timedelta(days=70)
+    spent = client.post(
+        "/api/v1/money/expenses",
+        json={"amount": "12.00", "category": "supplies", "occurred_on": ago.isoformat()},
+    )
+    assert spent.status_code == 201, spent.text
+
+    assert months(client)[first_of(ago)]["expenses"] == "12.00"
+
+
 def test_spent_splits_into_house_and_own_money(client, make_product, db):
     """House money is the joint account; own money is what a partner paid personally. Spend
     from before tracking started has no split."""

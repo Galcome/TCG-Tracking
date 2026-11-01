@@ -14,6 +14,29 @@ export function reportMoney(value: string | null | undefined, fallback = 'Unknow
   return `${negative ? '-' : ''}$${groupInteger(integer)}.${fraction}`
 }
 
+/** Exact `left - right` for the API's two-decimal money strings, in integer cents. */
+export function minus(left: string, right: string): string {
+  const cents = BigInt(left.replace('.', '')) - BigInt(right.replace('.', ''))
+  const size = cents < 0n ? -cents : cents
+  return `${cents < 0n ? '-' : ''}${size / 100n}.${(size % 100n).toString().padStart(2, '0')}`
+}
+
+/** What takes a period's revenue down to its trading profit, in the order it comes off. */
+export function tradingDeductions(figures: { uncosted_revenue: string; sale_fees: string; cost_of_sales: string }) {
+  const zero = (value: string) => minus(value, '0.00') === '0.00'
+  return [
+    ...(zero(figures.uncosted_revenue) ? [] : [{ label: 'Sales with no cost recorded', amount: figures.uncosted_revenue }]),
+    ...(zero(figures.sale_fees) ? [] : [{ label: 'Fees and shipping', amount: figures.sale_fees }]),
+    { label: 'Cost of the stock sold', amount: figures.cost_of_sales },
+  ]
+}
+
+/** The sum behind a trading profit, spelled out: "$10.00 revenue − $4.00 cost of the stock sold = $6.00 trading profit". */
+export function tradingSum(figures: { revenue: string; realized_profit: string; uncosted_revenue: string; sale_fees: string; cost_of_sales: string }): string {
+  const parts = [`${reportMoney(figures.revenue)} revenue`, ...tradingDeductions(figures).map(line => `${reportMoney(line.amount)} ${line.label.toLowerCase()}`)]
+  return `${parts.join(' − ')} = ${reportMoney(figures.realized_profit)} trading profit`
+}
+
 export const REPORT_GROUPS: readonly {
   value: GroupBy
   label: string

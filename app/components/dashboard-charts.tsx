@@ -5,7 +5,7 @@ import { colors } from '../context/ThemeContext';
 import { useTypography } from '../context/TypographyContext';
 import { linePaths, plotValue, stackHeights } from '../lib/charts';
 import { money } from '../lib/format';
-import { monthLabel } from '../lib/reports';
+import { minus, monthLabel, tradingSum } from '../lib/reports';
 import type { MonthRow, ValuePoint, YearRow } from '../lib/api';
 import { Button, Copy, Row, toneColor } from './ui';
 
@@ -48,13 +48,16 @@ interface Bucket {
   own_spent: string
   untracked_spent: string
   revenue: string
+  uncosted_revenue: string
+  sale_fees: string
+  cost_of_sales: string
   realized_profit: string
-  expenses: string | null
+  expenses: string
 }
 
 function fromMonth(row: MonthRow): Bucket {
   const title = new Date(`${row.month}T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  return { ...row, key: row.month, label: monthLabel(row.month), title, expenses: null };
+  return { ...row, key: row.month, label: monthLabel(row.month), title };
 }
 
 function fromYear(row: YearRow & { year: number }): Bucket {
@@ -73,9 +76,11 @@ function Figure({ label, value, color }: { label: string; value: string; color?:
 }
 
 /**
- * What went out against what came in, by month or by year. Spend stacks into partners' own
- * money and house money (the joint account and store credit); spend from before that split
- * was tracked sits on top in grey. Tap a bar for its exact figures; the latest is shown first.
+ * Stock bought against revenue, by month or by year. Spend stacks into partners' own money and
+ * house money (the joint account and store credit); spend from before that split was tracked
+ * sits on top in grey. Tap a bar for its exact figures; the latest is shown first. Profit is
+ * not derived from these two, because stock only counts against it when it sells, so it gets
+ * its own sum rather than sitting beside them as though it were their difference.
  */
 export function SpendRevenue({ months, years, trackedFrom }: { months: MonthRow[]; years: YearRow[]; trackedFrom: string | undefined }) {
   const fonts = useTypography();
@@ -95,23 +100,25 @@ export function SpendRevenue({ months, years, trackedFrom }: { months: MonthRow[
 
   return <View style={{ gap: 12 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <Text style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 14, flex: 1 }}>Spent vs revenue</Text>
+      <Text style={{ color: colors.muted, fontFamily: fonts.medium, fontSize: 14, flex: 1 }}>Stock bought vs revenue</Text>
       <Button variant={grouping === 'month' ? 'primary' : 'secondary'} label="Month" onPress={() => choose('month')} />
       <Button variant={grouping === 'year' ? 'primary' : 'secondary'} label="Year" onPress={() => choose('year')} />
     </View>
     {selected ? <View style={{ gap: 8 }}>
       <Text style={{ color: colors.text, fontFamily: fonts.strong, fontSize: 16 }}>{selected.title}</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 20 }}>
-        <Figure label="Spent" value={money(selected.spent)} />
+        <Figure label="Stock bought" value={money(selected.spent)} />
         <Figure label="Revenue" value={money(selected.revenue)} color={colors.gain} />
-        <Figure label="Trading profit" value={money(selected.realized_profit)} color={toneColor(selected.realized_profit)} />
+        <Figure label="Revenue less stock bought" value={money(minus(selected.revenue, selected.spent))} color={toneColor(minus(selected.revenue, selected.spent))} />
       </View>
       <Copy muted>{[
         `House ${money(selected.house_spent)}`,
         `Own ${money(selected.own_spent)}`,
         plotValue(selected.untracked_spent) > 0 ? `Before tracking ${money(selected.untracked_spent)}` : null,
-        selected.expenses !== null && plotValue(selected.expenses) !== 0 ? `Expenses ${money(selected.expenses)}` : null,
       ].filter(Boolean).join(' · ')}</Copy>
+      <Copy>{tradingSum(selected)}</Copy>
+      <Copy>{`${money(selected.realized_profit)} trading profit − ${money(selected.expenses)} expenses = ${money(minus(selected.realized_profit, selected.expenses))} net profit`}</Copy>
+      <Copy muted>Stock counts against profit when it sells, not when it is bought.</Copy>
     </View> : <Copy muted>No dated activity yet.</Copy>}
     {buckets.length > 0 ? <View style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-end' }}>
       {buckets.map((bucket, index) => {
@@ -119,7 +126,7 @@ export function SpendRevenue({ months, years, trackedFrom }: { months: MonthRow[
         const revenue = heights[index * 2 + 1];
         const active = bucket.key === selected?.key;
         return <Pressable key={bucket.key} onPress={() => setPicked(bucket.key)} accessibilityRole="button" accessibilityState={{ selected: active }}
-          accessibilityLabel={`${bucket.title}: spent ${money(bucket.spent)}, revenue ${money(bucket.revenue)}`}
+          accessibilityLabel={`${bucket.title}: stock bought ${money(bucket.spent)}, revenue ${money(bucket.revenue)}`}
           style={{ flex: 1, minWidth: 0, gap: 4, alignItems: 'center', opacity: active ? 1 : 0.5 }}>
           <View style={{ height: BAR_HEIGHT, width: '100%', maxWidth: 48, flexDirection: 'row', alignItems: 'flex-end', gap: 2 }}>
             <View style={{ flex: 1, borderTopLeftRadius: 3, borderTopRightRadius: 3, overflow: 'hidden' }}>

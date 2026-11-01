@@ -462,7 +462,7 @@ test('catalog discovery fills an unconfirmed draft and never changes stock or co
   expect(latest.stats.quantity_on_hand).toBe(1);
 });
 
-test('dashboard leads with inventory value, then net profit, then spent vs revenue split by who paid, in exact cents', async ({ page }) => {
+test('dashboard leads with inventory value, then a net profit sum that adds up, then stock bought vs revenue split by who paid, in exact cents', async ({ page }) => {
   const fixtureId = '66666666-6666-4666-8666-666666666666';
   await page.route(API + '/api/v1/reports/attention', route => route.fulfill({ json: {
     sales_missing_cost: 0, products_with_negative_stock: 1,
@@ -470,7 +470,7 @@ test('dashboard leads with inventory value, then net profit, then spent vs reven
   } }));
   await page.route(API + '/api/v1/reports/by-month', route => route.fulfill({ json: [{
     month: '2026-09-01', spent: '90071992547409.92', house_spent: '90071992547400.00', own_spent: '9.92', untracked_spent: '0.00',
-    revenue: '0.00', realized_profit: '-0.01', units_bought: 2, units_sold: 0,
+    revenue: '0.00', uncosted_revenue: '0.00', sale_fees: '0.00', cost_of_sales: '0.01', realized_profit: '-0.01', expenses: '0.50', units_bought: 2, units_sold: 0,
   }] }));
   await page.route(API + '/api/v1/reports/performance', route => route.fulfill({ json: {
     value_history: [
@@ -479,14 +479,15 @@ test('dashboard leads with inventory value, then net profit, then spent vs reven
     ],
     market_value: '12.00', priced_cost: '10.01', tracked_from: '2026-10-11', own_money: '3.00', house_money: '9.01',
     years: [
-      { year: 2026, spent: '0.29', house_spent: '0.10', own_spent: '0.19', untracked_spent: '0.00', revenue: '0.00', realized_profit: '-0.01', expenses: '1.00' },
-      { year: null, spent: '66783.00', house_spent: '0.00', own_spent: '0.00', untracked_spent: '66783.00', revenue: '0.00', realized_profit: '0.00', expenses: '0.00' },
+      { year: 2026, spent: '0.29', house_spent: '0.10', own_spent: '0.19', untracked_spent: '0.00', revenue: '0.00', uncosted_revenue: '0.00', sale_fees: '0.00', cost_of_sales: '0.01', realized_profit: '-0.01', expenses: '1.00' },
+      { year: null, spent: '66783.00', house_spent: '0.00', own_spent: '0.00', untracked_spent: '66783.00', revenue: '0.00', uncosted_revenue: '0.00', sale_fees: '0.00', cost_of_sales: '0.00', realized_profit: '0.00', expenses: '0.00' },
     ],
   } }));
   await page.route(API + '/api/v1/dashboard?*', route => route.fulfill({ json: {
-    realized_profit: '90071992547409.91', roi: null, inventory_at_cost: '10.01', total_invested: '20.01',
-    purchases_in_period: '0.29', cost_of_sales: '0.00', cost_written_off: '3.01', total_sales: '0.00',
-    average_sale: null, units_in_stock: 1, sale_count: 0, sales_missing_cost: 0, undated_sales: 1,
+    realized_profit: '90071992547409.91', roi: 0.247, inventory_at_cost: '10.01', total_invested: '20.01',
+    purchases_in_period: '0.29', cost_of_sales: '4.00', cost_written_off: '3.01', total_sales: '90071992547416.92',
+    uncosted_revenue: '2.00', sale_fees: '1.01',
+    average_sale: null, units_in_stock: 1, sale_count: 1, sales_missing_cost: 0, undated_sales: 1,
     products_with_negative_stock: 0, net_proceeds: '5.00', fees_paid: '1.01', store_credit: '2.00',
     cash_received: '3.00', cash_balance: '-17.01',
     expenses: '1.00', expenses_by_category: [{ category: 'supplies', amount: '1.00' }], net_profit: '90071992547408.91',
@@ -502,18 +503,35 @@ test('dashboard leads with inventory value, then net profit, then spent vs reven
   await expect(page.getByText('+$1.00 since yesterday', { exact: true })).toBeVisible();
   await expect(page.getByText('Cost', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Priced 1 of 1 unit · 1 on stale quotes', { exact: true })).toBeVisible();
-  await expect(page.getByText('$90,071,992,547,408.91', { exact: true })).toHaveCSS('color', 'rgb(116, 228, 179)');
-  await expect(page.getByText('Expenses $1.00', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,408.91', { exact: true }).first()).toHaveCSS('color', 'rgb(116, 228, 179)');
+  // The sum down from revenue to the headline, with the return on its trading line.
+  await expect(page.getByText('Revenue · 1 sale', { exact: true })).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,416.92', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sales with no cost recorded', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$2.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Fees and shipping', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$1.01', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cost of the stock sold', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$4.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Trading profit · 24.7% on cost', { exact: true })).toBeVisible();
+  await expect(page.getByText('$90,071,992,547,409.91', { exact: true })).toBeVisible();
+  await expect(page.getByText('Expenses', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$1.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('Net profit', { exact: true })).toHaveCount(2);
   // The period only changes net profit, so it lives in that card.
   await expect(page.getByRole('button', { name: /^Reporting period/ })).toBeVisible();
-  // One spend and revenue card: the latest month's exact figures, spend split by who paid.
-  await expect(page.getByLabel(/: spent \$90,071,992,547,409\.92, revenue \$0\.00$/)).toBeVisible();
+  // One stock and revenue card: the latest month's exact figures, spend split by who paid.
+  await expect(page.getByLabel(/: stock bought \$90,071,992,547,409\.92, revenue \$0\.00$/)).toBeVisible();
   await expect(page.getByText('$90,071,992,547,409.92', { exact: true })).toBeVisible();
-  await expect(page.getByText('-$0.01', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
+  await expect(page.getByText('-$90,071,992,547,409.92', { exact: true })).toHaveCSS('color', 'rgb(255, 155, 166)');
   await expect(page.getByText('House $90,071,992,547,400.00 · Own $9.92', { exact: true })).toBeVisible();
+  // Profit is not stock bought against revenue, so it shows its own sum.
+  await expect(page.getByText('$0.00 revenue − $0.01 cost of the stock sold = -$0.01 trading profit', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$0.01 trading profit − $0.50 expenses = -$0.51 net profit', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Year', exact: true }).click();
-  await expect(page.getByLabel('2026: spent $0.29, revenue $0.00', { exact: true })).toBeVisible();
-  await expect(page.getByText('House $0.10 · Own $0.19 · Expenses $1.00', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('2026: stock bought $0.29, revenue $0.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('House $0.10 · Own $0.19', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$0.01 trading profit − $1.00 expenses = -$1.01 net profit', { exact: true })).toBeVisible();
   await expect(page.getByText('Plus $66,783.00 of stock with no purchase date, not shown.', { exact: true })).toBeVisible();
   await expect(page.getByText('Year over year', { exact: true })).toHaveCount(0);
   // The detail lives in Reports now; the dashboard keeps none of the old disclosures.

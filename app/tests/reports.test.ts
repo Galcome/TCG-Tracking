@@ -4,10 +4,30 @@ import assert from 'node:assert/strict'
 import {
   REPORT_GROUPS,
   compareDecimalStrings,
+  minus,
   reportMoney,
   sortGroupRows,
+  tradingDeductions,
+  tradingSum,
 } from '../lib/reports.ts'
 import type { GroupRow } from '../lib/api.ts'
+
+test('minus is exact in cents, past what a float can hold', () => {
+  assert.equal(minus('2755.00', '3607.95'), '-852.95')
+  assert.equal(minus('90071992547409.92', '0.01'), '90071992547409.91')
+  assert.equal(minus('-0.01', '0.00'), '-0.01')
+  assert.equal(minus('0.00', '0.00'), '0.00')
+})
+
+test('the trading sum shows only what actually came off, and adds up', () => {
+  const october = { revenue: '2755.00', uncosted_revenue: '0.00', sale_fees: '0.00', cost_of_sales: '2210.00', realized_profit: '545.00' }
+  assert.deepEqual(tradingDeductions(october), [{ label: 'Cost of the stock sold', amount: '2210.00' }])
+  assert.equal(tradingSum(october), '$2,755.00 revenue − $2,210.00 cost of the stock sold = $545.00 trading profit')
+  assert.equal(
+    tradingSum({ revenue: '100.00', uncosted_revenue: '30.00', sale_fees: '5.00', cost_of_sales: '40.00', realized_profit: '25.00' }),
+    '$100.00 revenue − $30.00 sales with no cost recorded − $5.00 fees and shipping − $40.00 cost of the stock sold = $25.00 trading profit',
+  )
+})
 
 function row(overrides: Partial<GroupRow>): GroupRow {
   return {
