@@ -1335,8 +1335,10 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await page.getByRole('button', { name: 'Money', exact: true }).click();
 
   await expect(page.getByText('Open transactions', { exact: true })).toBeVisible();
-  const showAll = page.getByRole('button', { name: /^Show all \d+$/ });
-  if (await showAll.count()) await showAll.click();
+  // Tapping a partner's name says why they are owed what they are owed.
+  const partner = page.getByRole('group', { name: member.name, exact: true });
+  await partner.getByRole('button', { name: /^Why is E2E Tester at / }).click();
+  await expect(partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true })).toBeVisible();
   await page.getByRole('group', { name: 'Open: ' + name, exact: true }).getByRole('button', { name: 'Pay back', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Pay back', exact: true });
   const sent = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/transfers');
@@ -1357,14 +1359,15 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await page.getByLabel('Reason', { exact: true }).fill('Reversed in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(card.getByText('Voided', { exact: true })).toBeVisible();
   const voided = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   expect(voided.stats.quantity_on_hand).toBe(0);
 
-  await page.getByRole('button', { name: 'Hide voided', exact: true }).click();
+  // Voided rows are hidden until asked for.
   await expect(card).toHaveCount(0);
   await page.getByRole('button', { name: 'Show voided', exact: true }).click();
-  await expect(card).toBeVisible();
+  await expect(card.getByText('Voided', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide voided', exact: true }).click();
+  await expect(card).toHaveCount(0);
 });
 
 test('common actions sit one tap from where they are needed', async ({ page, request }) => {

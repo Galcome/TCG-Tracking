@@ -1,4 +1,4 @@
-import type { ExpenseCategory, FundingLeg, MovementLeg, OpenItem } from './api'
+import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type MovementLeg, type OpenItem, type StatementLine } from './api'
 import { money, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
@@ -153,6 +153,11 @@ export function signedCents(amount: string): bigint | null {
 }
 
 const legCents = signedCents
+
+/** Positive dollar strings added in exact cents, for a group total on screen. */
+export function sumMoney(values: string[]): string {
+  return dollars(values.reduce((total, value) => total + (signedCents(value) ?? 0n), 0n))
+}
 
 function dollars(cents: bigint): string {
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
@@ -405,6 +410,35 @@ export function openItemLine(item: OpenItem): string {
   const paid = leg ? money(leg.amount.trim().replace(/^-/, '')) : null
   if (!paid || paid === money(item.outstanding)) return `${item.account_name} paid for this`
   return `${item.account_name} is still owed ${money(item.outstanding)} of ${paid}`
+}
+
+/** Why one statement line moved this account, in words a partner would use. */
+export function statementReason(line: StatementLine, account: Pick<Account, 'id' | 'kind'>): string {
+  const { movement } = line
+  const up = tone(line.change) === 'gain'
+  const others = movement.legs.filter((leg) => leg.account_id !== account.id).map((leg) => leg.account_name).join(', ')
+  const product = movement.product_name ?? 'stock'
+  switch (movement.kind) {
+    case 'funding':
+      return up ? `Paid for ${product}` : `Bought ${product}`
+    case 'proceeds':
+      return account.kind === 'member' ? `Kept the cash from selling ${product}` : `Sold ${product}`
+    case 'expense':
+      return `${up ? 'Paid' : 'Spent on'} ${movement.expense_category ? EXPENSE_CATEGORY_LABELS[movement.expense_category].toLowerCase() : 'an expense'}`
+    case 'transfer':
+      if (account.kind === 'member') return up ? `Put money into ${others}` : `Paid back from ${others}`
+      return up ? `From ${others}` : `To ${others}`
+    case 'contribution':
+      return 'Buy-in'
+    default:
+      return 'Balance adjustment'
+  }
+}
+
+/** A statement change with its sign always shown: "+$271.06", "−$335.00". */
+export function signedChange(change: string): string {
+  const amount = money(change.trim().replace(/^[-+]/, ''))
+  return (tone(change) === 'loss' ? '−' : '+') + amount
 }
 
 export function legLine(leg: Pick<MovementLeg, 'account_name' | 'account_kind' | 'amount'>): string {

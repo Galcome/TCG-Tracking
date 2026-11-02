@@ -1106,6 +1106,21 @@ export interface OpenItem {
   movement: Movement
 }
 
+/** One movement's effect on an account, in the balance's own terms, and the balance after it. */
+export interface StatementLine {
+  /** For a partner, positive is the group owing them more. */
+  change: string
+  balance: string
+  movement: Movement
+}
+
+/** Why an account's balance is what it is. Newest first; the changes add up to `balance`. */
+export interface Statement {
+  account_id: string
+  balance: string
+  items: StatementLine[]
+}
+
 /** Who paid for a purchase. `amount` may be omitted when one account paid all of it. */
 export interface FundingLeg {
   account_id: string
@@ -1634,6 +1649,8 @@ export function createApi(request: ApiRequest) { return {
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
 
   openItems: () => request<{ items: OpenItem[] }>('/api/v1/money/open'),
+
+  statement: (accountId: string) => request<Statement>(`/api/v1/money/accounts/${accountId}/statement`),
 
   /** Overhead. `paid_from` omitted means the joint account paid. */
   createExpense: (expense: {

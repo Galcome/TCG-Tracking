@@ -46,6 +46,8 @@ from src.schemas.money_ledger import (
     OpenItemRead,
     PostingRead,
     ProceedsLeg,
+    Statement,
+    StatementLine,
     TransferCreate,
 )
 from src.services import ledger, money
@@ -376,6 +378,41 @@ def list_open_items(
             for item in items
         ]
     )
+
+
+@router.get("/accounts/{account_id}/statement", response_model=Statement)
+def account_statement(
+    account_id: uuid.UUID,
+    _: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> Statement:
+    """Every active movement that moved this account's balance, with the balance after each.
+
+    Stock bought and expenses paid add to what a partner is owed; paybacks and sale cash
+    they kept take it away. Voided rows changed nothing, so they are not lines here.
+    """
+    account = _require_account(db, account_id)
+    rows = db.execute(
+        select(MoneyMovement, func.sum(MoneyPosting.delta_cents))
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .where(MoneyPosting.account_id == account.id, MoneyMovement.status == STATUS_ACTIVE)
+        .group_by(MoneyMovement.id)
+        .order_by(
+            MoneyMovement.occurred_on.asc().nullsfirst(),
+            MoneyMovement.created_at.asc(),
+            MoneyMovement.id.asc(),
+        )
+    ).all()
+
+    reads = {read.id: read for read in _read_movements(db, [movement for movement, _ in rows])}
+    lines: list[StatementLine] = []
+    balance = 0
+    for movement, flow in rows:
+        change = money.balance_for(account, int(flow))
+        balance += change
+        lines.append(StatementLine(change=change, balance=balance, movement=reads[movement.id]))
+    lines.reverse()
+    return Statement(account_id=account.id, balance=balance, items=lines)
 
 
 @router.get("/movements", response_model=MovementList)
