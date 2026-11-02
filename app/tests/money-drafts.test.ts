@@ -19,7 +19,10 @@ import {
   expenseEditFromMovement,
   parseAdjustmentCents,
   positiveMoney,
+  signedChange,
+  statementReason,
   storeCreditMeaning,
+  sumMoney,
   transferDraftFromMovement,
   validateBalanceAdjustmentDraft,
   validateExpenseDraft,
@@ -27,7 +30,7 @@ import {
   validateVoidMovementDraft,
 } from '../lib/money-drafts'
 
-import type { OpenItem } from '../lib/api'
+import type { OpenItem, StatementLine } from '../lib/api'
 
 const date = '2026-09-09'
 
@@ -54,6 +57,40 @@ test('an open item says how much of that partner\'s own share is left, not of th
   }) as unknown as OpenItem
   assert.equal(openItemLine(item('200.00')), 'Jason paid for this')
   assert.equal(openItemLine(item('50.00')), 'Jason is still owed $50.00 of $200.00')
+})
+
+test('a statement line says in plain words why a partner\'s balance moved', () => {
+  const joseph = { id: 'joseph', kind: 'member' } as const
+  const joint = { id: 'joint', kind: 'joint' } as const
+  const line = (kind: string, change: string, extra: object = {}) => ({
+    change,
+    balance: '0.00',
+    movement: {
+      kind,
+      product_name: 'Surging Sparks ETB',
+      expense_category: null,
+      legs: [
+        { account_id: 'joseph', account_name: 'Joseph', account_kind: 'member', amount: '0.00' },
+        { account_id: 'joint', account_name: 'WealthSimple', account_kind: 'joint', amount: '0.00' },
+      ],
+      ...extra,
+    },
+  }) as unknown as StatementLine
+  assert.equal(statementReason(line('funding', '361.49'), joseph), 'Paid for Surging Sparks ETB')
+  assert.equal(statementReason(line('funding', '-361.49'), joint), 'Bought Surging Sparks ETB')
+  assert.equal(statementReason(line('proceeds', '-335.00'), joseph), 'Kept the cash from selling Surging Sparks ETB')
+  assert.equal(statementReason(line('proceeds', '335.00'), joint), 'Sold Surging Sparks ETB')
+  assert.equal(statementReason(line('expense', '75.18', { expense_category: 'shipping_supplies' }), joseph), 'Paid shipping supplies')
+  assert.equal(statementReason(line('expense', '-12.00'), joint), 'Spent on an expense')
+  assert.equal(statementReason(line('transfer', '-100.00'), joseph), 'Paid back from WealthSimple')
+  assert.equal(statementReason(line('transfer', '100.00'), joseph), 'Put money into WealthSimple')
+  assert.equal(statementReason(line('transfer', '100.00'), joint), 'From Joseph')
+  assert.equal(statementReason(line('transfer', '-100.00'), joint), 'To Joseph')
+  assert.equal(statementReason(line('contribution', '5000.00'), joint), 'Buy-in')
+  assert.equal(statementReason(line('adjustment', '10.00'), joseph), 'Balance adjustment')
+  assert.equal(signedChange('361.49'), '+$361.49')
+  assert.equal(signedChange('-335.00'), '−$335.00')
+  assert.equal(sumMoney(['270.06', '1.00', '103.67']), '374.73')
 })
 
 test('adjustment cents are parsed exactly without float rounding', () => {

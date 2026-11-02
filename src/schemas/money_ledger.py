@@ -258,6 +258,27 @@ class OpenItemList(BaseModel):
     items: list[OpenItemRead]
 
 
+class StatementLine(BaseModel):
+    """One movement's effect on one account's balance, and the balance after it."""
+
+    #: In the balance's own terms: for a partner, positive is the group owing them more.
+    change: MoneyOut
+    balance: MoneyOut
+    movement: MovementRead
+
+
+class Statement(BaseModel):
+    """Why an account's balance is what it is: every active movement that touched it.
+
+    Newest first. The changes add up to `balance` exactly, so the figure on the card is
+    never a number you have to take on trust.
+    """
+
+    account_id: uuid.UUID
+    balance: MoneyOut
+    items: list[StatementLine]
+
+
 # -------------------------------------------------- funding attached to a purchase
 
 

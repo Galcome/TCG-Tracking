@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { Text, View } from 'react-native'
+import { Pressable, Text, View } from 'react-native'
 
 import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
@@ -14,7 +14,10 @@ import {
   expenseEditFromMovement,
   legLine,
   openItemLine,
+  signedChange,
+  statementReason,
   storeCreditMeaning,
+  sumMoney,
   transferDraftFromMovement,
   type BalanceAdjustmentDraft,
   type ExpenseEdit,
@@ -22,8 +25,6 @@ import {
 } from '../../lib/money-drafts'
 
 const PAGE_SIZE = 50
-/** Open items shown before "Show all", so a long list does not bury the ledger below it. */
-const OPEN_PREVIEW = 5
 
 const MOVEMENT_KINDS: { value: MovementKind | ''; label: string }[] = [
   { value: '', label: 'All movement types' },
@@ -74,6 +75,39 @@ function balanceTone(account: Account): string | undefined {
   return toneColor(account.balance)
 }
 
+/** Every line that moved this account, newest first, so the balance is never taken on trust. */
+function AccountStatement({ account }: { account: Account }) {
+  const api = useApi()
+  const statement = useQuery({ queryKey: ['statement', account.id], queryFn: () => api.statement(account.id) })
+  if (statement.error) return <ErrorNotice error={statement.error} retry={() => void statement.refetch()} />
+  if (!statement.data) return <Loading />
+  const lines = statement.data.items
+  const owed = account.balance_means === 'owed'
+  if (lines.length === 0) return <Copy muted>Nothing has moved this balance yet.</Copy>
+  return (
+    <View style={{ gap: 8 }}>
+      <Copy muted>
+        {owed ? 'Adds to what they are owed: stock and expenses they paid for. Comes off: paybacks and sale cash they kept.' : 'Every movement in and out, newest first.'}
+      </Copy>
+      {lines.map((line) => (
+        <View key={line.movement.id} role="group" accessibilityLabel={`Statement: ${statementReason(line, account)}`} style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
+          <Row>
+            <View style={{ flex: 1, minWidth: 180 }}>
+              <Copy>{statementReason(line, account)}</Copy>
+              {/* The reason already names the product, so only the date and notes follow. */}
+              <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Copy>{signedChange(line.change)}</Copy>
+              <Copy muted>{owed ? 'Owed' : 'Balance'} {money(line.balance)}</Copy>
+            </View>
+          </Row>
+        </View>
+      ))}
+    </View>
+  )
+}
+
 function AccountCard({
   account,
   onTransfer,
@@ -85,12 +119,21 @@ function AccountCard({
   onAdjust: () => void
   onExpense: () => void
 }) {
+  const [showing, setShowing] = useState(false)
   return (
     <View role="group" accessibilityLabel={account.name}>
       <Card>
         <Row>
           <View style={{ flex: 1, minWidth: 180 }}>
-            <Copy>{account.name}</Copy>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Why is ${account.name} at ${money(account.balance)}`}
+              aria-expanded={showing}
+              accessibilityState={{ expanded: showing }}
+              onPress={() => setShowing(!showing)}
+            >
+              <Copy><Text style={{ color: colors.accent }}>{account.name} {showing ? '−' : '+'}</Text></Copy>
+            </Pressable>
             <Copy muted>{accountKindLabel(account)} · {accountMeaning(account)}</Copy>
             {account.contributed && !isZeroMoney(account.contributed) ? (
               <Copy muted>Put in for shares: {money(account.contributed)}</Copy>
@@ -103,6 +146,7 @@ function AccountCard({
           <Button label="Adjust" onPress={onAdjust} />
           <Button label="Add expense" onPress={onExpense} />
         </Row>
+        {showing ? <AccountStatement account={account} /> : null}
       </Card>
     </View>
   )
@@ -242,9 +286,9 @@ export function Money(_props: MoneyProps = {}) {
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const [voiding, setVoiding] = useState<string | null>(null)
   const [stockAction, setStockAction] = useState<StockAction | null>(null)
-  const [hideVoided, setHideVoided] = useState(false)
+  // A voided row changed nothing, so it is noise until someone asks for it.
+  const [hideVoided, setHideVoided] = useState(true)
   const [payingBack, setPayingBack] = useState<OpenItem | null>(null)
-  const [allOpen, setAllOpen] = useState(false)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const open = useQuery({ queryKey: ['openItems'], queryFn: api.openItems })
@@ -265,6 +309,12 @@ export function Money(_props: MoneyProps = {}) {
   )
   const rows = movements.data?.items ?? []
   const openItems = open.data?.items ?? []
+  // One group per partner, so nobody's items sit behind somebody else's older ones.
+  const openByPartner = useMemo(() => {
+    const groups = new Map<string, OpenItem[]>()
+    for (const item of open.data?.items ?? []) groups.set(item.account_id, [...(groups.get(item.account_id) ?? []), item])
+    return [...groups.values()]
+  }, [open.data])
   const spentStores = items.filter((account) => account.balance_means === 'credit' && isZeroMoney(account.balance))
   const shownAccounts = items.filter((account) => !spentStores.includes(account))
   const accountOptions = useMemo(
@@ -339,48 +389,54 @@ export function Money(_props: MoneyProps = {}) {
       {openItems.length > 0 ? (
         <>
           <Copy>Open transactions</Copy>
-          <Copy muted>What partners paid for and have not been paid back yet, oldest first.</Copy>
-          {(allOpen ? openItems : openItems.slice(0, OPEN_PREVIEW)).map((item) => (
-            <OpenItemCard
-              key={`${item.movement.id}:${item.account_id}`}
-              item={item}
-              onPayBack={() => setPayingBack(item)}
-            />
+          <Copy muted>What partners paid for and have not been paid back yet, oldest first. Each partner&apos;s items add up to what they are owed.</Copy>
+          {openByPartner.map((group) => (
+            <View key={group[0].account_id} style={{ gap: 12 }}>
+              <Copy>
+                {group[0].account_name} · {group.length} open · {money(sumMoney(group.map((item) => item.outstanding)))}
+              </Copy>
+              {group.map((item) => (
+                <OpenItemCard
+                  key={`${item.movement.id}:${item.account_id}`}
+                  item={item}
+                  onPayBack={() => setPayingBack(item)}
+                />
+              ))}
+            </View>
           ))}
-          {openItems.length > OPEN_PREVIEW ? (
-            <Button
-              label={allOpen ? 'Show fewer' : `Show all ${openItems.length}`}
-              onPress={() => setAllOpen(!allOpen)}
-            />
-          ) : null}
         </>
       ) : null}
 
-      <Choice
-        label="Account"
-        value={accountFilter}
-        options={accountOptions}
-        onChange={(value) => {
-          setAccountFilter(value)
-          resetMovementPage()
-        }}
-      />
-      <Choice
-        label="Movement type"
-        value={kindFilter}
-        options={MOVEMENT_KINDS}
-        onChange={(value) => {
-          setKindFilter(value as MovementKind | '')
-          resetMovementPage()
-        }}
-      />
-      <Button
-        label={hideVoided ? 'Show voided' : 'Hide voided'}
-        onPress={() => {
-          setHideVoided(!hideVoided)
-          resetMovementPage()
-        }}
-      />
+      <Copy>Movements</Copy>
+      <Card>
+        <Row>
+          <Button
+            label={hideVoided ? 'Show voided' : 'Hide voided'}
+            onPress={() => {
+              setHideVoided(!hideVoided)
+              resetMovementPage()
+            }}
+          />
+          <Choice
+            label="Movement type"
+            value={kindFilter}
+            options={MOVEMENT_KINDS}
+            onChange={(value) => {
+              setKindFilter(value as MovementKind | '')
+              resetMovementPage()
+            }}
+          />
+          <Choice
+            label="Account"
+            value={accountFilter}
+            options={accountOptions}
+            onChange={(value) => {
+              setAccountFilter(value)
+              resetMovementPage()
+            }}
+          />
+        </Row>
+      </Card>
       <Copy muted>{movements.data ? `${rows.length} movement${rows.length === 1 ? '' : 's'} shown${movements.data.total > rows.length ? ` of ${movements.data.total}` : ''}.` : 'Loading movements…'}</Copy>
       <ErrorNotice error={accounts.error ?? open.error ?? movements.error} retry={retry} />
       {accounts.isPending || movements.isPending ? <Loading /> : null}
