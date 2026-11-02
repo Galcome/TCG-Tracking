@@ -1355,12 +1355,18 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await expect(edit).toBeVisible();
   await edit.getByRole('button', { name: 'Close', exact: true }).click();
 
-  await card.getByRole('button', { name: 'Void', exact: true }).click();
+  // The statement line that explains the balance is also where the mistake gets fixed.
+  const line = partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true });
+  await line.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(edit).toBeVisible();
+  await edit.getByRole('button', { name: 'Close', exact: true }).click();
+  await line.getByRole('button', { name: 'Void', exact: true }).click();
   await page.getByLabel('Reason', { exact: true }).fill('Reversed in test');
   await page.getByRole('button', { name: 'Void transaction', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const voided = await (await request.get(API + '/api/v1/products/' + product.id)).json();
   expect(voided.stats.quantity_on_hand).toBe(0);
+  await expect(line).toHaveCount(0);
 
   // Voided rows are hidden until asked for.
   await expect(card).toHaveCount(0);

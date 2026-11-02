@@ -75,8 +75,14 @@ function balanceTone(account: Account): string | undefined {
   return toneColor(account.balance)
 }
 
+/** What can be done to a posted movement. Edit is missing when the movement cannot be re-opened. */
+interface MovementActions {
+  onEdit?: () => void
+  onVoid: () => void
+}
+
 /** Every line that moved this account, newest first, so the balance is never taken on trust. */
-function AccountStatement({ account }: { account: Account }) {
+function AccountStatement({ account, actionsFor }: { account: Account; actionsFor: (movement: Movement) => MovementActions }) {
   const api = useApi()
   const statement = useQuery({ queryKey: ['statement', account.id], queryFn: () => api.statement(account.id) })
   if (statement.error) return <ErrorNotice error={statement.error} retry={() => void statement.refetch()} />
@@ -89,21 +95,29 @@ function AccountStatement({ account }: { account: Account }) {
       <Copy muted>
         {owed ? 'Adds to what they are owed: stock and expenses they paid for. Comes off: paybacks and sale cash they kept.' : 'Every movement in and out, newest first.'}
       </Copy>
-      {lines.map((line) => (
-        <View key={line.movement.id} role="group" accessibilityLabel={`Statement: ${statementReason(line, account)}`} style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
-          <Row>
-            <View style={{ flex: 1, minWidth: 180 }}>
-              <Copy>{statementReason(line, account)}</Copy>
-              {/* The reason already names the product, so only the date and notes follow. */}
-              <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Copy>{signedChange(line.change)}</Copy>
-              <Copy muted>{owed ? 'Owed' : 'Balance'} {money(line.balance)}</Copy>
-            </View>
-          </Row>
-        </View>
-      ))}
+      {lines.map((line) => {
+        const actions = actionsFor(line.movement)
+        return (
+          <View key={line.movement.id} role="group" accessibilityLabel={`Statement: ${statementReason(line, account)}`} style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
+            <Row>
+              <View style={{ flex: 1, minWidth: 180 }}>
+                <Copy>{statementReason(line, account)}</Copy>
+                {/* The reason already names the product, so only the date and notes follow. */}
+                <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Copy>{signedChange(line.change)}</Copy>
+                <Copy muted>{owed ? 'Owed' : 'Balance'} {money(line.balance)}</Copy>
+              </View>
+            </Row>
+            {/* A statement only lists active movements, so every line can still be voided. */}
+            <Row>
+              {actions.onEdit ? <Button label="Edit" onPress={actions.onEdit} /> : null}
+              <Button label="Void" onPress={actions.onVoid} danger />
+            </Row>
+          </View>
+        )
+      })}
     </View>
   )
 }
@@ -113,11 +127,13 @@ function AccountCard({
   onTransfer,
   onAdjust,
   onExpense,
+  actionsFor,
 }: {
   account: Account
   onTransfer: () => void
   onAdjust: () => void
   onExpense: () => void
+  actionsFor: (movement: Movement) => MovementActions
 }) {
   const [showing, setShowing] = useState(false)
   return (
@@ -146,7 +162,7 @@ function AccountCard({
           <Button label="Adjust" onPress={onAdjust} />
           <Button label="Add expense" onPress={onExpense} />
         </Row>
-        {showing ? <AccountStatement account={account} /> : null}
+        {showing ? <AccountStatement account={account} actionsFor={actionsFor} /> : null}
       </Card>
     </View>
   )
@@ -322,6 +338,21 @@ export function Money(_props: MoneyProps = {}) {
     [items],
   )
 
+  /** A purchase or sale opens its own transaction form; anything else opens the money form it came from. */
+  function actionsFor(movement: Movement): MovementActions {
+    if (movement.purchase_id || movement.sale_id) {
+      return {
+        onEdit: () => setStockAction({ mode: 'edit', movement }),
+        onVoid: () => setStockAction({ mode: 'void', movement }),
+      }
+    }
+    const target = editTarget(movement, items)
+    return {
+      onEdit: target ? () => setEditing(target) : undefined,
+      onVoid: () => setVoiding(movement.id),
+    }
+  }
+
   function resetMovementPage() {
     setOffset(0)
   }
@@ -376,6 +407,7 @@ export function Money(_props: MoneyProps = {}) {
               onTransfer={() => setTransferFrom(account.id)}
               onAdjust={() => setAdjusting(account)}
               onExpense={() => setExpenseFrom(account.id)}
+              actionsFor={actionsFor}
             />
           ))}
           {spentStores.length > 0 ? (
@@ -449,27 +481,9 @@ export function Money(_props: MoneyProps = {}) {
           </Copy>
         </Card>
       ) : null}
-      {rows.map((movement) => {
-        if (movement.purchase_id || movement.sale_id) {
-          return (
-            <MovementCard
-              key={movement.id}
-              movement={movement}
-              onVoid={() => setStockAction({ mode: 'void', movement })}
-              onEdit={() => setStockAction({ mode: 'edit', movement })}
-            />
-          )
-        }
-        const target = editTarget(movement, items)
-        return (
-          <MovementCard
-            key={movement.id}
-            movement={movement}
-            onVoid={() => setVoiding(movement.id)}
-            onEdit={target ? () => setEditing(target) : undefined}
-          />
-        )
-      })}
+      {rows.map((movement) => (
+        <MovementCard key={movement.id} movement={movement} {...actionsFor(movement)} />
+      ))}
       {movements.data && movements.data.total > PAGE_SIZE ? (
         <Row>
           <Button
