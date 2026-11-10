@@ -17,6 +17,7 @@ import {
   linesSinceSettled,
   openItemLine,
   buildTransferPayload,
+  costBreakdown,
   expenseEditFromMovement,
   parseAdjustmentCents,
   positiveMoney,
@@ -400,4 +401,26 @@ test('a statement keeps only the lines since the balance was last zero', () => {
   assert.equal(sumMoney(open.map((item) => item.change)), '441.80')
   assert.deepEqual(linesSinceSettled([line('-42.10', '0.00'), line('42.10', '42.10')]), [])
   assert.equal(linesSinceSettled([line('10.00', '30.00'), line('20.00', '20.00')]).length, 2)
+})
+
+test('a statement line breaks a purchase or sale down into what it cost', () => {
+  const base = {
+    quantity: 2, amount: null, base_amount: null, shipping: null, tax: null, fees: null,
+    platform_fees: null, payment_fees: null, shipping_paid: null, cost: null, profit: null, has_unknown_cost: false,
+  }
+  assert.deepEqual(costBreakdown({ ...base, kind: 'purchase', amount: '253.11', base_amount: '220.00', shipping: '0.00', tax: '28.60', fees: '4.51' }), [
+    { label: 'Quantity', value: '2' },
+    { label: 'Price', value: '$220.00 ($110.00 each)' },
+    { label: 'Tax', value: '$28.60' },
+    { label: 'Fees', value: '$4.51' },
+    { label: 'Total paid', value: '$253.11 ($126.56 each)' },
+  ])
+  assert.deepEqual(costBreakdown({ ...base, kind: 'sale', quantity: -1, amount: '300.00', platform_fees: '39.00', cost: '126.56', profit: '134.44' }), [
+    { label: 'Quantity', value: '1' },
+    { label: 'Sold for', value: '$300.00' },
+    { label: 'Platform fees', value: '−$39.00' },
+    { label: 'Cost', value: '$126.56' },
+    { label: 'Profit', value: '$134.44' },
+  ])
+  assert.deepEqual(costBreakdown({ ...base, kind: 'sale', quantity: 1, amount: '50.00', has_unknown_cost: true }).slice(-1), [{ label: 'Cost', value: 'Unknown' }])
 })

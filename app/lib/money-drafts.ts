@@ -1,5 +1,5 @@
-import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type MovementLeg, type OpenItem, type StatementLine } from './api'
-import { money, tone } from './format'
+import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type MovementLeg, type OpenItem, type StatementLine, type Transaction } from './api'
+import { money, perUnit, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
 export type MoneyAdjustmentDirection = 'up' | 'down'
@@ -454,4 +454,45 @@ export function legLine(leg: Pick<MovementLeg, 'account_name' | 'account_kind' |
   if (leg.account_kind === 'member') return leg.account_name + ' is owed ' + amount + (out ? ' more' : ' less')
   if (leg.account_kind === 'store_credit') return amount + ' store credit ' + (out ? 'used at ' : 'added at ') + leg.account_name
   return amount + (out ? ' out of ' : ' into ') + leg.account_name
+}
+
+/** One labelled figure in a transaction's cost breakdown. */
+export interface BreakdownRow {
+  label: string
+  value: string
+}
+
+/** What a purchase or sale was made of, top to bottom, ending in what it came to. Zero extras
+ *  are left out so the rows shown always add up to the last one. */
+export function costBreakdown(
+  t: Pick<Transaction, 'kind' | 'quantity' | 'amount' | 'base_amount' | 'shipping' | 'tax' | 'fees' | 'platform_fees' | 'payment_fees' | 'shipping_paid' | 'cost' | 'profit' | 'has_unknown_cost'>,
+): BreakdownRow[] {
+  const units = Math.abs(t.quantity)
+  /** The amount, and the price of one when several went together. */
+  const withEach = (amount: string) => {
+    const one = units > 1 ? perUnit(amount, units) : null
+    return money(amount) + (one !== null ? ` (${money(one)} each)` : '')
+  }
+  const nonZero = (value: string | null): value is string => value !== null && tone(value) !== null
+  const rows: BreakdownRow[] = [{ label: 'Quantity', value: String(units) }]
+  if (t.kind === 'purchase') {
+    const price = t.base_amount ?? t.amount
+    if (price !== null) rows.push({ label: 'Price', value: withEach(price) })
+    for (const [label, value] of [['Shipping', t.shipping], ['Tax', t.tax], ['Fees', t.fees]] as const) {
+      if (nonZero(value)) rows.push({ label, value: money(value) })
+    }
+    if (t.amount !== null) rows.push({ label: 'Total paid', value: withEach(t.amount) })
+    return rows
+  }
+  if (t.kind === 'sale') {
+    if (t.amount !== null) rows.push({ label: 'Sold for', value: withEach(t.amount) })
+    for (const [label, value] of [['Platform fees', t.platform_fees], ['Payment fees', t.payment_fees], ['Shipping paid', t.shipping_paid]] as const) {
+      if (nonZero(value)) rows.push({ label, value: '−' + money(value) })
+    }
+    rows.push({ label: 'Cost', value: t.has_unknown_cost || t.cost === null ? 'Unknown' : money(t.cost) })
+    if (!t.has_unknown_cost && t.profit !== null) rows.push({ label: 'Profit', value: money(t.profit) })
+    return rows
+  }
+  if (t.amount !== null) rows.push({ label: 'Amount', value: money(t.amount) })
+  return rows
 }
