@@ -13,6 +13,7 @@ import {
   adjustmentDraftFromMovement,
   expenseEditFromMovement,
   legLine,
+  linesSinceSettled,
   openItemLine,
   signedChange,
   statementReason,
@@ -81,20 +82,17 @@ interface MovementActions {
   onVoid: () => void
 }
 
-/** Every line that moved this account, newest first, so the balance is never taken on trust. */
+/** Only the lines that make up the balance right now, newest first. Anything from before the
+ *  balance last hit zero has netted out and lives in Movements below. */
 function AccountStatement({ account, actionsFor }: { account: Account; actionsFor: (movement: Movement) => MovementActions }) {
   const api = useApi()
   const statement = useQuery({ queryKey: ['statement', account.id], queryFn: () => api.statement(account.id) })
   if (statement.error) return <ErrorNotice error={statement.error} retry={() => void statement.refetch()} />
   if (!statement.data) return <Loading />
-  const lines = statement.data.items
-  const owed = account.balance_means === 'owed'
-  if (lines.length === 0) return <Copy muted>Nothing has moved this balance yet.</Copy>
+  const lines = linesSinceSettled(statement.data.items)
+  if (lines.length === 0) return <Copy muted>Nothing owing.</Copy>
   return (
     <View style={{ gap: 8 }}>
-      <Copy muted>
-        {owed ? 'Adds to what they are owed: stock and expenses they paid for. Comes off: paybacks and sale cash they kept.' : 'Every movement in and out, newest first.'}
-      </Copy>
       {lines.map((line) => {
         const actions = actionsFor(line.movement)
         return (
@@ -105,10 +103,7 @@ function AccountStatement({ account, actionsFor }: { account: Account; actionsFo
                 {/* The reason already names the product, so only the date and notes follow. */}
                 <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
               </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Copy>{signedChange(line.change)}</Copy>
-                <Copy muted>{owed ? 'Owed' : 'Balance'} {money(line.balance)}</Copy>
-              </View>
+              <Copy>{signedChange(line.change)}</Copy>
             </Row>
             {/* A statement only lists active movements, so every line can still be voided. */}
             <Row>
@@ -118,6 +113,14 @@ function AccountStatement({ account, actionsFor }: { account: Account; actionsFo
           </View>
         )
       })}
+      <View style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
+        <Row>
+          <View style={{ flex: 1, minWidth: 180 }}>
+            <Copy>Total</Copy>
+          </View>
+          <Copy>{money(statement.data.balance)}</Copy>
+        </Row>
+      </View>
     </View>
   )
 }

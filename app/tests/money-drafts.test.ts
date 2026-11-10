@@ -14,6 +14,7 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   legLine,
+  linesSinceSettled,
   openItemLine,
   buildTransferPayload,
   expenseEditFromMovement,
@@ -388,4 +389,15 @@ test('a buy-in names whose shares it paid for and a positive amount', () => {
   })
   assert.equal(buildContributionPayload({ ...draft, amount: '0' }), null)
   assert.ok(validateContributionDraft({ ...draft, memberId: '' }).accountId)
+})
+
+test('a statement keeps only the lines since the balance was last zero', () => {
+  const line = (change: string, balance: string) => ({ change, balance, movement: { id: change } }) as unknown as StatementLine
+  // Newest first: two buys on top of a balance that was paid down to zero.
+  const lines = [line('253.11', '441.80'), line('188.69', '188.69'), line('-42.10', '0.00'), line('42.10', '42.10')]
+  const open = linesSinceSettled(lines)
+  assert.deepEqual(open.map((item) => item.change), ['253.11', '188.69'])
+  assert.equal(sumMoney(open.map((item) => item.change)), '441.80')
+  assert.deepEqual(linesSinceSettled([line('-42.10', '0.00'), line('42.10', '42.10')]), [])
+  assert.equal(linesSinceSettled([line('10.00', '30.00'), line('20.00', '20.00')]).length, 2)
 })
