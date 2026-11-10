@@ -125,8 +125,9 @@ export interface TransferDialogProps {
   onClose: () => void
   /** The posted transfer this one corrects. */
   replacing?: { id: string; draft: TransferDraft }
-  /** Paying a partner back for one row: who gets it and how much, with the source left to choose. */
-  payingBack?: { movementId: string; toAccountId: string; amount: string; notes: string }
+  /** Settling up with a partner: who gets it and how much, with the source left to choose. With
+   *  a movement it pays back that one row; without, it settles the whole balance. */
+  payingBack?: { movementId?: string; toAccountId: string; amount: string; notes: string }
 }
 
 export function TransferDialog({ accounts, from, onClose, replacing, payingBack }: TransferDialogProps) {

@@ -1338,8 +1338,18 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   // Tapping a partner's name says why they are owed what they are owed.
   const partner = page.getByRole('group', { name: member.name, exact: true });
   await partner.getByRole('button', { name: /^Why is E2E Tester at / }).click();
-  await expect(partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true })).toBeVisible();
-  await page.getByRole('group', { name: 'Open: ' + name, exact: true }).getByRole('button', { name: 'Pay back', exact: true }).click();
+  const owed = partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true });
+  await expect(owed).toBeVisible();
+  // Tapping the line shows what the purchase was made of.
+  await owed.getByRole('button', { name: 'Breakdown of Paid for ' + name, exact: true }).click();
+  await expect(owed.getByText('Total paid', { exact: true })).toBeVisible();
+  // The whole balance can be paid back from the statement's total.
+  await partner.getByRole('button', { name: /^Pay back all / }).click();
+  await expect(page.getByRole('dialog', { name: 'Pay back', exact: true })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Paying back one line settles that line.
+  await owed.getByRole('button', { name: 'Pay back', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Pay back', exact: true });
   const sent = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === API + '/api/v1/money/transfers');
   await dialog.getByRole('button', { name: 'Pay it back', exact: true }).click();

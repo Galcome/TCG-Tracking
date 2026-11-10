@@ -7,10 +7,11 @@ import { EditTransactionDialog, VoidDialog } from '../../components/product-form
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
-import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem } from '../../lib/api'
+import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem, type StatementLine } from '../../lib/api'
 import { money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
+  costBreakdown,
   expenseEditFromMovement,
   legLine,
   linesSinceSettled,
@@ -82,44 +83,119 @@ interface MovementActions {
   onVoid: () => void
 }
 
+/** A label and its figure, one per line of a breakdown. */
+function BreakdownLine({ label, value }: { label: string; value: string }) {
+  return (
+    <Row>
+      <View style={{ flex: 1, minWidth: 120 }}>
+        <Copy muted>{label}</Copy>
+      </View>
+      <Copy muted>{value}</Copy>
+    </Row>
+  )
+}
+
+/** What a purchase or sale on a statement was made of. */
+function StockBreakdown({ movement }: { movement: Movement }) {
+  const api = useApi()
+  const productId = movement.product_id ?? ''
+  const product = useQuery({ queryKey: ['product', productId], queryFn: () => api.product(productId), enabled: Boolean(productId) })
+  const id = movement.purchase_id ?? movement.sale_id
+  const kind = movement.purchase_id ? 'purchase' : 'sale'
+  if (product.error) return <ErrorNotice error={product.error} retry={() => void product.refetch()} />
+  if (!product.data) return <Loading />
+  const transaction = product.data.history.find((row) => row.kind === kind && row.id === id)
+  if (!transaction) return <Copy muted>The {kind} behind this line is no longer on the product.</Copy>
+  return (
+    <>
+      {costBreakdown(transaction).map((row) => <BreakdownLine key={row.label} label={row.label} value={row.value} />)}
+    </>
+  )
+}
+
+/** Tapping a statement line opens what it was made of, then who paid for it. */
+function LineBreakdown({ line }: { line: StatementLine }) {
+  const { movement } = line
+  const isStock = Boolean((movement.purchase_id || movement.sale_id) && movement.product_id)
+  return (
+    <View style={{ gap: 4, paddingLeft: 12, borderLeftWidth: 2, borderColor: colors.edge }}>
+      {isStock ? <StockBreakdown movement={movement} /> : <BreakdownLine label="Amount" value={money(movement.amount)} />}
+      {movement.legs.map((leg) => <Copy key={leg.account_id} muted>{legLine(leg)}</Copy>)}
+    </View>
+  )
+}
+
 /** Only the lines that make up the balance right now, newest first. Anything from before the
  *  balance last hit zero has netted out and lives in Movements below. */
-function AccountStatement({ account, actionsFor }: { account: Account; actionsFor: (movement: Movement) => MovementActions }) {
+function AccountStatement({
+  account,
+  actionsFor,
+  openItems,
+  onPayBackItem,
+  onPayBackAll,
+}: {
+  account: Account
+  actionsFor: (movement: Movement) => MovementActions
+  openItems: OpenItem[]
+  onPayBackItem: (item: OpenItem) => void
+  onPayBackAll: (balance: string) => void
+}) {
   const api = useApi()
+  const [opened, setOpened] = useState<string | null>(null)
   const statement = useQuery({ queryKey: ['statement', account.id], queryFn: () => api.statement(account.id) })
   if (statement.error) return <ErrorNotice error={statement.error} retry={() => void statement.refetch()} />
   if (!statement.data) return <Loading />
   const lines = linesSinceSettled(statement.data.items)
   if (lines.length === 0) return <Copy muted>Nothing owing.</Copy>
+  const balance = statement.data.balance
+  const owedToThem = account.balance_means === 'owed' && !isZeroMoney(balance) && !isNegativeMoney(balance)
   return (
     <View style={{ gap: 8 }}>
       {lines.map((line) => {
         const actions = actionsFor(line.movement)
+        const reason = statementReason(line, account)
+        const open = openItems.find((item) => item.movement.id === line.movement.id)
+        const showing = opened === line.movement.id
         return (
-          <View key={line.movement.id} role="group" accessibilityLabel={`Statement: ${statementReason(line, account)}`} style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
+          <View key={line.movement.id} role="group" accessibilityLabel={`Statement: ${reason}`} style={{ gap: 8, borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
             <Row>
               <View style={{ flex: 1, minWidth: 180 }}>
-                <Copy>{statementReason(line, account)}</Copy>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Breakdown of ${reason}`}
+                  aria-expanded={showing}
+                  accessibilityState={{ expanded: showing }}
+                  onPress={() => setOpened(showing ? null : line.movement.id)}
+                >
+                  <Copy><Text style={{ color: colors.accent }}>{reason} {showing ? '−' : '+'}</Text></Copy>
+                </Pressable>
                 {/* The reason already names the product, so only the date and notes follow. */}
                 <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
               </View>
               <Copy>{signedChange(line.change)}</Copy>
             </Row>
+            {showing ? <LineBreakdown line={line} /> : null}
             {/* A statement only lists active movements, so every line can still be voided. */}
             <Row>
+              {open ? <Button label="Pay back" onPress={() => onPayBackItem(open)} /> : null}
               {actions.onEdit ? <Button label="Edit" onPress={actions.onEdit} /> : null}
               <Button label="Void" onPress={actions.onVoid} danger />
             </Row>
           </View>
         )
       })}
-      <View style={{ borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
+      <View style={{ gap: 8, borderTopWidth: 1, borderColor: colors.edge, paddingTop: 8 }}>
         <Row>
           <View style={{ flex: 1, minWidth: 180 }}>
             <Copy>Total</Copy>
           </View>
-          <Copy>{money(statement.data.balance)}</Copy>
+          <Copy>{money(balance)}</Copy>
         </Row>
+        {owedToThem ? (
+          <Row>
+            <Button label={`Pay back all ${money(balance)}`} onPress={() => onPayBackAll(balance)} variant="primary" />
+          </Row>
+        ) : null}
       </View>
     </View>
   )
@@ -131,12 +207,18 @@ function AccountCard({
   onAdjust,
   onExpense,
   actionsFor,
+  openItems,
+  onPayBackItem,
+  onPayBackAll,
 }: {
   account: Account
   onTransfer: () => void
   onAdjust: () => void
   onExpense: () => void
   actionsFor: (movement: Movement) => MovementActions
+  openItems: OpenItem[]
+  onPayBackItem: (item: OpenItem) => void
+  onPayBackAll: (balance: string) => void
 }) {
   const [showing, setShowing] = useState(false)
   return (
@@ -165,7 +247,9 @@ function AccountCard({
           <Button label="Adjust" onPress={onAdjust} />
           <Button label="Add expense" onPress={onExpense} />
         </Row>
-        {showing ? <AccountStatement account={account} actionsFor={actionsFor} /> : null}
+        {showing ? (
+          <AccountStatement account={account} actionsFor={actionsFor} openItems={openItems} onPayBackItem={onPayBackItem} onPayBackAll={onPayBackAll} />
+        ) : null}
       </Card>
     </View>
   )
@@ -288,6 +372,16 @@ function StockActionDialog({ action, onClose }: { action: StockAction; onClose: 
     : <VoidDialog transaction={transaction} onClose={onClose} />
 }
 
+/** Joint cash going to a partner: for one open row, or for their whole balance. */
+interface PayBack {
+  key: string
+  fromAccountId?: string
+  toAccountId: string
+  amount: string
+  notes: string
+  movementId?: string
+}
+
 export interface MoneyProps {
   /** Kept for route-shell parity; the screen itself owns its money actions. */
   onRecordSale?: () => void
@@ -307,7 +401,7 @@ export function Money(_props: MoneyProps = {}) {
   const [stockAction, setStockAction] = useState<StockAction | null>(null)
   // A voided row changed nothing, so it is noise until someone asks for it.
   const [hideVoided, setHideVoided] = useState(true)
-  const [payingBack, setPayingBack] = useState<OpenItem | null>(null)
+  const [payingBack, setPayingBack] = useState<PayBack | null>(null)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const open = useQuery({ queryKey: ['openItems'], queryFn: api.openItems })
@@ -354,6 +448,32 @@ export function Money(_props: MoneyProps = {}) {
       onEdit: target ? () => setEditing(target) : undefined,
       onVoid: () => setVoiding(movement.id),
     }
+  }
+
+  const jointId = accounts.data?.items.find((account) => account.kind === 'joint')?.id
+
+  /** Pay a partner back for one open row, from joint cash. */
+  function payBackItem(item: OpenItem) {
+    setPayingBack({
+      key: item.movement.id + item.account_id,
+      fromAccountId: jointId ?? accounts.data?.items.find((account) => account.id !== item.account_id)?.id,
+      toAccountId: item.account_id,
+      amount: item.outstanding,
+      notes: `Paying back ${item.movement.product_name ?? MOVEMENT_LABELS[item.movement.kind].toLowerCase()}`,
+      movementId: item.movement.id,
+    })
+  }
+
+  /** Pay a partner their whole balance from joint cash. With no single row named, the server
+   *  takes it off their oldest open items first, so everything they are owed closes. */
+  function payBackAll(account: Account, balance: string) {
+    setPayingBack({
+      key: 'all' + account.id,
+      fromAccountId: jointId ?? accounts.data?.items.find((other) => other.id !== account.id)?.id,
+      toAccountId: account.id,
+      amount: balance,
+      notes: `Paying back ${account.name}`,
+    })
   }
 
   function resetMovementPage() {
@@ -411,6 +531,9 @@ export function Money(_props: MoneyProps = {}) {
               onAdjust={() => setAdjusting(account)}
               onExpense={() => setExpenseFrom(account.id)}
               actionsFor={actionsFor}
+              openItems={openItems.filter((item) => item.account_id === account.id)}
+              onPayBackItem={payBackItem}
+              onPayBackAll={(balance) => payBackAll(account, balance)}
             />
           ))}
           {spentStores.length > 0 ? (
@@ -434,7 +557,7 @@ export function Money(_props: MoneyProps = {}) {
                 <OpenItemCard
                   key={`${item.movement.id}:${item.account_id}`}
                   item={item}
-                  onPayBack={() => setPayingBack(item)}
+                  onPayBack={() => payBackItem(item)}
                 />
               ))}
             </View>
@@ -532,17 +655,11 @@ export function Money(_props: MoneyProps = {}) {
       {stockAction ? <StockActionDialog key={stockAction.movement.id + stockAction.mode} action={stockAction} onClose={() => setStockAction(null)} /> : null}
       {payingBack && accounts.data ? (
         <TransferDialog
-          key={payingBack.movement.id + payingBack.account_id}
+          key={payingBack.key}
           // Every account, not just active ones: a partner who left can still be owed.
           accounts={accounts.data.items}
-          from={(accounts.data.items.find((account) => account.kind === 'joint')
-            ?? accounts.data.items.find((account) => account.id !== payingBack.account_id))?.id}
-          payingBack={{
-            movementId: payingBack.movement.id,
-            toAccountId: payingBack.account_id,
-            amount: payingBack.outstanding,
-            notes: `Paying back ${payingBack.movement.product_name ?? MOVEMENT_LABELS[payingBack.movement.kind].toLowerCase()}`,
-          }}
+          from={payingBack.fromAccountId}
+          payingBack={payingBack}
           onClose={() => setPayingBack(null)}
         />
       ) : null}
