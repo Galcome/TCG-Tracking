@@ -435,6 +435,13 @@ export function statementReason(line: StatementLine, account: Pick<Account, 'id'
   }
 }
 
+/** The statement lines since the balance was last at zero, newest first. Everything older
+ * nets to nothing, so these lines alone add up to the balance; the rest is history. */
+export function linesSinceSettled(lines: StatementLine[]): StatementLine[] {
+  const settled = lines.findIndex((line) => signedCents(line.balance) === 0n)
+  return settled === -1 ? lines : lines.slice(0, settled)
+}
+
 /** A statement change with its sign always shown: "+$271.06", "−$335.00". */
 export function signedChange(change: string): string {
   const amount = money(change.trim().replace(/^[-+]/, ''))

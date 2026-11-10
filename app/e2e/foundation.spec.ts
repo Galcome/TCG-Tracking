@@ -1348,6 +1348,11 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const { id } = await payback.json();
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
+  // The payback was undone behind the screen's back, and a statement lists only what is still
+  // owed, so load what the server now says before looking for the purchase line again.
+  await page.reload();
+  await partner.getByRole('button', { name: /^Why is E2E Tester at / }).click();
+  await expect(partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true })).toBeVisible();
 
   const card = page.getByRole('group', { name: row.notes || row.id, exact: true });
   await card.getByRole('button', { name: 'Edit', exact: true }).click();
