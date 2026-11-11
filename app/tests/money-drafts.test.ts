@@ -14,8 +14,11 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   legLine,
+  movementDetail,
   movementHeadline,
+  movementParties,
   paidBackLine,
+  transferDraftFromPayback,
   openItemLine,
   buildTransferPayload,
   costBreakdown,
@@ -413,6 +416,36 @@ test('a movement row says what happened in a few words', () => {
 test('a paid-back row notes when and where it was paid back from', () => {
   assert.equal(paidBackLine({ occurred_on: '2026-11-10', from_account_name: 'Joint account' }), 'Paid back 2026-11-10 from Joint account')
   assert.equal(paidBackLine({ occurred_on: null, from_account_name: 'Joint account' }), 'Paid back from Joint account')
+})
+
+test('a movement row says who paid and who got the cash', () => {
+  const leg = (account_name: string, account_kind: 'joint' | 'member' | 'store_credit', amount: string) => ({ account_id: account_name, account_name, account_kind, amount })
+  assert.equal(movementParties({ kind: 'funding', legs: [leg('Joseph', 'member', '-253.11')] }), 'Paid by Joseph')
+  assert.equal(movementParties({ kind: 'funding', legs: [leg('Joseph', 'member', '-100.00'), leg('Joint', 'joint', '-50.00')] }), 'Paid by Joseph $100.00, Joint $50.00')
+  assert.equal(movementParties({ kind: 'funding', legs: [] }), '')
+  assert.equal(movementParties({ kind: 'expense', legs: [leg('Jason', 'member', '-9.00')] }), 'Paid by Jason')
+  assert.equal(movementParties({ kind: 'proceeds', legs: [leg('Joint', 'joint', '300.00')] }), 'Cash to Joint')
+  assert.equal(movementParties({ kind: 'proceeds', legs: [] }), '')
+  assert.equal(movementParties({ kind: 'transfer', legs: [leg('Joint', 'joint', '-188.69'), leg('Joseph', 'member', '188.69')] }), 'Joint → Joseph')
+  assert.equal(movementParties({ kind: 'contribution', legs: [leg('Joint', 'joint', '5000.00')] }), 'Into Joint')
+  assert.equal(movementParties({ kind: 'transfer', legs: [leg('Joint', 'joint', '-5.00')] }), 'Out of Joint')
+  assert.equal(movementParties({ kind: 'transfer', legs: [] }), '')
+  assert.equal(movementParties({ kind: 'adjustment', legs: [leg('Mark', 'member', '-5.00')] }), 'Mark')
+})
+
+test('a movement row says when and who entered it', () => {
+  assert.equal(movementDetail({ occurred_on: '2026-11-10', entered_by_name: 'Joseph', notes: 'Paying back ETB' }), '2026-11-10 · Entered by Joseph · Paying back ETB')
+  assert.equal(movementDetail({ occurred_on: null, entered_by_name: null, notes: null }), 'No date')
+})
+
+test('a payback re-opens as the transfer that made it, still tied to its line', () => {
+  const payback = { from_account_id: 'joint', to_account_id: 'jason', amount: '1000.00', occurred_on: '2026-11-10', notes: 'part one' }
+  assert.deepEqual(transferDraftFromPayback(payback, 'line', '2026-12-01'), {
+    fromAccountId: 'joint', toAccountId: 'jason', amount: '1000.00', occurredOn: '2026-11-10', notes: 'part one', settlesMovementId: 'line',
+  })
+  assert.deepEqual(transferDraftFromPayback({ ...payback, occurred_on: null, notes: null }, 'line', '2026-12-01'), {
+    fromAccountId: 'joint', toAccountId: 'jason', amount: '1000.00', occurredOn: '2026-12-01', notes: '', settlesMovementId: 'line',
+  })
 })
 
 test('a statement line breaks a purchase or sale down into what it cost', () => {

@@ -458,6 +458,47 @@ export function movementHeadline(movement: Pick<Movement, 'kind' | 'legs' | 'pro
   }
 }
 
+function partyNames(legs: Pick<MovementLeg, 'account_name' | 'amount'>[]): string {
+  if (legs.length === 1) return legs[0].account_name
+  return legs.map((leg) => `${leg.account_name} ${money(leg.amount.trim().replace(/^-/, ''))}`).join(', ')
+}
+
+/**
+ * Who was on each side of a movement, in one line: "Paid by Joseph", "Cash to Joint account",
+ * "Joint account → Joseph". The figures behind it are a tap away on the card.
+ */
+export function movementParties(movement: Pick<Movement, 'kind' | 'legs'>): string {
+  const out = movement.legs.filter((leg) => tone(leg.amount) === 'loss')
+  const into = movement.legs.filter((leg) => tone(leg.amount) === 'gain')
+  if (movement.kind === 'funding' || movement.kind === 'expense') return out.length ? `Paid by ${partyNames(out)}` : ''
+  if (movement.kind === 'proceeds') return into.length ? `Cash to ${partyNames(into)}` : ''
+  if (movement.kind === 'adjustment') return partyNames(movement.legs)
+  if (out.length && into.length) return `${partyNames(out)} → ${partyNames(into)}`
+  if (into.length) return `Into ${partyNames(into)}`
+  return out.length ? `Out of ${partyNames(out)}` : ''
+}
+
+/** Re-open a payback made against `settlesMovementId` as the transfer that made it. */
+export function transferDraftFromPayback(
+  payback: Pick<PaidBack, 'from_account_id' | 'to_account_id' | 'amount' | 'occurred_on' | 'notes'>,
+  settlesMovementId: string,
+  today: string,
+): TransferDraft {
+  return {
+    fromAccountId: payback.from_account_id,
+    toAccountId: payback.to_account_id,
+    amount: payback.amount,
+    occurredOn: payback.occurred_on ?? today,
+    notes: payback.notes ?? '',
+    settlesMovementId,
+  }
+}
+
+/** The small print under a movement: "2026-11-10 · Entered by Joseph · Paying back ETB". */
+export function movementDetail(row: { occurred_on: string | null; entered_by_name?: string | null; notes: string | null }): string {
+  return [row.occurred_on ?? 'No date', row.entered_by_name ? `Entered by ${row.entered_by_name}` : null, row.notes].filter(Boolean).join(' · ')
+}
+
 /** When and from where a movement was paid back: "Paid back 2026-11-10 from Joint account". */
 export function paidBackLine(payback: Pick<PaidBack, 'occurred_on' | 'from_account_name'>): string {
   return ['Paid back', payback.occurred_on, 'from', payback.from_account_name].filter(Boolean).join(' ')

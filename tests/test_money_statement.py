@@ -111,6 +111,25 @@ def test_a_part_paid_purchase_shows_only_what_is_left_on_it(client, make_product
     ]
 
 
+def test_a_part_paid_line_carries_its_payback_so_it_can_be_edited(client, make_product):
+    _, newer = two_open_rows(client, make_product)
+
+    payback = settle(client, newer["movement"]["id"], "50.00")
+
+    line = next(
+        row
+        for row in statement(client, me(client)["id"])["items"]
+        if row["movement"]["id"] == newer["movement"]["id"]
+    )
+    [paid] = line["movement"]["paid_back"]
+    assert line["movement"]["entered_by_name"]
+    assert paid["entered_by_name"] == line["movement"]["entered_by_name"]
+    assert line["change"] == "150.00"
+    assert (paid["movement_id"], paid["amount"]) == (payback["id"], "50.00")
+    assert paid["from_account_id"] == joint(client)["id"]
+    assert paid["to_account_id"] == me(client)["id"]
+
+
 def test_money_with_no_row_takes_the_oldest_lines_off_first(client, make_product):
     _, newer = two_open_rows(client, make_product)
 
@@ -152,9 +171,13 @@ def test_a_movement_notes_when_and_where_it_was_paid_back(client, make_product):
         {
             "movement_id": payback["id"],
             "occurred_on": TODAY.isoformat(),
+            "from_account_id": joint(client)["id"],
             "from_account_name": joint(client)["name"],
+            "to_account_id": me(client)["id"],
             "to_account_name": me(client)["name"],
             "amount": "200.00",
+            "notes": None,
+            "entered_by_name": payback["entered_by_name"],
         }
     ]
     assert funding[older["movement"]["id"]]["paid_back"] == []

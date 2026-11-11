@@ -125,14 +125,10 @@ class AdjustmentCreate(BaseModel):
     account_id: uuid.UUID
     #: What the balance should move by, in that account's own terms - `owed` for a member
     #: account, `cash` for the joint one. The sign flip to raw flow happens server-side.
-    amount: SignedMoney | None = Field(
-        default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS
-    )
+    amount: SignedMoney | None = Field(default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS)
     #: What the balance should read afterwards, in the same terms. Zero is a real target:
     #: "we are square with Patrick".
-    target: SignedMoney | None = Field(
-        default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS
-    )
+    target: SignedMoney | None = Field(default=None, ge=-MAX_MOVEMENT_CENTS, le=MAX_MOVEMENT_CENTS)
     occurred_on: date = Field(default_factory=date.today)
     notes: str | None = None
 
@@ -221,9 +217,14 @@ class PaidBackRead(BaseModel):
 
     movement_id: uuid.UUID
     occurred_on: date | None
+    from_account_id: uuid.UUID
     from_account_name: str
+    to_account_id: uuid.UUID
     to_account_name: str
     amount: MoneyOut
+    notes: str | None
+    #: Who typed it in, so there is someone to ask about it.
+    entered_by_name: str | None = None
 
 
 class MovementRead(BaseModel):
@@ -252,6 +253,8 @@ class MovementRead(BaseModel):
     #: Live paybacks made against this movement, oldest first. A paid-back purchase leaves
     #: the statement, so this is the note of when and from where it was paid back.
     paid_back: list[PaidBackRead] = []
+    #: Who typed it in, so there is someone to ask about it.
+    entered_by_name: str | None = None
     notes: str | None
     status: str
 

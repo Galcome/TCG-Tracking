@@ -219,9 +219,7 @@ def list_accounts(
         (MoneyAccount.kind == ACCOUNT_MEMBER, 1),
         else_=2,
     )
-    accounts = db.scalars(
-        select(MoneyAccount).order_by(order, MoneyAccount.name)
-    ).all()
+    accounts = db.scalars(select(MoneyAccount).order_by(order, MoneyAccount.name)).all()
 
     items: list[AccountRead] = []
     joint_balance = 0
@@ -275,6 +273,7 @@ def _serialise(
     products: dict[uuid.UUID, tuple[uuid.UUID, str]],
     settleable: set[tuple[uuid.UUID, uuid.UUID]],
     paid_back: dict[uuid.UUID, list[money.Payback]],
+    names: dict[uuid.UUID, str],
 ) -> list[MovementRead]:
     items: list[MovementRead] = []
     for movement in movements:
@@ -314,14 +313,19 @@ def _serialise(
                     PaidBackRead(
                         movement_id=payback.id,
                         occurred_on=payback.occurred_on,
+                        from_account_id=source.id,
                         from_account_name=source.name,
+                        to_account_id=destination.id,
                         to_account_name=destination.name,
                         amount=amount,
+                        notes=payback.notes,
+                        entered_by_name=names.get(payback.created_by_member_id),
                     )
                     for payback, source, destination, amount in paid_back.get(movement.id, [])
                 ],
                 notes=movement.notes,
                 status=movement.status,
+                entered_by_name=names.get(movement.created_by_member_id),
             )
         )
     return items
@@ -369,8 +373,16 @@ def _read_movements(db: Session, movements: list[MoneyMovement]) -> list[Movemen
     links = {m.settles_movement_id for m in movements if m.settles_movement_id is not None}
     settleable = money.settleable(db, links) if links else set()
     paid_back = money.paybacks(db, {movement.id for movement in movements})
+    entered_by = {m.created_by_member_id for m in movements} | {
+        payback.created_by_member_id for rows in paid_back.values() for payback, *_ in rows
+    }
+    entered_by.discard(None)
+    names: dict[uuid.UUID, str] = {}
+    if entered_by:
+        found = select(Member.id, Member.display_name).where(Member.id.in_(entered_by))
+        names = dict(db.execute(found).tuples().all())
     return _serialise(
-        movements, legs_by_movement, _products(db, movements), settleable, paid_back
+        movements, legs_by_movement, _products(db, movements), settleable, paid_back, names
     )
 
 
@@ -647,9 +659,7 @@ def create_adjustment(
     return _one(db, movement)
 
 
-@router.post(
-    "/contributions", response_model=MovementRead, status_code=status.HTTP_201_CREATED
-)
+@router.post("/contributions", response_model=MovementRead, status_code=status.HTTP_201_CREATED)
 def create_contribution(
     payload: ContributionCreate,
     member: Member = Depends(get_current_member),
@@ -775,4 +785,3 @@ def void_movement(
 def _one(db: Session, movement: MoneyMovement) -> MovementRead:
     """Serialise a single movement the same way the list does."""
     return _read_movements(db, [movement])[0]
-
