@@ -1663,7 +1663,15 @@ export function createApi(request: ApiRequest) { return {
 
   accounts: () => request<AccountsPage>('/api/v1/money/accounts'),
 
-  movements: (params: { account_id?: string; kind?: MovementKind; include_voided?: boolean; limit?: number; offset?: number }) =>
+  movements: (params: {
+    account_id?: string
+    kind?: MovementKind
+    include_voided?: boolean
+    occurred_from?: string
+    occurred_to?: string
+    limit?: number
+    offset?: number
+  }) =>
     request<MovementPage>(`/api/v1/money/movements${query(params)}`),
 
   openItems: () => request<{ items: OpenItem[] }>('/api/v1/money/open'),

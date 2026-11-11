@@ -299,8 +299,10 @@ def test_a_payback_keeps_its_row_through_a_product_delete_and_restore(client, ma
     [left] = open_items(client)
     assert left["movement"]["id"] == older["movement"]["id"]
     assert left["outstanding"] == "100.00"
-    [row] = movements(client, kind="transfer")
-    assert row["settles_movement_id"] == newer["movement"]["id"]
+    # Live again, the payback goes back under the row it paid off.
+    assert movements(client, kind="transfer") == []
+    funding = {row["id"]: row for row in movements(client, kind="funding")}
+    assert [paid["amount"] for paid in funding[newer["movement"]["id"]]["paid_back"]] == ["200.00"]
 
 
 def test_money_with_no_row_clears_the_oldest_item_first(client, make_product):

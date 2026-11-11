@@ -10,10 +10,11 @@ approval step; the audit trail is what makes a mistake recoverable.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from src.dependencies import db_session, get_current_member
 from src.models.ledger import STATUS_ACTIVE, Purchase, Sale
@@ -436,6 +437,8 @@ def account_statement(
 def list_movements(
     account_id: uuid.UUID | None = Query(default=None),
     kind: str | None = Query(default=None, pattern=f"^({'|'.join(MOVEMENT_KINDS)})$"),
+    occurred_from: date | None = Query(default=None),
+    occurred_to: date | None = Query(default=None),
     include_voided: bool = Query(default=True),
     limit: int = Query(default=DEFAULT_MOVEMENT_LIMIT, ge=1, le=MAX_MOVEMENT_LIMIT),
     offset: int = Query(default=0, ge=0),
@@ -447,16 +450,49 @@ def list_movements(
     Voided movements are listed and flagged by default, exactly as voided sales are: a
     voided row is the explanation for a balance changing. `include_voided=false` leaves them
     out here rather than in the client, so the total and the paging stay right.
+
+    Paying a partner back for a purchase or expense is listed under that row, not as a
+    transfer of its own: transfers are money moved for no row in particular. A row matches
+    an account or a date range when it does, or when one of its paybacks does, so paying
+    something back this week shows what was paid back.
     """
-    filters = []
+    if occurred_from and occurred_to and occurred_from > occurred_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The start date is after the end date",
+        )
+    payback = aliased(MoneyMovement)
+
+    def matches(movement) -> list:
+        """The account and date conditions, for a row or for one of its paybacks."""
+        conditions = []
+        if account_id is not None:
+            conditions.append(
+                movement.id.in_(
+                    select(MoneyPosting.movement_id).where(MoneyPosting.account_id == account_id)
+                )
+            )
+        if occurred_from:
+            conditions.append(movement.occurred_on >= occurred_from)
+        if occurred_to:
+            conditions.append(movement.occurred_on <= occurred_to)
+        return conditions
+
+    # A live payback is shown on the row it paid off. See `money.live_payback`.
+    filters = [~money.live_payback(MoneyMovement)]
     if kind:
         filters.append(MoneyMovement.kind == kind)
     if not include_voided:
         filters.append(MoneyMovement.status == STATUS_ACTIVE)
-    if account_id is not None:
+    if own := matches(MoneyMovement):
         filters.append(
-            MoneyMovement.id.in_(
-                select(MoneyPosting.movement_id).where(MoneyPosting.account_id == account_id)
+            or_(
+                and_(*own),
+                exists().where(
+                    payback.settles_movement_id == MoneyMovement.id,
+                    money.live_payback(payback),
+                    *matches(payback),
+                ),
             )
         )
 
