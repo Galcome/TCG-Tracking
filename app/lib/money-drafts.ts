@@ -1,5 +1,5 @@
 import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type Movement, type MovementLeg, type OpenItem, type PaidBack, type StatementLine, type Transaction } from './api'
-import { money, perUnit, tone } from './format'
+import { isoFromDate, money, perUnit, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
 export type MoneyAdjustmentDirection = 'up' | 'down'
@@ -500,6 +500,35 @@ export function movementDetail(row: { occurred_on: string | null; entered_by_nam
 }
 
 /** When and from where a movement was paid back: "Paid back 2026-11-10 from Joint account". */
+/** Which days the movements list covers. Empty means every day. */
+export type DateRangePreset = '' | 'month' | 'last30' | 'year' | 'custom'
+
+export const DATE_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
+  { value: '', label: 'All dates' },
+  { value: 'month', label: 'This month' },
+  { value: 'last30', label: 'Last 30 days' },
+  { value: 'year', label: 'This year' },
+  { value: 'custom', label: 'Custom range' },
+]
+
+export type MovementDates = { occurred_from?: string; occurred_to?: string }
+
+/** The first day a preset covers (and the last, for a custom range), as the list filter wants them. */
+export function movementDates(preset: DateRangePreset, custom: { from: string; to: string }, now = new Date()): MovementDates {
+  const day = (year: number, month: number, date: number) => isoFromDate(new Date(year, month, date))
+  const [year, month, date] = [now.getFullYear(), now.getMonth(), now.getDate()]
+  if (preset === 'month') return { occurred_from: day(year, month, 1) }
+  if (preset === 'last30') return { occurred_from: day(year, month, date - 29) }
+  if (preset === 'year') return { occurred_from: day(year, 0, 1) }
+  if (preset === 'custom') {
+    return {
+      ...(custom.from ? { occurred_from: custom.from } : {}),
+      ...(custom.to ? { occurred_to: custom.to } : {}),
+    }
+  }
+  return {}
+}
+
 export function paidBackLine(payback: Pick<PaidBack, 'occurred_on' | 'from_account_name'>): string {
   return ['Paid back', payback.occurred_on, 'from', payback.from_account_name].filter(Boolean).join(' ')
 }

@@ -1359,6 +1359,23 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await expect(owed).toHaveCount(0);
   const card = page.getByRole('group', { name: row.notes || row.id, exact: true });
   await expect(card.getByText(new RegExp('Paid back .* from ' + shared.name))).toBeVisible();
+  // The payback is part of the purchase's row, with its own Edit and Void, not a transfer card.
+  const paidBack = card.getByRole('group', { name: /^Payback: Paid back / });
+  await expect(paidBack.getByRole('button', { name: 'Void', exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Paying back ' + name, exact: true })).toHaveCount(0);
+  // Bought today, so it is in this month's movements and not in a range that ended last year.
+  await page.getByRole('button', { name: 'Dates: All dates', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Dates', exact: true }).getByRole('button', { name: 'This month', exact: true }).click();
+  await expect(card).toBeVisible();
+  await page.getByRole('button', { name: 'Dates: This month', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Dates', exact: true }).getByRole('button', { name: 'Custom range', exact: true }).click();
+  const lastYear = String(new Date().getFullYear() - 1);
+  await page.getByLabel('From', { exact: true }).fill(lastYear + '-12-01');
+  await page.getByLabel('To', { exact: true }).fill(lastYear + '-12-31');
+  await expect(card).toHaveCount(0);
+  await page.getByRole('button', { name: 'Dates: Custom range', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Dates', exact: true }).getByRole('button', { name: 'All dates', exact: true }).click();
+  await expect(card).toBeVisible();
   const { id } = await payback.json();
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
   // The payback was undone behind the screen's back, and a statement lists only what is still

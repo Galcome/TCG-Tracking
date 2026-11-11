@@ -15,9 +15,9 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, exists, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from src.models.ledger import STATUS_ACTIVE, STATUS_VOIDED, Purchase, Sale
 from src.models.member import Member
@@ -323,6 +323,32 @@ def open_lines(db: Session, account: MoneyAccount) -> tuple[int, list[tuple[Mone
 Payback = tuple[MoneyMovement, MoneyAccount, MoneyAccount, int]
 
 
+def live_payback(payback: type[MoneyMovement]) -> ColumnElement[bool]:
+    """Whether `payback` (a movement, or an alias of one) still pays off the row it names.
+
+    It does while it is active, the row is active, and a partner who paid for the row is
+    who it paid. Otherwise the link has gone stale and the payback is just money moved.
+    """
+    row = aliased(MoneyMovement)
+    paid = aliased(MoneyPosting)
+    received = aliased(MoneyPosting)
+    partner = aliased(MoneyAccount)
+    return and_(
+        payback.status == STATUS_ACTIVE,
+        exists().where(
+            row.id == payback.settles_movement_id,
+            row.status == STATUS_ACTIVE,
+            paid.movement_id == row.id,
+            paid.delta_cents < 0,
+            received.movement_id == payback.id,
+            received.delta_cents > 0,
+            received.account_id == paid.account_id,
+            partner.id == paid.account_id,
+            partner.kind == ACCOUNT_MEMBER,
+        ),
+    )
+
+
 def paybacks(db: Session, ids: set[uuid.UUID]) -> dict[uuid.UUID, list[Payback]]:
     """The live paybacks linked to each of these movements, oldest first.
 
@@ -335,7 +361,7 @@ def paybacks(db: Session, ids: set[uuid.UUID]) -> dict[uuid.UUID, list[Payback]]
         select(MoneyMovement, MoneyPosting, MoneyAccount)
         .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
         .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
-        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.settles_movement_id.in_(ids))
+        .where(MoneyMovement.settles_movement_id.in_(ids), live_payback(MoneyMovement))
         .order_by(
             MoneyMovement.occurred_on.asc().nullsfirst(),
             MoneyMovement.created_at.asc(),
@@ -389,9 +415,7 @@ def record_movement(
     db.flush()
 
     for account_id, delta in legs:
-        db.add(
-            MoneyPosting(movement_id=movement.id, account_id=account_id, delta_cents=delta)
-        )
+        db.add(MoneyPosting(movement_id=movement.id, account_id=account_id, delta_cents=delta))
     db.flush()
     return movement
 
@@ -429,9 +453,7 @@ def _derived_movement(
 def _replace_legs(db: Session, movement: MoneyMovement, legs: list[tuple[uuid.UUID, int]]) -> None:
     db.execute(delete(MoneyPosting).where(MoneyPosting.movement_id == movement.id))
     for account_id, delta in legs:
-        db.add(
-            MoneyPosting(movement_id=movement.id, account_id=account_id, delta_cents=delta)
-        )
+        db.add(MoneyPosting(movement_id=movement.id, account_id=account_id, delta_cents=delta))
     db.flush()
 
 

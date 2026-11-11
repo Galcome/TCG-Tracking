@@ -14,6 +14,7 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   legLine,
+  movementDates,
   movementDetail,
   movementHeadline,
   movementParties,
@@ -468,4 +469,17 @@ test('a statement line breaks a purchase or sale down into what it cost', () => 
     { label: 'Profit', value: '$134.44' },
   ])
   assert.deepEqual(costBreakdown({ ...base, kind: 'sale', quantity: 1, amount: '50.00', has_unknown_cost: true }).slice(-1), [{ label: 'Cost', value: 'Unknown' }])
+})
+
+test('date presets cover whole days up to today', () => {
+  const now = new Date(2026, 10, 11, 15, 30)
+  const none = { from: '', to: '' }
+  assert.deepEqual(movementDates('', none, now), {})
+  assert.deepEqual(movementDates('month', none, now), { occurred_from: '2026-11-01' })
+  assert.deepEqual(movementDates('last30', none, now), { occurred_from: '2026-10-13' })
+  assert.deepEqual(movementDates('year', none, now), { occurred_from: '2026-01-01' })
+  assert.deepEqual(movementDates('last30', none, new Date(2026, 0, 5)), { occurred_from: '2025-12-07' })
+  assert.deepEqual(movementDates('custom', { from: '2026-01-01', to: '2026-01-31' }, now), { occurred_from: '2026-01-01', occurred_to: '2026-01-31' })
+  assert.deepEqual(movementDates('custom', { from: '', to: '2026-01-31' }, now), { occurred_to: '2026-01-31' })
+  assert.deepEqual(movementDates('custom', none, now), {})
 })

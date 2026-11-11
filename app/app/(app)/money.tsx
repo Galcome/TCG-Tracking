@@ -4,16 +4,19 @@ import { Pressable, Text, View } from 'react-native'
 
 import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, PayBackAllDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
+import { DateField } from '../../components/date-field'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
 import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem, type PaidBack, type StatementLine } from '../../lib/api'
-import { money, todayIso } from '../../lib/format'
+import { isoFromDate, money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
   costBreakdown,
+  DATE_RANGE_OPTIONS,
   expenseEditFromMovement,
   legLine,
+  movementDates,
   movementDetail,
   movementHeadline,
   movementParties,
@@ -26,6 +29,7 @@ import {
   transferDraftFromMovement,
   transferDraftFromPayback,
   type BalanceAdjustmentDraft,
+  type DateRangePreset,
   type ExpenseEdit,
   type TransferDraft,
 } from '../../lib/money-drafts'
@@ -354,10 +358,12 @@ function MovementCard({
   movement,
   onVoid,
   onEdit,
+  paybackActions,
 }: {
   movement: Movement
   onVoid: () => void
   onEdit?: () => void
+  paybackActions: (payback: PaidBack) => MovementActions
 }) {
   const [showing, setShowing] = useState(false)
   const voided = movement.status === 'voided'
@@ -386,17 +392,16 @@ function MovementCard({
           </View>
           <Text style={{ color, fontSize: 18, fontWeight: '700' }}>{money(movement.amount)}</Text>
         </Row>
-        {(movement.paid_back ?? []).map((payback) => (
-          <View key={payback.movement_id} style={{ alignSelf: 'flex-start', backgroundColor: colors.raised, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ color: colors.gain, fontSize: 13, fontWeight: '600' }}>✓ {paidBackLine(payback)} · {money(payback.amount)}</Text>
-          </View>
-        ))}
         {showing ? <MovementLegs movement={movement} /> : null}
         <Row>
           {voided ? <Copy muted>Voided</Copy> : null}
           {!voided && onEdit ? <Button label="Edit" onPress={onEdit} /> : null}
           {!voided ? <Button label="Void" onPress={onVoid} danger /> : null}
         </Row>
+        {/* Paying a partner back for this is part of this row, not a transfer of its own. */}
+        {(movement.paid_back ?? []).map((payback) => (
+          <PaybackRow key={payback.movement_id} payback={payback} actions={paybackActions(payback)} />
+        ))}
       </Card>
     </View>
   )
@@ -465,6 +470,8 @@ export function Money(_props: MoneyProps = {}) {
   const api = useApi()
   const [accountFilter, setAccountFilter] = useState('')
   const [kindFilter, setKindFilter] = useState<MovementKind | ''>('')
+  const [datePreset, setDatePreset] = useState<DateRangePreset>('')
+  const [customDates, setCustomDates] = useState({ from: '', to: '' })
   const [offset, setOffset] = useState(0)
   const [transferFrom, setTransferFrom] = useState<string | null>(null)
   const [adjusting, setAdjusting] = useState<Account | null>(null)
@@ -480,12 +487,14 @@ export function Money(_props: MoneyProps = {}) {
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const open = useQuery({ queryKey: ['openItems'], queryFn: api.openItems })
+  const dates = movementDates(datePreset, customDates)
   const movements = useQuery({
-    queryKey: ['movements', accountFilter, kindFilter, hideVoided, offset],
+    queryKey: ['movements', accountFilter, kindFilter, hideVoided, dates, offset],
     queryFn: () => api.movements({
       account_id: accountFilter || undefined,
       kind: kindFilter || undefined,
       include_voided: hideVoided ? false : undefined,
+      ...dates,
       limit: PAGE_SIZE,
       offset,
     }),
@@ -668,7 +677,42 @@ export function Money(_props: MoneyProps = {}) {
               resetMovementPage()
             }}
           />
+          <Choice
+            label="Dates"
+            value={datePreset}
+            options={DATE_RANGE_OPTIONS}
+            onChange={(value) => {
+              const preset = value as DateRangePreset
+              // A custom range opens on the last 30 days, ready to be moved.
+              if (preset === 'custom' && datePreset !== 'custom') {
+                const now = new Date()
+                setCustomDates({ from: isoFromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), to: todayIso() })
+              }
+              setDatePreset(preset)
+              resetMovementPage()
+            }}
+          />
         </Row>
+        {datePreset === 'custom' ? (
+          <Row>
+            <DateField
+              label="From"
+              value={customDates.from}
+              onChange={(from) => {
+                setCustomDates({ ...customDates, from })
+                resetMovementPage()
+              }}
+            />
+            <DateField
+              label="To"
+              value={customDates.to}
+              onChange={(to) => {
+                setCustomDates({ ...customDates, to })
+                resetMovementPage()
+              }}
+            />
+          </Row>
+        ) : null}
       </Card>
       <Copy muted>{movements.data ? `${rows.length} movement${rows.length === 1 ? '' : 's'} shown${movements.data.total > rows.length ? ` of ${movements.data.total}` : ''}.` : 'Loading movements…'}</Copy>
       <ErrorNotice error={accounts.error ?? open.error ?? movements.error} retry={retry} />
@@ -676,14 +720,19 @@ export function Money(_props: MoneyProps = {}) {
       {movements.data && rows.length === 0 ? (
         <Card>
           <Copy muted>
-            {accountFilter || kindFilter || hideVoided
+            {accountFilter || kindFilter || hideVoided || datePreset
               ? 'No movements match those filters.'
               : 'Nothing has moved yet. Purchases and sales will appear here.'}
           </Copy>
         </Card>
       ) : null}
       {rows.map((movement) => (
-        <MovementCard key={movement.id} movement={movement} {...actionsFor(movement)} />
+        <MovementCard
+          key={movement.id}
+          movement={movement}
+          {...actionsFor(movement)}
+          paybackActions={(payback) => paybackActionsFor(movement, payback)}
+        />
       ))}
       {movements.data && movements.data.total > PAGE_SIZE ? (
         <Row>
