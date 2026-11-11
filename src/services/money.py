@@ -278,6 +278,84 @@ def open_items(db: Session) -> list[OpenItem]:
     return items
 
 
+def open_lines(db: Session, account: MoneyAccount) -> tuple[int, list[tuple[MoneyMovement, int]]]:
+    """An account's balance and the movements still in it, oldest first.
+
+    Each movement comes with how much of it is still in the balance, signed like the balance,
+    so the lines always add up to it. The walk is `open_items`, for any account and either
+    sign: newest first, a movement that pushed the balance its way keeps whatever was not
+    paid back against it, until the balance runs out. Whatever was paid back, kept or moved
+    has netted out and is not a line - it is history, in the movements list.
+    """
+    balance = balance_for(account, balances(db).get(account.id, 0))
+    if balance == 0:
+        return 0, []
+    sign = 1 if balance > 0 else -1
+    paid_back = _paid_back(db)
+    rows = db.execute(
+        select(MoneyMovement, func.sum(MoneyPosting.delta_cents))
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .where(MoneyPosting.account_id == account.id, MoneyMovement.status == STATUS_ACTIVE)
+        .group_by(MoneyMovement.id)
+        .order_by(
+            MoneyMovement.occurred_on.desc().nullslast(),
+            MoneyMovement.created_at.desc(),
+            MoneyMovement.id.desc(),
+        )
+    )
+    left = abs(balance)
+    lines: list[tuple[MoneyMovement, int]] = []
+    for movement, flow in rows:
+        pushed = sign * balance_for(account, int(flow))
+        unpaid = pushed - paid_back.get((movement.id, account.id), 0)
+        outstanding = min(unpaid, left)
+        if outstanding <= 0:
+            continue
+        left -= outstanding
+        lines.append((movement, sign * outstanding))
+        if left == 0:
+            break
+    lines.reverse()
+    return balance, lines
+
+
+#: A payback against a movement: (payback, from account, to account, cents).
+Payback = tuple[MoneyMovement, MoneyAccount, MoneyAccount, int]
+
+
+def paybacks(db: Session, ids: set[uuid.UUID]) -> dict[uuid.UUID, list[Payback]]:
+    """The live paybacks linked to each of these movements, oldest first.
+
+    Each says when it was paid back, from where, to whom and how much. A paid-back
+    purchase drops off the statement, so this is where the history of paying it off lives.
+    """
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(MoneyMovement, MoneyPosting, MoneyAccount)
+        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
+        .join(MoneyAccount, MoneyAccount.id == MoneyPosting.account_id)
+        .where(MoneyMovement.status == STATUS_ACTIVE, MoneyMovement.settles_movement_id.in_(ids))
+        .order_by(
+            MoneyMovement.occurred_on.asc().nullsfirst(),
+            MoneyMovement.created_at.asc(),
+            MoneyMovement.id.asc(),
+        )
+    )
+    legs: dict[uuid.UUID, tuple[MoneyMovement, list[tuple[MoneyPosting, MoneyAccount]]]] = {}
+    for movement, posting, account in rows:
+        legs.setdefault(movement.id, (movement, []))[1].append((posting, account))
+    found: dict[uuid.UUID, list[Payback]] = {}
+    for movement, postings in legs.values():
+        source = next(account for posting, account in postings if posting.delta_cents < 0)
+        for posting, account in postings:
+            if posting.delta_cents > 0:
+                found.setdefault(movement.settles_movement_id, []).append(
+                    (movement, source, account, posting.delta_cents)
+                )
+    return found
+
+
 # -------------------------------------------------------------------------- movements
 
 

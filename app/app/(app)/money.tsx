@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
-import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
+import { BalanceAdjustmentDialog, ContributionDialog, ExpenseDialog, PayBackAllDialog, TransferDialog, VoidMovementDialog } from '../../components/money-forms'
 import { EditTransactionDialog, VoidDialog } from '../../components/product-forms'
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
@@ -14,8 +14,9 @@ import {
   costBreakdown,
   expenseEditFromMovement,
   legLine,
-  linesSinceSettled,
+  movementHeadline,
   openItemLine,
+  paidBackLine,
   signedChange,
   statementReason,
   storeCreditMeaning,
@@ -125,8 +126,8 @@ function LineBreakdown({ line }: { line: StatementLine }) {
   )
 }
 
-/** Only the lines that make up the balance right now, newest first. Anything from before the
- *  balance last hit zero has netted out and lives in Movements below. */
+/** Only what is still in the balance, newest first. Once an item is paid back it leaves the
+ *  statement; its Movements row notes when and where it was paid back from. */
 function AccountStatement({
   account,
   actionsFor,
@@ -145,7 +146,7 @@ function AccountStatement({
   const statement = useQuery({ queryKey: ['statement', account.id], queryFn: () => api.statement(account.id) })
   if (statement.error) return <ErrorNotice error={statement.error} retry={() => void statement.refetch()} />
   if (!statement.data) return <Loading />
-  const lines = linesSinceSettled(statement.data.items)
+  const lines = statement.data.items
   if (lines.length === 0) return <Copy muted>Nothing owing.</Copy>
   const balance = statement.data.balance
   const owedToThem = account.balance_means === 'owed' && !isZeroMoney(balance) && !isNegativeMoney(balance)
@@ -296,6 +297,25 @@ function OpenItemCard({ item, onPayBack }: { item: OpenItem; onPayBack: () => vo
   )
 }
 
+/** One colour per kind of movement, so the list reads at a glance. */
+const KIND_COLORS: Record<MovementKind, string> = {
+  funding: colors.vault,
+  proceeds: colors.gain,
+  transfer: colors.accent,
+  expense: colors.loss,
+  contribution: colors.inventory,
+  adjustment: colors.muted,
+}
+
+function KindTag({ kind, color }: { kind: MovementKind; color: string }) {
+  return (
+    <View style={{ alignSelf: 'flex-start', borderWidth: 1, borderColor: color, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}>
+      <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{MOVEMENT_LABELS[kind]}</Text>
+    </View>
+  )
+}
+
+/** A movement in one line: what happened and how much. Which accounts moved is a tap away. */
 function MovementCard({
   movement,
   onVoid,
@@ -305,23 +325,41 @@ function MovementCard({
   onVoid: () => void
   onEdit?: () => void
 }) {
-  const canVoid = movement.status !== 'voided'
+  const [showing, setShowing] = useState(false)
+  const voided = movement.status === 'voided'
+  const color = voided ? colors.muted : KIND_COLORS[movement.kind]
+  const headline = movementHeadline(movement)
   return (
     <View role="group" accessibilityLabel={movement.notes || movement.id}>
-      <Card>
+      <Card style={{ borderLeftWidth: 4, borderLeftColor: color }}>
         <Row>
-          <View style={{ flex: 1, minWidth: 180 }}>
-            <Copy>{MOVEMENT_LABELS[movement.kind]}</Copy>
-            <Copy muted>{movementDetail(movement)}</Copy>
+          <View style={{ flex: 1, minWidth: 180, gap: 4 }}>
+            <KindTag kind={movement.kind} color={color} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Accounts in ${headline}`}
+              aria-expanded={showing}
+              accessibilityState={{ expanded: showing }}
+              onPress={() => setShowing(!showing)}
+            >
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600', textDecorationLine: voided ? 'line-through' : 'none' }}>
+                {headline} <Text style={{ color: colors.muted }}>{showing ? '−' : '+'}</Text>
+              </Text>
+            </Pressable>
+            <Copy muted>{[movement.occurred_on ?? 'No date', movement.notes].filter(Boolean).join(' · ')}</Copy>
           </View>
-          <Copy>{money(movement.amount)}</Copy>
+          <Text style={{ color, fontSize: 18, fontWeight: '700' }}>{money(movement.amount)}</Text>
         </Row>
-        <MovementLegs movement={movement} />
-        {movement.notes ? <Copy muted>{movement.notes}</Copy> : null}
+        {(movement.paid_back ?? []).map((payback) => (
+          <View key={payback.movement_id} style={{ alignSelf: 'flex-start', backgroundColor: colors.raised, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+            <Text style={{ color: colors.gain, fontSize: 13, fontWeight: '600' }}>✓ {paidBackLine(payback)} · {money(payback.amount)}</Text>
+          </View>
+        ))}
+        {showing ? <MovementLegs movement={movement} /> : null}
         <Row>
-          <Copy muted>{movement.status === 'voided' ? 'Voided' : 'Posted'}</Copy>
-          {canVoid && onEdit ? <Button label="Edit" onPress={onEdit} /> : null}
-          {canVoid ? <Button label="Void" onPress={onVoid} danger /> : null}
+          {voided ? <Copy muted>Voided</Copy> : null}
+          {!voided && onEdit ? <Button label="Edit" onPress={onEdit} /> : null}
+          {!voided ? <Button label="Void" onPress={onVoid} danger /> : null}
         </Row>
       </Card>
     </View>
@@ -372,14 +410,14 @@ function StockActionDialog({ action, onClose }: { action: StockAction; onClose: 
     : <VoidDialog transaction={transaction} onClose={onClose} />
 }
 
-/** Joint cash going to a partner: for one open row, or for their whole balance. */
+/** Joint cash going to a partner for one open row. */
 interface PayBack {
   key: string
   fromAccountId?: string
   toAccountId: string
   amount: string
   notes: string
-  movementId?: string
+  movementId: string
 }
 
 export interface MoneyProps {
@@ -402,6 +440,7 @@ export function Money(_props: MoneyProps = {}) {
   // A voided row changed nothing, so it is noise until someone asks for it.
   const [hideVoided, setHideVoided] = useState(true)
   const [payingBack, setPayingBack] = useState<PayBack | null>(null)
+  const [payingAll, setPayingAll] = useState<{ account: Account; balance: string } | null>(null)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const open = useQuery({ queryKey: ['openItems'], queryFn: api.openItems })
@@ -464,18 +503,6 @@ export function Money(_props: MoneyProps = {}) {
     })
   }
 
-  /** Pay a partner their whole balance from joint cash. With no single row named, the server
-   *  takes it off their oldest open items first, so everything they are owed closes. */
-  function payBackAll(account: Account, balance: string) {
-    setPayingBack({
-      key: 'all' + account.id,
-      fromAccountId: jointId ?? accounts.data?.items.find((other) => other.id !== account.id)?.id,
-      toAccountId: account.id,
-      amount: balance,
-      notes: `Paying back ${account.name}`,
-    })
-  }
-
   function resetMovementPage() {
     setOffset(0)
   }
@@ -533,7 +560,7 @@ export function Money(_props: MoneyProps = {}) {
               actionsFor={actionsFor}
               openItems={openItems.filter((item) => item.account_id === account.id)}
               onPayBackItem={payBackItem}
-              onPayBackAll={(balance) => payBackAll(account, balance)}
+              onPayBackAll={(balance) => setPayingAll({ account, balance })}
             />
           ))}
           {spentStores.length > 0 ? (
@@ -661,6 +688,16 @@ export function Money(_props: MoneyProps = {}) {
           from={payingBack.fromAccountId}
           payingBack={payingBack}
           onClose={() => setPayingBack(null)}
+        />
+      ) : null}
+      {payingAll && accounts.data ? (
+        <PayBackAllDialog
+          key={payingAll.account.id}
+          accounts={accounts.data.items}
+          from={jointId}
+          to={payingAll.account}
+          amount={payingAll.balance}
+          onClose={() => setPayingAll(null)}
         />
       ) : null}
     </Page>

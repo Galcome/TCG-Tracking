@@ -1,4 +1,4 @@
-import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type MovementLeg, type OpenItem, type StatementLine, type Transaction } from './api'
+import { EXPENSE_CATEGORY_LABELS, type Account, type ExpenseCategory, type FundingLeg, type Movement, type MovementLeg, type OpenItem, type PaidBack, type StatementLine, type Transaction } from './api'
 import { money, perUnit, tone } from './format'
 import { isIsoDate, isMoneyString } from './product-drafts'
 
@@ -435,11 +435,32 @@ export function statementReason(line: StatementLine, account: Pick<Account, 'id'
   }
 }
 
-/** The statement lines since the balance was last at zero, newest first. Everything older
- * nets to nothing, so these lines alone add up to the balance; the rest is history. */
-export function linesSinceSettled(lines: StatementLine[]): StatementLine[] {
-  const settled = lines.findIndex((line) => signedCents(line.balance) === 0n)
-  return settled === -1 ? lines : lines.slice(0, settled)
+/** A movement in a few words: what happened, not every account it touched. */
+export function movementHeadline(movement: Pick<Movement, 'kind' | 'legs' | 'product_name' | 'expense_category'>): string {
+  const into = movement.legs.find((leg) => tone(leg.amount) === 'gain')
+  const out = movement.legs.find((leg) => tone(leg.amount) === 'loss')
+  const product = movement.product_name ?? 'stock'
+  switch (movement.kind) {
+    case 'funding':
+      return `Bought ${product}`
+    case 'proceeds':
+      return `Sold ${product}`
+    case 'expense':
+      return movement.expense_category ? EXPENSE_CATEGORY_LABELS[movement.expense_category] : 'Expense'
+    case 'transfer':
+      if (into?.account_kind === 'member' && out?.account_kind !== 'member') return `Paid back ${into.account_name}`
+      if (out?.account_kind === 'member' && into?.account_kind !== 'member') return `${out.account_name} put money in`
+      return `${out?.account_name ?? 'Transfer'} → ${into?.account_name ?? ''}`.trim()
+    case 'contribution':
+      return 'Buy-in'
+    default:
+      return 'Balance adjustment'
+  }
+}
+
+/** When and from where a movement was paid back: "Paid back 2026-11-10 from Joint account". */
+export function paidBackLine(payback: Pick<PaidBack, 'occurred_on' | 'from_account_name'>): string {
+  return ['Paid back', payback.occurred_on, 'from', payback.from_account_name].filter(Boolean).join(' ')
 }
 
 /** A statement change with its sign always shown: "+$271.06", "−$335.00". */

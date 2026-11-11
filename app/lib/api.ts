@@ -1086,8 +1086,19 @@ export interface Movement {
   contributed_by_member_id?: string | null
   /** Set on a payback made from an open item: the movement it is paying back. */
   settles_movement_id?: string | null
+  /** Live paybacks made against this movement, oldest first: when, from where and how much. */
+  paid_back?: PaidBack[]
   notes: string | null
   status: string
+}
+
+/** One payback made against a movement. */
+export interface PaidBack {
+  movement_id: string
+  occurred_on: string | null
+  from_account_name: string
+  to_account_name: string
+  amount: string
 }
 
 export interface MovementPage {
@@ -1106,15 +1117,16 @@ export interface OpenItem {
   movement: Movement
 }
 
-/** One movement's effect on an account, in the balance's own terms, and the balance after it. */
+/** A movement still in an account's balance, and the balance up to and including it. */
 export interface StatementLine {
-  /** For a partner, positive is the group owing them more. */
+  /** How much of it is still in the balance. For a partner, positive is the group owing them. */
   change: string
   balance: string
   movement: Movement
 }
 
-/** Why an account's balance is what it is. Newest first; the changes add up to `balance`. */
+/** What an account's balance is made of right now: only what is still owed or held, never what
+ *  was paid back. Newest first; the changes add up to `balance`. */
 export interface Statement {
   account_id: string
   balance: string
@@ -1651,6 +1663,13 @@ export function createApi(request: ApiRequest) { return {
   openItems: () => request<{ items: OpenItem[] }>('/api/v1/money/open'),
 
   statement: (accountId: string) => request<Statement>(`/api/v1/money/accounts/${accountId}/statement`),
+
+  /** Pays a partner everything they are owed, one linked payback per open item. */
+  payBackAll: (accountId: string, payback: { from_account_id: string; occurred_on?: string }) =>
+    request<Movement[]>(`/api/v1/money/accounts/${accountId}/pay-back`, {
+      method: 'POST',
+      body: JSON.stringify(payback),
+    }),
 
   /** Overhead. `paid_from` omitted means the joint account paid. */
   createExpense: (expense: {

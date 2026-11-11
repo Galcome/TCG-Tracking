@@ -125,9 +125,9 @@ export interface TransferDialogProps {
   onClose: () => void
   /** The posted transfer this one corrects. */
   replacing?: { id: string; draft: TransferDraft }
-  /** Settling up with a partner: who gets it and how much, with the source left to choose. With
-   *  a movement it pays back that one row; without, it settles the whole balance. */
-  payingBack?: { movementId?: string; toAccountId: string; amount: string; notes: string }
+  /** Paying a partner back for one open row: who gets it and how much, with the source left to
+   *  choose. Paying back everything is PayBackAllDialog. */
+  payingBack?: { movementId: string; toAccountId: string; amount: string; notes: string }
 }
 
 export function TransferDialog({ accounts, from, onClose, replacing, payingBack }: TransferDialogProps) {
@@ -195,6 +195,41 @@ export function TransferDialog({ accounts, from, onClose, replacing, payingBack 
       <Field label="How much" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" autoFocus />
       <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
       <Field label="Note" value={notes} onChangeText={setNotes} multiline />
+    </MoneySheet>
+  )
+}
+
+export interface PayBackAllDialogProps {
+  accounts: Account[]
+  from?: string
+  to: Account
+  amount: string
+  onClose: () => void
+}
+
+/** Pays a partner back for every open item at once. Each item gets its own linked payback, so
+ *  every one leaves the statement and its Movements row notes when and where it was paid from. */
+export function PayBackAllDialog({ accounts, from, to, amount, onClose }: PayBackAllDialogProps) {
+  const api = useApi()
+  const sources = accounts.filter((account) => account.id !== to.id)
+  const [source, setSource] = useState(from ?? sources[0]?.id ?? '')
+  const [occurredOn, setOccurredOn] = useState(todayIso())
+  const mutation = useMoneyMutation(
+    (payload: { from_account_id: string; occurred_on: string }) => api.payBackAll(to.id, payload),
+    onClose,
+  )
+  return (
+    <MoneySheet
+      title={`Pay back ${to.name}`}
+      onClose={onClose}
+      onSubmit={() => mutation.mutate({ from_account_id: source, occurred_on: occurredOn })}
+      busy={mutation.isPending}
+      submitLabel={`Pay back ${money(amount)}`}
+      error={mutation.error}
+    >
+      <Copy muted>Pays back every open item, so each one leaves the statement.</Copy>
+      <Choice label="Out of" value={source} options={sources.map(accountOption)} onChange={setSource} />
+      <DateField label="Date" value={occurredOn} onChange={setOccurredOn} />
     </MoneySheet>
   )
 }

@@ -44,6 +44,8 @@ from src.schemas.money_ledger import (
     MovementRead,
     OpenItemList,
     OpenItemRead,
+    PaidBackRead,
+    PayBackAll,
     PostingRead,
     ProceedsLeg,
     Statement,
@@ -272,6 +274,7 @@ def _serialise(
     legs_by_movement: dict[uuid.UUID, list[tuple[MoneyPosting, MoneyAccount]]],
     products: dict[uuid.UUID, tuple[uuid.UUID, str]],
     settleable: set[tuple[uuid.UUID, uuid.UUID]],
+    paid_back: dict[uuid.UUID, list[money.Payback]],
 ) -> list[MovementRead]:
     items: list[MovementRead] = []
     for movement in movements:
@@ -307,6 +310,16 @@ def _serialise(
                     )
                     else None
                 ),
+                paid_back=[
+                    PaidBackRead(
+                        movement_id=payback.id,
+                        occurred_on=payback.occurred_on,
+                        from_account_name=source.name,
+                        to_account_name=destination.name,
+                        amount=amount,
+                    )
+                    for payback, source, destination, amount in paid_back.get(movement.id, [])
+                ],
                 notes=movement.notes,
                 status=movement.status,
             )
@@ -355,7 +368,10 @@ def _read_movements(db: Session, movements: list[MoneyMovement]) -> list[Movemen
     # reported, because correcting a payback posts its link again and the write checks it.
     links = {m.settles_movement_id for m in movements if m.settles_movement_id is not None}
     settleable = money.settleable(db, links) if links else set()
-    return _serialise(movements, legs_by_movement, _products(db, movements), settleable)
+    paid_back = money.paybacks(db, {movement.id for movement in movements})
+    return _serialise(
+        movements, legs_by_movement, _products(db, movements), settleable, paid_back
+    )
 
 
 @router.get("/open", response_model=OpenItemList)
@@ -386,31 +402,20 @@ def account_statement(
     _: Member = Depends(get_current_member),
     db: Session = Depends(db_session, scope="function"),
 ) -> Statement:
-    """Every active movement that moved this account's balance, with the balance after each.
+    """What this account's balance is made of right now, newest first.
 
-    Stock bought and expenses paid add to what a partner is owed; paybacks and sale cash
-    they kept take it away. Voided rows changed nothing, so they are not lines here.
+    Only what is still in the balance: a purchase paid back, or sale cash moved on, has
+    netted out and leaves the statement for the movements list, where its paybacks are
+    noted. The lines add up to the balance. See `money.open_lines`.
     """
     account = _require_account(db, account_id)
-    rows = db.execute(
-        select(MoneyMovement, func.sum(MoneyPosting.delta_cents))
-        .join(MoneyPosting, MoneyPosting.movement_id == MoneyMovement.id)
-        .where(MoneyPosting.account_id == account.id, MoneyMovement.status == STATUS_ACTIVE)
-        .group_by(MoneyMovement.id)
-        .order_by(
-            MoneyMovement.occurred_on.asc().nullsfirst(),
-            MoneyMovement.created_at.asc(),
-            MoneyMovement.id.asc(),
-        )
-    ).all()
-
-    reads = {read.id: read for read in _read_movements(db, [movement for movement, _ in rows])}
+    balance, open_lines = money.open_lines(db, account)
+    reads = {read.id: read for read in _read_movements(db, [m for m, _ in open_lines])}
     lines: list[StatementLine] = []
-    balance = 0
-    for movement, flow in rows:
-        change = money.balance_for(account, int(flow))
-        balance += change
-        lines.append(StatementLine(change=change, balance=balance, movement=reads[movement.id]))
+    running = 0
+    for movement, change in open_lines:
+        running += change
+        lines.append(StatementLine(change=change, balance=running, movement=reads[movement.id]))
     lines.reverse()
     return Statement(account_id=account.id, balance=balance, items=lines)
 
@@ -514,6 +519,76 @@ def create_transfer(
         },
     )
     return _one(db, movement)
+
+
+@router.post(
+    "/accounts/{account_id}/pay-back",
+    response_model=list[MovementRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def pay_back_all(
+    account_id: uuid.UUID,
+    payload: PayBackAll,
+    member: Member = Depends(get_current_member),
+    db: Session = Depends(db_session, scope="function"),
+) -> list[MovementRead]:
+    """Pay a partner everything they are owed: one payback per open item, all or nothing.
+
+    Each payback is linked to its item exactly as Pay back on that row would be, so every
+    item leaves the statement with a note of when and from where it was paid back. A
+    single lump transfer would come off the oldest items too, but would leave nothing on
+    any of them to say so.
+    """
+    # Locked so a double tap waits for the first, then finds nothing left to pay.
+    destination = db.scalar(
+        select(MoneyAccount).where(MoneyAccount.id == account_id).with_for_update()
+    )
+    if destination is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    source = _require_account(db, payload.from_account_id)
+    if source.id == destination.id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Pay them back from a different account",
+        )
+    items = [item for item in money.open_items(db) if item.account.id == destination.id]
+    if not items:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{destination.name} is not owed anything",
+        )
+
+    products = _products(db, [item.movement for item in items])
+    created: list[MoneyMovement] = []
+    for item in items:
+        what = products.get(item.movement.id, (None, None))[1] or (
+            (item.movement.expense_category or item.movement.kind).replace("_", " ")
+        )
+        movement = money.record_movement(
+            db,
+            kind=MOVEMENT_TRANSFER,
+            legs=[(source.id, -item.outstanding), (destination.id, item.outstanding)],
+            occurred_on=payload.occurred_on,
+            member_id=member.id,
+            notes=f"Paying back {what}",
+            settles_movement_id=item.movement.id,
+        )
+        ledger.record_audit(
+            db,
+            entity_type="money_movement",
+            entity_id=movement.id,
+            action="create",
+            member_id=member.id,
+            after={
+                "kind": MOVEMENT_TRANSFER,
+                "amount_cents": item.outstanding,
+                "from": str(source.id),
+                "to": str(destination.id),
+                "settles": str(item.movement.id),
+            },
+        )
+        created.append(movement)
+    return _read_movements(db, created)
 
 
 @router.post("/adjustments", response_model=MovementRead, status_code=status.HTTP_201_CREATED)
