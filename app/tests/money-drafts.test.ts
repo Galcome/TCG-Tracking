@@ -14,7 +14,8 @@ import {
   buildBalanceAdjustmentPayload,
   buildExpensePayload,
   legLine,
-  linesSinceSettled,
+  movementHeadline,
+  paidBackLine,
   openItemLine,
   buildTransferPayload,
   costBreakdown,
@@ -392,15 +393,26 @@ test('a buy-in names whose shares it paid for and a positive amount', () => {
   assert.ok(validateContributionDraft({ ...draft, memberId: '' }).accountId)
 })
 
-test('a statement keeps only the lines since the balance was last zero', () => {
-  const line = (change: string, balance: string) => ({ change, balance, movement: { id: change } }) as unknown as StatementLine
-  // Newest first: two buys on top of a balance that was paid down to zero.
-  const lines = [line('253.11', '441.80'), line('188.69', '188.69'), line('-42.10', '0.00'), line('42.10', '42.10')]
-  const open = linesSinceSettled(lines)
-  assert.deepEqual(open.map((item) => item.change), ['253.11', '188.69'])
-  assert.equal(sumMoney(open.map((item) => item.change)), '441.80')
-  assert.deepEqual(linesSinceSettled([line('-42.10', '0.00'), line('42.10', '42.10')]), [])
-  assert.equal(linesSinceSettled([line('10.00', '30.00'), line('20.00', '20.00')]).length, 2)
+test('a movement row says what happened in a few words', () => {
+  const leg = (account_name: string, account_kind: 'joint' | 'member' | 'store_credit', amount: string) => ({ account_id: account_name, account_name, account_kind, amount })
+  const base = { product_name: null, expense_category: null, legs: [] }
+  assert.equal(movementHeadline({ ...base, kind: 'funding', product_name: 'Delta Reign ETB' }), 'Bought Delta Reign ETB')
+  assert.equal(movementHeadline({ ...base, kind: 'funding' }), 'Bought stock')
+  assert.equal(movementHeadline({ ...base, kind: 'proceeds', product_name: 'Booster Box' }), 'Sold Booster Box')
+  assert.equal(movementHeadline({ ...base, kind: 'expense', expense_category: 'shipping_supplies' }), 'Shipping supplies')
+  assert.equal(movementHeadline({ ...base, kind: 'expense' }), 'Expense')
+  assert.equal(movementHeadline({ ...base, kind: 'transfer', legs: [leg('Joint', 'joint', '-188.69'), leg('Joseph', 'member', '188.69')] }), 'Paid back Joseph')
+  assert.equal(movementHeadline({ ...base, kind: 'transfer', legs: [leg('Joseph', 'member', '-50.00'), leg('Joint', 'joint', '50.00')] }), 'Joseph put money in')
+  assert.equal(movementHeadline({ ...base, kind: 'transfer', legs: [leg('Joint', 'joint', '-20.00'), leg('LCS', 'store_credit', '20.00')] }), 'Joint → LCS')
+  assert.equal(movementHeadline({ ...base, kind: 'transfer', legs: [leg('Joseph', 'member', '-5.00'), leg('Mark', 'member', '5.00')] }), 'Joseph → Mark')
+  assert.equal(movementHeadline({ ...base, kind: 'transfer' }), 'Transfer →')
+  assert.equal(movementHeadline({ ...base, kind: 'contribution' }), 'Buy-in')
+  assert.equal(movementHeadline({ ...base, kind: 'adjustment' }), 'Balance adjustment')
+})
+
+test('a paid-back row notes when and where it was paid back from', () => {
+  assert.equal(paidBackLine({ occurred_on: '2026-11-10', from_account_name: 'Joint account' }), 'Paid back 2026-11-10 from Joint account')
+  assert.equal(paidBackLine({ occurred_on: null, from_account_name: 'Joint account' }), 'Paid back from Joint account')
 })
 
 test('a statement line breaks a purchase or sale down into what it cost', () => {

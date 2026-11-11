@@ -1345,7 +1345,7 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await expect(owed.getByText('Total paid', { exact: true })).toBeVisible();
   // The whole balance can be paid back from the statement's total.
   await partner.getByRole('button', { name: /^Pay back all / }).click();
-  await expect(page.getByRole('dialog', { name: 'Pay back', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Pay back ' + member.name, exact: true })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   // Paying back one line settles that line.
@@ -1356,6 +1356,10 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   const payback = await sent;
   expect(payback.request().postDataJSON()).toMatchObject({ from_account_id: shared.id, to_account_id: member.id, notes: 'Paying back ' + name, settles_movement_id: row.id });
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Once paid back the line leaves the statement, and the purchase's row says when and from where.
+  await expect(owed).toHaveCount(0);
+  const card = page.getByRole('group', { name: row.notes || row.id, exact: true });
+  await expect(card.getByText(new RegExp('Paid back .* from ' + shared.name))).toBeVisible();
   const { id } = await payback.json();
   expect((await request.post(API + '/api/v1/money/movements/' + id + '/void', { data: { reason: 'e2e cleanup' } })).ok()).toBeTruthy();
   // The payback was undone behind the screen's back, and a statement lists only what is still
@@ -1364,7 +1368,6 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   await partner.getByRole('button', { name: /^Why is E2E Tester at / }).click();
   await expect(partner.getByRole('group', { name: 'Statement: Paid for ' + name, exact: true })).toBeVisible();
 
-  const card = page.getByRole('group', { name: row.notes || row.id, exact: true });
   await card.getByRole('button', { name: 'Edit', exact: true }).click();
   const edit = page.getByRole('dialog', { name: 'Edit purchase', exact: true });
   await expect(edit).toBeVisible();

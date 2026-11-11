@@ -189,7 +189,9 @@ def test_grading_return_and_bucket_move_share_fresh_stock_checks(concurrent_stoc
     assert statuses == [200, 409]
     with Session(engine) as db:
         stats = inventory.product_stats(db, [stock.raw, stock.graded])
-        assert stats[stock.raw].quantity_on_hand + stats[stock.graded].quantity_on_hand == 1
+        # Either side may win: when the move wins, the graded product never gets a stock row
+        # and is absent from the stats, so total whatever products are listed.
+        assert sum(product.quantity_on_hand for product in stats.values()) == 1
         assert all(value >= 0 for product in stats.values() for value in product.by_bucket.values())
 
 

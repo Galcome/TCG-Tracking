@@ -106,6 +106,13 @@ class TransferCreate(BaseModel):
         return self
 
 
+class PayBackAll(BaseModel):
+    """Pay a partner everything they are owed, one payback per open item."""
+
+    from_account_id: uuid.UUID
+    occurred_on: date = Field(default_factory=date.today)
+
+
 class AdjustmentCreate(BaseModel):
     """A correction, or an opening balance carried over from the spreadsheet.
 
@@ -209,6 +216,16 @@ class PostingRead(BaseModel):
     amount: MoneyOut = Field(validation_alias="delta_cents")
 
 
+class PaidBackRead(BaseModel):
+    """One payback made against a movement: when, from where, to whom and how much."""
+
+    movement_id: uuid.UUID
+    occurred_on: date | None
+    from_account_name: str
+    to_account_name: str
+    amount: MoneyOut
+
+
 class MovementRead(BaseModel):
     model_config = _READ_CONFIG
 
@@ -232,6 +249,9 @@ class MovementRead(BaseModel):
     #: Set on a payback whose movement can still be paid back to the same account, so
     #: correcting the payback keeps it on that row.
     settles_movement_id: uuid.UUID | None = None
+    #: Live paybacks made against this movement, oldest first. A paid-back purchase leaves
+    #: the statement, so this is the note of when and from where it was paid back.
+    paid_back: list[PaidBackRead] = []
     notes: str | None
     status: str
 
@@ -259,19 +279,21 @@ class OpenItemList(BaseModel):
 
 
 class StatementLine(BaseModel):
-    """One movement's effect on one account's balance, and the balance after it."""
+    """A movement still in an account's balance, and the balance up to and including it."""
 
-    #: In the balance's own terms: for a partner, positive is the group owing them more.
+    #: How much of the movement is still in the balance, in the balance's own terms: for a
+    #: partner, positive is the group owing them. Part of a purchase can be paid back.
     change: MoneyOut
     balance: MoneyOut
     movement: MovementRead
 
 
 class Statement(BaseModel):
-    """Why an account's balance is what it is: every active movement that touched it.
+    """What an account's balance is made of right now. See `money.open_lines`.
 
-    Newest first. The changes add up to `balance` exactly, so the figure on the card is
-    never a number you have to take on trust.
+    Newest first. Only what is still in the balance is a line - anything paid back or
+    netted out is history in the movements list - and the changes add up to `balance`
+    exactly, so the figure on the card is never a number you have to take on trust.
     """
 
     account_id: uuid.UUID
