@@ -377,11 +377,10 @@ def _read_movements(db: Session, movements: list[MoneyMovement]) -> list[Movemen
         payback.created_by_member_id for rows in paid_back.values() for payback, *_ in rows
     }
     entered_by.discard(None)
-    names = (
-        dict(db.execute(select(Member.id, Member.display_name).where(Member.id.in_(entered_by))))
-        if entered_by
-        else {}
-    )
+    names: dict[uuid.UUID, str] = {}
+    if entered_by:
+        found = select(Member.id, Member.display_name).where(Member.id.in_(entered_by))
+        names = dict(db.execute(found).tuples().all())
     return _serialise(
         movements, legs_by_movement, _products(db, movements), settleable, paid_back, names
     )
