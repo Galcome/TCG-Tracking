@@ -5,6 +5,7 @@ const paths: Record<string, string> = {
   Stock: 'M4 5h16v16H4zM4 10h16M9 5v5M15 5v5M9 15h6',
   Vault: 'm12 3 9 9-9 9-9-9zM8 12h8M12 8v8',
   Sales: 'M4 20h16M6 16l5-5 4 3 5-9M15 5h5v5',
+  Money: 'M12 3v18M16.5 7.5C16.5 5.6 14.5 4.5 12 4.5S7.5 5.6 7.5 7.5 9.5 10.5 12 11s4.5 1.6 4.5 3.5-2 3-4.5 3-4.5-1.1-4.5-3',
   Add: 'M12 5v14M5 12h14',
   More: 'M5 11h2v2H5zM11 11h2v2h-2zM17 11h2v2h-2z',
 };

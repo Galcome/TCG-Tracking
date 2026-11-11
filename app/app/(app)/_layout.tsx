@@ -41,11 +41,11 @@ export default function ProtectedLayout() {
     { href: '/reports', label: 'Reports', short: 'Reports', icon: '▥', bucket: undefined },
   ] as const);
   const mobileLinks = [links[0], { ...links[1], label: 'Stock', short: 'Stock', bucket: undefined },
-    { href: '/quick-actions', label: 'Add', short: 'Add', icon: '+', bucket: undefined }, links[4],
+    { href: '/quick-actions', label: 'Add', short: 'Add', icon: '+', bucket: undefined }, links[5],
     { href: '/more', label: 'More', short: 'More', icon: '•••', bucket: undefined }] as const;
   const navigation = (isDesktop ? links : mobileLinks).map(link => {
     const isAdd = link.href === '/quick-actions';
-    const selected = link.href === '/more' ? path === '/money' || path === '/reports' : !isAdd && path === link.href && (!link.bucket || params.bucket === link.bucket);
+    const selected = link.href === '/more' ? path === '/sales' || path === '/reports' : !isAdd && path === link.href && (!link.bucket || params.bucket === link.bucket);
     const tint = link.label === 'Inventory' ? colors.inventory : link.label === 'Store' ? colors.store : link.label === 'Vault' ? colors.vault : colors.accent;
     return <Pressable key={link.label} accessibilityRole="button" accessibilityLabel={link.label} accessibilityState={{ selected, disabled: !member.data }} disabled={!member.data}
       onPress={() => { if (isAdd) setQuickActions(true); else if (link.href === '/more') setMore(true); else router.push(link.bucket ? { pathname: '/inventory', params: { bucket: link.bucket } } : link.href); }}
@@ -88,7 +88,7 @@ export default function ProtectedLayout() {
         <Button label="Add expense" onPress={() => { setQuickActions(false); setExpensing(true); }} />
       </Sheet>
       <Sheet title="More" open={more} compact onClose={() => setMore(false)}>
-        {links.slice(3).filter(link => ['Money', 'Reports'].includes(link.label)).map(link => <Button key={link.label} label={link.label} onPress={() => { setMore(false); router.push(link.href); }} />)}
+        {links.filter(link => ['Sales', 'Reports'].includes(link.label)).map(link => <Button key={link.label} label={link.label} onPress={() => { setMore(false); router.push(link.href); }} />)}
       </Sheet>
       <Sheet title="Account" open={account} compact onClose={() => setAccount(false)}><Copy>{member.data?.display_name}</Copy><Button label="Sign out" onPress={() => { setAccount(false); setAdding(false); setSelling(false); setScanningSingles(false); setExpensing(false); setRipping(false); void signOut().catch(setActionError); }} /></Sheet>
     </View>

@@ -49,7 +49,7 @@ test('compact shell keeps navigation reachable and global forms reuse the protec
       expect(navigationBox!.y).toBeGreaterThan(600);
       expect(navigationBox!.y + navigationBox!.height).toBeGreaterThanOrEqual(895);
     }
-    for (const label of width < 1000 ? ['Dashboard', 'Stock', 'Add', 'Sales', 'More'] : ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
+    for (const label of width < 1000 ? ['Dashboard', 'Stock', 'Add', 'Money', 'More'] : ['Dashboard', 'Inventory', 'Store', 'Vault', 'Sales', 'Money', 'Reports']) {
       const box = await navigation.getByRole('button', { name: label, exact: true }).boundingBox();
       expect(box, label + ' must be rendered without scrolling').not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -675,6 +675,7 @@ test('sales CSV keeps filters, all pages, unknown values and explicit zero', asy
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: rows.slice(offset, offset + limit), total: rows.length, offset, limit }) });
   });
   await signIn(page);
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
   await page.getByLabel('Search by product', { exact: true }).fill('CSV sale fixture');
   await expect.poll(() => requests.some(url => url.searchParams.get('q') === 'CSV sale fixture')).toBeTruthy();
@@ -837,6 +838,7 @@ test('reporting period defaults to 60 days and stays shared across navigation an
   await expect(page.getByRole('button', { name: 'Reporting period: 60 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Reporting period: 60 days', exact: true }).click();
   await page.getByRole('button', { name: '90 days', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Reporting period: 90 days', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Reporting period: 90 days', exact: true }).click();
@@ -1229,7 +1231,6 @@ test('transformation history links outputs and reverses the whole cost chain', a
 });
 test('money adjustments use exact cents and transfer void restores both balances', async ({ page, request }) => {
   await signIn(page);
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Money', exact: true })).toBeVisible();
   const readAccounts = async () => (await request.get(API + '/api/v1/money/accounts')).json();
@@ -1303,7 +1304,6 @@ test('an expense added from an account card is paid from that account', async ({
   await signIn(page);
   const { items } = await (await request.get(API + '/api/v1/money/accounts')).json();
   const member = items.find((a: { name: string }) => a.name === 'E2E Tester');
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
   await page.getByRole('group', { name: member.name, exact: true }).getByRole('button', { name: 'Add expense', exact: true }).click();
   await page.getByLabel('How much', { exact: true }).fill('4.56');
@@ -1331,7 +1331,6 @@ test('a purchase a partner paid for can be paid back, corrected from its row, vo
   const row = funding.items.find((m: { product_id: string }) => m.product_id === product.id);
 
   await signIn(page);
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
 
   await expect(page.getByText('Open transactions', { exact: true })).toBeVisible();
@@ -1450,6 +1449,7 @@ test('sale preview, store-credit proceeds and void preserve server money and sto
   await expect(page.getByText('Realized $25.00', { exact: true })).toBeVisible();
   const accountsAfterSale = await (await request.get(API + '/api/v1/money/accounts')).json();
   expect(accountsAfterSale.items.find((a: { name: string }) => a.name === 'Expo test shop').balance).toBe('75.00');
+  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Sales', exact: true }).click();
   const filteredSales = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/sales'
     && new URL(response.url()).searchParams.get('q') === 'Expo sale journey');
@@ -1764,7 +1764,6 @@ test('desktop sidebar actions are one width', async ({ page }) => {
 
 test('a debt the group owes is never coloured as a gain', async ({ page, request }) => {
   await signIn(page);
-  if ((page.viewportSize()?.width ?? 1280) < 1000) await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Money', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Money', exact: true })).toBeVisible();
   const accounts = (await (await request.get(API + '/api/v1/money/accounts')).json()).items;

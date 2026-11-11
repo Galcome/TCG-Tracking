@@ -7,14 +7,16 @@ import { EditTransactionDialog, VoidDialog } from '../../components/product-form
 import { Button, Card, Choice, Copy, ErrorNotice, Loading, Page, Row, Signed, toneColor } from '../../components/ui'
 import { useApi } from '../../context/AppContext'
 import { colors } from '../../context/ThemeContext'
-import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem, type StatementLine } from '../../lib/api'
+import { EXPENSE_CATEGORY_LABELS, MOVEMENT_LABELS, type Account, type Movement, type MovementKind, type OpenItem, type PaidBack, type StatementLine } from '../../lib/api'
 import { money, todayIso } from '../../lib/format'
 import {
   adjustmentDraftFromMovement,
   costBreakdown,
   expenseEditFromMovement,
   legLine,
+  movementDetail,
   movementHeadline,
+  movementParties,
   openItemLine,
   paidBackLine,
   signedChange,
@@ -22,6 +24,7 @@ import {
   storeCreditMeaning,
   sumMoney,
   transferDraftFromMovement,
+  transferDraftFromPayback,
   type BalanceAdjustmentDraft,
   type ExpenseEdit,
   type TransferDraft,
@@ -84,6 +87,8 @@ interface MovementActions {
   onVoid: () => void
 }
 
+type PaybackActionsFor = (movement: Movement, payback: PaidBack) => MovementActions
+
 /** A label and its figure, one per line of a breakdown. */
 function BreakdownLine({ label, value }: { label: string; value: string }) {
   return (
@@ -131,12 +136,14 @@ function LineBreakdown({ line }: { line: StatementLine }) {
 function AccountStatement({
   account,
   actionsFor,
+  paybackActionsFor,
   openItems,
   onPayBackItem,
   onPayBackAll,
 }: {
   account: Account
   actionsFor: (movement: Movement) => MovementActions
+  paybackActionsFor: PaybackActionsFor
   openItems: OpenItem[]
   onPayBackItem: (item: OpenItem) => void
   onPayBackAll: (balance: string) => void
@@ -170,8 +177,9 @@ function AccountStatement({
                 >
                   <Copy><Text style={{ color: colors.accent }}>{reason} {showing ? '−' : '+'}</Text></Copy>
                 </Pressable>
-                {/* The reason already names the product, so only the date and notes follow. */}
-                <Copy muted>{[line.movement.occurred_on ?? 'No date', line.movement.notes].filter(Boolean).join(' · ')}</Copy>
+                {/* The reason already names the product, so only who paid, when, who entered it and notes follow. */}
+                {movementParties(line.movement) ? <Copy>{movementParties(line.movement)}</Copy> : null}
+                <Copy muted>{movementDetail(line.movement)}</Copy>
               </View>
               <Copy>{signedChange(line.change)}</Copy>
             </Row>
@@ -182,6 +190,10 @@ function AccountStatement({
               {actions.onEdit ? <Button label="Edit" onPress={actions.onEdit} /> : null}
               <Button label="Void" onPress={actions.onVoid} danger />
             </Row>
+            {/* Part paid: each payback so far sits under the line it went to, editable like any transfer. */}
+            {(line.movement.paid_back ?? []).map((payback) => (
+              <PaybackRow key={payback.movement_id} payback={payback} actions={paybackActionsFor(line.movement, payback)} />
+            ))}
           </View>
         )
       })}
@@ -202,12 +214,32 @@ function AccountStatement({
   )
 }
 
+/** One payback against a statement line that is still part owed. */
+function PaybackRow({ payback, actions }: { payback: PaidBack; actions: MovementActions }) {
+  return (
+    <View role="group" accessibilityLabel={`Payback: ${paidBackLine(payback)}`} style={{ gap: 6, marginLeft: 16, paddingLeft: 12, borderLeftWidth: 2, borderColor: colors.gain }}>
+      <Row>
+        <View style={{ flex: 1, minWidth: 160 }}>
+          <Text style={{ color: colors.gain, fontWeight: '600' }}>✓ {paidBackLine(payback)}</Text>
+          {payback.notes || payback.entered_by_name ? <Copy muted>{[payback.entered_by_name ? `Entered by ${payback.entered_by_name}` : null, payback.notes].filter(Boolean).join(' · ')}</Copy> : null}
+        </View>
+        <Text style={{ color: colors.gain, fontWeight: '600' }}>−{money(payback.amount)}</Text>
+      </Row>
+      <Row>
+        {actions.onEdit ? <Button label="Edit" onPress={actions.onEdit} /> : null}
+        <Button label="Void" onPress={actions.onVoid} danger />
+      </Row>
+    </View>
+  )
+}
+
 function AccountCard({
   account,
   onTransfer,
   onAdjust,
   onExpense,
   actionsFor,
+  paybackActionsFor,
   openItems,
   onPayBackItem,
   onPayBackAll,
@@ -217,6 +249,7 @@ function AccountCard({
   onAdjust: () => void
   onExpense: () => void
   actionsFor: (movement: Movement) => MovementActions
+  paybackActionsFor: PaybackActionsFor
   openItems: OpenItem[]
   onPayBackItem: (item: OpenItem) => void
   onPayBackAll: (balance: string) => void
@@ -249,7 +282,7 @@ function AccountCard({
           <Button label="Add expense" onPress={onExpense} />
         </Row>
         {showing ? (
-          <AccountStatement account={account} actionsFor={actionsFor} openItems={openItems} onPayBackItem={onPayBackItem} onPayBackAll={onPayBackAll} />
+          <AccountStatement account={account} actionsFor={actionsFor} paybackActionsFor={paybackActionsFor} openItems={openItems} onPayBackItem={onPayBackItem} onPayBackAll={onPayBackAll} />
         ) : null}
       </Card>
     </View>
@@ -268,12 +301,13 @@ function MovementLegs({ movement }: { movement: Movement }) {
   )
 }
 
-/** What a movement is about, for the line under its title. */
-function movementDetail(movement: Movement): string {
+/** What an open item is about, for the line under its title. */
+function openItemDetail(movement: Movement): string {
   return [
     movement.occurred_on ?? 'No date',
     movement.product_name,
     movement.expense_category ? EXPENSE_CATEGORY_LABELS[movement.expense_category] : null,
+    movement.entered_by_name ? `Entered by ${movement.entered_by_name}` : null,
   ].filter(Boolean).join(' · ')
 }
 
@@ -284,7 +318,7 @@ function OpenItemCard({ item, onPayBack }: { item: OpenItem; onPayBack: () => vo
         <Row>
           <View style={{ flex: 1, minWidth: 180 }}>
             <Copy>{MOVEMENT_LABELS[item.movement.kind]}</Copy>
-            <Copy muted>{movementDetail(item.movement)}</Copy>
+            <Copy muted>{openItemDetail(item.movement)}</Copy>
             <Copy muted>{openItemLine(item)}</Copy>
           </View>
           <Copy>{money(item.outstanding)}</Copy>
@@ -329,6 +363,7 @@ function MovementCard({
   const voided = movement.status === 'voided'
   const color = voided ? colors.muted : KIND_COLORS[movement.kind]
   const headline = movementHeadline(movement)
+  const parties = movementParties(movement)
   return (
     <View role="group" accessibilityLabel={movement.notes || movement.id}>
       <Card style={{ borderLeftWidth: 4, borderLeftColor: color }}>
@@ -346,7 +381,8 @@ function MovementCard({
                 {headline} <Text style={{ color: colors.muted }}>{showing ? '−' : '+'}</Text>
               </Text>
             </Pressable>
-            <Copy muted>{[movement.occurred_on ?? 'No date', movement.notes].filter(Boolean).join(' · ')}</Copy>
+            {parties ? <Text style={{ color: colors.text, fontSize: 14 }}>{parties}</Text> : null}
+            <Copy muted>{movementDetail(movement)}</Copy>
           </View>
           <Text style={{ color, fontSize: 18, fontWeight: '700' }}>{money(movement.amount)}</Text>
         </Row>
@@ -489,6 +525,17 @@ export function Money(_props: MoneyProps = {}) {
     }
   }
 
+  /** A payback under a statement line edits as the transfer it is, still tied to that line. */
+  function paybackActionsFor(movement: Movement, payback: PaidBack): MovementActions {
+    const editable = [payback.from_account_id, payback.to_account_id].every((id) => items.some((account) => account.id === id))
+    return {
+      onEdit: editable
+        ? () => setEditing({ kind: 'transfer', id: payback.movement_id, draft: transferDraftFromPayback(payback, movement.id, todayIso()) })
+        : undefined,
+      onVoid: () => setVoiding(payback.movement_id),
+    }
+  }
+
   const jointId = accounts.data?.items.find((account) => account.kind === 'joint')?.id
 
   /** Pay a partner back for one open row, from joint cash. */
@@ -558,6 +605,7 @@ export function Money(_props: MoneyProps = {}) {
               onAdjust={() => setAdjusting(account)}
               onExpense={() => setExpenseFrom(account.id)}
               actionsFor={actionsFor}
+              paybackActionsFor={paybackActionsFor}
               openItems={openItems.filter((item) => item.account_id === account.id)}
               onPayBackItem={payBackItem}
               onPayBackAll={(balance) => setPayingAll({ account, balance })}

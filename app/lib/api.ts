@@ -1090,15 +1090,21 @@ export interface Movement {
   paid_back?: PaidBack[]
   notes: string | null
   status: string
+  /** Who typed it in, so there is someone to ask about it. */
+  entered_by_name?: string | null
 }
 
 /** One payback made against a movement. */
 export interface PaidBack {
   movement_id: string
   occurred_on: string | null
+  from_account_id: string
   from_account_name: string
+  to_account_id: string
   to_account_name: string
   amount: string
+  notes: string | null
+  entered_by_name?: string | null
 }
 
 export interface MovementPage {
