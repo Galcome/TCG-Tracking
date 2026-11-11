@@ -68,7 +68,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npx expo install --check
-      - run: npx playwright install --with-deps chromium
+      # The runner image already carries Chrome's system libraries; --with-deps would make
+      # every run depend on the Ubuntu apt mirrors being reachable.
+      - run: npx playwright install chromium
       - run: npx playwright test --reporter=line
       - run: npx expo export --platform android --platform ios --output-dir dist-native --clear --max-workers 2
       - name: Failure evidence (test fixtures only)
